@@ -2,9 +2,9 @@
 // bottom, each group with its label in the left column:
 //
 // - `This page`, only while the harness homes' note is set: the page's acts are off, and
-//   each act shows as the command he would type, with `Copy`.
+//   each act shows as the command the user would type, with `Copy`.
 // - `Placed`: the verdict, then each problem in three lines (what, where, the fix and its
-//   act), then the counts per harness; with nothing needing him, the counts sit at the
+//   act), then the counts per harness; with nothing needing the user, the counts sit at the
 //   verdict's right.
 // - `Folder`: the loadout folder, its files git hasn't committed, and `Settings › loadout`.
 // - `Your items`, a group per module whose skills it took over, then each project
@@ -46,13 +46,13 @@
 
 import { css, html, LitElement, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
-import { api, navigate } from "/m/ui/client.js";
+import { api, navigate, WaitClock } from "/m/ui/client.js";
 
-import { CHANGED, Feed, parseJob, parseProjects, parseReplacePreview, parseSourceDir, parseView } from "./feed.ts";
+import { CHANGED, Feed, parseJob, parseProjects, parseReplacePreview, parseSourceDir } from "./feed.ts";
 import type { Job, Projects, ReplacePreview, SourceDir, View, ViewRow } from "./feed.ts";
 import { addAct, commandOf, globalOffAct, installAct, jobId, replaceAct } from "./acts-model.ts";
-import { ADD_KINDS, ADD_NOTE, BY_NAME, notListed, pickerOf } from "./add-model.ts";
-import type { NotListedRow, Picker } from "./add-model.ts";
+import { ADD_KINDS, ADD_NOTE, BY_NAME, harnessPicker, notListed, pickerOf } from "./add-model.ts";
+import type { HarnessOption, NotListedRow, Picker } from "./add-model.ts";
 import { confirmView, replaceRows } from "./confirm-model.ts";
 import type { PageAct } from "./acts-model.ts";
 import {
@@ -62,8 +62,8 @@ import {
 import type { Address, FilteredView } from "./address-model.ts";
 import {
   actCommand, COPIED, COPIED_MS, COPY, emptyGlobal, emptyLines, failedLine, fixLine, folderView, footLines,
-  GLOBAL_PLACE, GONE, INSTALL_ALL_PLACE, itemPlace, jobPlace, noteGroup, pageState, PLACED_PLACE, problemPlace,
-  READING, READING_AFTER_MS, REFRESH_MS, SETTINGS_LINK, SETTINGS_ROUTE,
+  GLOBAL_PLACE, GONE, INSTALL_ALL_PLACE, itemPlace, jobPlace, noteGroup, pageState, parseShownOnly, PLACED_PLACE,
+  problemPlace, READING, READING_AFTER_MS, REFRESH_MS, SETTINGS_LINK, SETTINGS_ROUTE,
 } from "./frame-model.ts";
 import { itemsView, scopeOf } from "./items-model.ts";
 import type { CellView, GlobalRow, GroupView, ItemRow, KindRow, Tone } from "./items-model.ts";
@@ -123,7 +123,7 @@ interface Sent {
 
 /** The foot line for an address whose thing is gone, and the address the page wrote in its
  * place. The shell may place the page again for that address, as a new element; the line
- * stays on it until he opens something or an act ends. */
+ * stays on it until the user opens something or an act ends. */
 let goneHeld: { at: Address; line: string } | null = null;
 
 /** A fresh job id for one press. */
@@ -288,7 +288,8 @@ export class LoadoutPage extends LitElement {
 
   #view: Feed<View> | null = null;
   #dir: Feed<SourceDir> | null = null;
-  #openedAt = 0;
+  /** The first read's wait, for its `Reading…`. */
+  #waited = new WaitClock(READING_AFTER_MS);
 
   /** What is open, and the dim foot line for an address whose item is gone. */
   #at: Address = NOTHING_OPEN;
@@ -313,8 +314,10 @@ export class LoadoutPage extends LitElement {
   #wholeDiff = false;
   /** `/api/projects`, read each time Add opens. */
   #projects: Feed<Projects> | null = null;
-  /** Add's choices: the section (the picker's value), and by name its kind and name. */
+  /** Add's choices: the section (the picker's value), the harness (`For`'s value, empty for
+   * every harness), and by name its kind and name. */
   #addTo = "";
+  #addFor = "";
   #addKind: string = ADD_KINDS[0];
   #addName = "";
 
@@ -334,7 +337,6 @@ export class LoadoutPage extends LitElement {
   /** Which copy act reads `Copied`. */
   #copied: string | null = null;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
-  #waitTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshTimer: ReturnType<typeof setInterval> | undefined;
 
   #shown = (): void => {
@@ -353,14 +355,13 @@ export class LoadoutPage extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.#openedAt = Date.now();
+    this.#waited.start(() => this.requestUpdate());
     const changed = (): void => this.requestUpdate();
-    this.#view = new Feed<View>(() => api("loadout", "api/view"), parseView, changed);
+    this.#view = new Feed<View>(() => api("loadout", "api/view"), parseShownOnly, changed);
     this.#dir = new Feed<SourceDir>(() => api("loadout", "api/folder"), parseSourceDir, changed);
     this.#readAll();
     document.addEventListener("visibilitychange", this.#shown);
     document.addEventListener("click", this.#outside);
-    this.#waitTimer = setTimeout(() => this.requestUpdate(), READING_AFTER_MS);
     this.#refreshTimer = setInterval(() => {
       if (document.visibilityState === "visible") this.#readAll();
     }, REFRESH_MS);
@@ -381,7 +382,7 @@ export class LoadoutPage extends LitElement {
     this.#job = null;
     clearTimeout(this.#jobTimer);
     clearTimeout(this.#copyTimer);
-    clearTimeout(this.#waitTimer);
+    this.#waited.stop();
     clearInterval(this.#refreshTimer);
     document.removeEventListener("visibilitychange", this.#shown);
     document.removeEventListener("click", this.#outside);
@@ -488,6 +489,7 @@ export class LoadoutPage extends LitElement {
       this.#preview?.feed.close();
       this.#preview = null;
       this.#addTo = "";
+      this.#addFor = "";
       this.#addName = "";
       this.#addKind = ADD_KINDS[0];
       if (address.piece !== "replace") this.#replaceItem = null;
@@ -615,7 +617,7 @@ export class LoadoutPage extends LitElement {
       @click=${() => void this.#copy(what, text)}>${this.#copied === what ? COPIED : COPY}</button>`;
   }
 
-  /** An act as he would type it, with `Copy`, while the note is set. */
+  /** An act as the user would type it, with `Copy`, while the note is set. */
   #typed(argv: readonly string[], key: string) {
     const command = commandOf(argv);
     return html`<div class="cmd"><code data-line="command">${command}</code>${this.#copyButton(key, command)}</div>`;
@@ -626,13 +628,13 @@ export class LoadoutPage extends LitElement {
   render() {
     const feed = this.#view;
     if (feed === null) return nothing;
-    let state = pageState(feed, Date.now() - this.#openedAt);
+    let state = pageState(feed, this.#waited.waitedMs());
     // A filtered view waits for projects to say which there are, as the page waits for
     // its view.
     const projects = this.#projects;
     if ((state === "up" || state === "empty" || state === "problem") && this.#filter !== null && projects !== null
         && projects.value === null && projects.failure === null) {
-      state = Date.now() - this.#openedAt >= READING_AFTER_MS ? "reading" : "waiting";
+      state = this.#waited.waitedMs() >= READING_AFTER_MS ? "reading" : "waiting";
     }
     if (state === "gone") return html`<p class="waiting" data-line="gone" role="status">${GONE}</p>`;
     if (state === "waiting") return nothing;
@@ -730,7 +732,8 @@ export class LoadoutPage extends LitElement {
     </div>`;
   }
 
-  /** The project's own section, `Yours too`, then the skills modules took over. */
+  /** The project's own sections, `Yours too`, then the skills modules took over. The first
+   * draws the harnesses' head row and the link to the project. */
   #filteredItems(filtered: FilteredView, ctx: Ctx) {
     const harnesses = ctx.view.harnesses;
     const own = filtered.own;
@@ -742,9 +745,10 @@ export class LoadoutPage extends LitElement {
         navigate("projects", `open/${encodeURIComponent(key)}`);
       }}>${PROJECT_LINK}</a>`;
     return html`
-      ${own !== null ? this.#group(own.group, harnesses, ctx, { head: true, label: own.label, count: own.count, link }) : nothing}
+      ${own.map((one, at) => this.#group(one.group, harnesses, ctx,
+                                          { head: at === 0, label: one.label, count: one.count, ...(at === 0 ? { link } : {}) }))}
       ${this.#group(filtered.yours.group, harnesses, ctx,
-                    { head: own === null, label: filtered.yours.label, count: filtered.yours.count })}
+                    { head: own.length === 0, label: filtered.yours.label, count: filtered.yours.count })}
       ${filtered.modules.map((group) => this.#group(group, harnesses, ctx, { head: false }))}`;
   }
 
@@ -1064,6 +1068,20 @@ export class LoadoutPage extends LitElement {
       ? html`<span class="sub" data-line="picker">${picker.line}</span>` : nothing}`;
   }
 
+  /** `For every harness ▾`: every harness, or one harness on this machine. */
+  #harnessPicker(options: HarnessOption[]) {
+    return html`<select class="pick" data-line="add-for" aria-label="For" @change=${(event: Event) => {
+      this.#addFor = (event.target as HTMLSelectElement).value;
+      this.requestUpdate();
+    }}>${options.map((option) => html`<option value=${option.value} ?selected=${option.value === this.#addFor}>${
+      option.label}</option>`)}</select>`;
+  }
+
+  /** The harness Add names: `For`'s choice, every harness (null) when it is gone. */
+  #addHarness(options: HarnessOption[]): string | null {
+    return options.find((option) => option.value === this.#addFor)?.harness ?? null;
+  }
+
   /** The section Add names: the picker's choice, Your items when it is gone. */
   #addSection(picker: Picker): string | null {
     return picker.options.find((option) => option.value === this.#addTo)?.section ?? null;
@@ -1081,9 +1099,11 @@ export class LoadoutPage extends LitElement {
   }
 
   #addOpen(row: NotListedRow, picker: Picker, ctx: Ctx) {
-    const act = addAct(row.kind, row.name, this.#addSection(picker));
+    const harnesses = harnessPicker(ctx.view);
+    const act = addAct(row.kind, row.name, this.#addSection(picker), this.#addHarness(harnesses));
     return html`<div class="det" data-part="add">
       <div class="r"><span class="k">Add to</span><span class="f">${this.#picker(picker)}</span><span></span></div>
+      <div class="r"><span class="k">For</span><span class="f">${this.#harnessPicker(harnesses)}</span><span></span></div>
       <div class="r"><span class="k">From</span><span class="f" data-line="from">${row.from.replace(/^From /, "")}</span><span></span></div>
       ${this.#addButtons(act, ctx)}
       <div class="foot">${this.#byNameButton()}</div>
@@ -1097,7 +1117,8 @@ export class LoadoutPage extends LitElement {
 
   #addByName(picker: Picker, ctx: Ctx) {
     const name = this.#addName.trim();
-    const act = name === "" ? null : addAct(this.#addKind, name, this.#addSection(picker));
+    const harnesses = harnessPicker(ctx.view);
+    const act = name === "" ? null : addAct(this.#addKind, name, this.#addSection(picker), this.#addHarness(harnesses));
     return html`<div class="det" data-part="add">
       <div class="r"><span class="k">Kind</span><span class="f"><select class="pick" data-line="kind" aria-label="Kind"
         @change=${(event: Event) => { this.#addKind = (event.target as HTMLSelectElement).value; this.requestUpdate(); }}>${
@@ -1108,6 +1129,7 @@ export class LoadoutPage extends LitElement {
           this.requestUpdate();
         }}></span><span></span></div>
       <div class="r"><span class="k">Add to</span><span class="f">${this.#picker(picker)}</span><span></span></div>
+      <div class="r"><span class="k">For</span><span class="f">${this.#harnessPicker(harnesses)}</span><span></span></div>
       ${this.#addButtons(act, ctx)}
     </div>`;
   }

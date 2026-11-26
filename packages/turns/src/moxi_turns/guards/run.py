@@ -4,6 +4,8 @@ The endpoint (the Claude endpoint, or a Codex host) loads the guards that are on
 start and at each `ready`, and builds one harness's **table** from them: per guard its id,
 its patterns for that harness, `who`, `match`, `match_flags`, whether it has a judge, its
 `deny`, `wants`, `on_error`, its deadline clamped to `guards.max_wait_ms` and its `step`.
+A guard's `sessions` function is asked at the first load only: the runner keeps each
+answer, so whether a guard runs by that function is decided once, at the session's start.
 A guard that names no pattern for the harness is not in that harness's table. The Claude
 runner gets the table over the leg and matches in its own process; a host matches here,
 with `decide`.
@@ -120,7 +122,7 @@ class Entry:
     on_error: str
     #: The judge's bound, clamped to `guards.max_wait_ms`.
     deadline_ms: int
-    #: What turned it on: `list`, `switch` or both.
+    #: What turned it on: any of `list`, `switch` and `sessions`.
     by: tuple[str, ...] = ()
     found: Found | None = field(default=None, repr=False, compare=False)
     _names: tuple[re.Pattern, ...] = field(default=(), repr=False, compare=False)
@@ -331,6 +333,9 @@ class GuardRunner:
         self._clean: set[str] = set()
         #: Guards whose Allow at the ask step was logged.
         self._allowed_at_ask: set[str] = set()
+        #: Each `sessions` function's answer for this session, by target, kept from the
+        #: first load so a reload asks none again.
+        self._sessions: dict[str, tuple[bool, str | None]] = {}
         self._records = _Recorder(record or _doctor_record, clear or _doctor_clear)
 
     # -- the table ---------------------------------------------------------------------
@@ -350,7 +355,8 @@ class GuardRunner:
 
     def reload(self) -> list[dict[str, Any]]:
         """Read `guards.run`, the switches and `guards.max_wait_ms` again, load what they
-        name, and make the table. Returns it in the leg's form. Never raises."""
+        name, and make the table; each `sessions` function keeps its first answer.
+        Returns the table in the leg's form. Never raises."""
         try:
             on, max_wait = self._settings()
         except Exception as exc:  # noqa: BLE001 - a bad config costs the list, not the endpoint
@@ -624,16 +630,34 @@ class GuardRunner:
     def _default_load(self, on: list[str]) -> Loaded:
         from . import load
 
-        return load(on, env=self.env)
+        return load(on, sessions=self.sessions_answer, env=self.env)
+
+    def sessions_answer(self, target: str) -> tuple[bool, str | None]:
+        """The `sessions` function `target`'s answer for this runner's session: asked the
+        first time, kept after. A function that reads off is logged once."""
+        from . import read_sessions
+
+        with self._cond:
+            kept = self._sessions.get(target)
+        if kept is not None:
+            return kept
+        got = read_sessions(target, env=self.env)
+        with self._cond:
+            kept = self._sessions.setdefault(target, got)
+        if kept is got and got[1] is not None:
+            log.warning("guards: sessions function %s reads off for this session: %s",
+                        target, got[1])
+        return kept
 
 
 def _off_fix(e: Entry) -> str | None:
-    """The command that turns guard `e` off: off the list, else its switch off."""
+    """The command that turns guard `e` off: off the list, else its switch off; None
+    when only its `sessions` function turned it on."""
     found = e.found
     if "list" in e.by or not e.by:
         entry = found.path if found is not None and found.path else e.id
         return f"moxi config set turns {ON_KEY} --remove {entry}"
-    if found is not None and found.module and found.guard.switch:
+    if "switch" in e.by and found is not None and found.module and found.guard.switch:
         return f"moxi config set {found.module} {found.guard.switch} false"
     return None
 

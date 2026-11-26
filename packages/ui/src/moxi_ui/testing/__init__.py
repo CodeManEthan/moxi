@@ -50,6 +50,13 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     Each context closes when the test ends.
 `ui_context`, `ui_page`
     One `ui_contexts()` context, and its first page, signed in on `ui_shell`.
+`ui_days` (module scope)
+    A `moxi_ui.testing.days.Days`: dates `days_ago` days before one today, the module's
+    anchor, read the first time it is asked and past midnight when that was less than two
+    minutes away. `ui_days.noon(2)` seeds a fixture's data and `ui_days.key(2)` names the
+    day the page groups it under, and the two agree even when the run crosses midnight.
+    `ui_days.wait_out_midnight()` waits out a midnight less than two minutes away, for
+    steps of a test that must fall on one date.
 `ui_component_check`
     `check(page, module, name, attrs=None, *, tokens=("accent",), allow=(), keep=False,
     token_ms=TOKEN_MS)`: the contract check on one component (see
@@ -61,6 +68,24 @@ A module whose `ui` is an optional extra uses these fixtures by name and never i
     `check(page, *, module=None, name="page", attrs=None, route="", width=360)`: the
     document has no horizontal scroll at 360 CSS px, with the module's panel open or its
     component placed (see `moxi_ui.testing.browser.check_width`).
+`ui_press`
+    `press(locator, *, wait_ms=WAIT_MS, **click_args)`: clicks `locator` once it is
+    visible and no read that decides its page's layout is out, which `client.js` marks
+    on the page root as `data-reading="<n>"` (see `moxi_ui.testing.browser.press`). A
+    test presses through it, so a late answer never moves a control under the click. A
+    page that doesn't settle within `wait_ms` fails the press with the mark's count.
+
+The fixtures' own calls to Playwright that take no timeout of their own (a context opened
+or closed, a trace started or stopped, the browser closed) each end within `CALL_S`, 60 s.
+Past it the fixture ends the processes `ui_browser` started, Playwright's driver and the
+browser under it, and the call fails saying which call it was; so a browser that stops
+answering fails a test's teardown rather than holding the run. Every later call to that
+browser fails the same way. A call that returns all the same once its processes are ended
+(`browser.close` and `playwright.stop` do) leaves one `BoundWarning` naming the call and
+the bound, which the run's warnings summary shows, even under `-W error`; it fails
+nothing. A call a test makes itself is bounded by the test's own
+timeout (pytest-timeout's `method="thread"` ends even a call that waits on such a
+browser).
 
 A module's browser test, for example:
 
@@ -80,7 +105,8 @@ A test that reads back what its page copied readies its context with
 the page passed to `navigator.clipboard.writeText`, since Firefox refuses a
 `clipboard-read` grant and WebKit a `clipboard-write` one.
 
-Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP, and
+Without a browser, `ui_shell.session()` is a signed-in session over plain HTTP (one
+sign-in, reused by every call while the shell honours it), and
 `ui_shell.servers()` and `ui_shell.kill(module)` reach the page servers the shell runs.
 """
 
@@ -90,6 +116,8 @@ import asyncio
 import os
 import re
 import sys
+import threading
+import warnings
 import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -103,12 +131,23 @@ import pytest
 WAIT_MS = 20000
 #: `WAIT_MS` in seconds, for a wait on the page through a helper that takes seconds.
 WAIT_S = WAIT_MS / 1000
+#: Seconds one of the fixtures' own calls to Playwright that takes no timeout of its own
+#: may take: past it the fixture ends the browser's processes and the call fails.
+CALL_S = 60.0
+
+class BoundWarning(UserWarning):
+    """One of the fixtures' calls to Playwright ran past `CALL_S`: the fixture ended the
+    browser's processes, and the call then returned, so nothing failed."""
+
+
 #: The module whose `expect` takes `WAIT_MS`.
 _SYNC_API = "playwright.sync_api"
 
 _REPORTS = pytest.StashKey[dict[str, Any]]()
 #: The `--ui-traces` directory this run was given, made when the run started.
 _TRACES_DIR = pytest.StashKey[Path]()
+#: The processes `ui_browser` started, while it holds a browser.
+_DRIVER = pytest.StashKey["_Driver"]()
 #: Each test shell's stored sign-in: the browser state (cookie and key) one sign-in left.
 _SIGNED_IN: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
 KEY_ITEM = "moxi-ui-key"
@@ -249,16 +288,80 @@ def ui_shell(ui_shells: Callable[..., Any], ui_shell_options: dict[str, Any]) ->
     return ui_shells(**ui_shell_options)
 
 
+class _Driver:
+    """The processes `ui_browser` started: Playwright's driver, and through it the browser.
+
+    `call` runs one of the fixtures' calls to Playwright that takes no timeout of its own.
+    Past `CALL_S` it kills those processes and every process under them, which closes the
+    driver's pipe, so the call fails and so does every later one. It kills nothing else:
+    psutil refuses a process whose id another process has taken since."""
+
+    def __init__(self, processes: list[Any]) -> None:
+        self.processes = processes
+        #: The call that ran past `CALL_S`, once one has.
+        self.ended: str | None = None
+
+    def call(self, what: str, run: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """`run(*args, **kwargs)`, bounded at `CALL_S`. Past the bound a call that fails
+        raises a `RuntimeError` naming the call; one that returns gives a `BoundWarning`."""
+        timer = threading.Timer(CALL_S, self.end, args=(what,))
+        timer.daemon = True
+        armed = self.ended is None
+        if armed:
+            timer.start()
+        try:
+            returned = run(*args, **kwargs)
+        except Exception as exc:
+            if self.ended is None:
+                raise
+            raise RuntimeError(f"the browser stopped answering: {self.ended} took more than "
+                               f"{CALL_S:g} s, so its processes were ended") from exc
+        finally:
+            timer.cancel()
+        if armed and self.ended is not None:
+            # Recorded as a warning whatever the run's filters say: the bound has done its
+            # work, and the test it ran in stands on its own outcome.
+            with warnings.catch_warnings():
+                warnings.simplefilter("always", BoundWarning)
+                warnings.warn(f"the browser stopped answering: {self.ended} took more than "
+                              f"{CALL_S:g} s, so its processes were ended and the call "
+                              f"went on", BoundWarning, stacklevel=2)
+        return returned
+
+    def end(self, what: str) -> None:
+        """Kill the processes and every process under them; `what` is the call that ran
+        past `CALL_S`."""
+        import psutil
+
+        self.ended = what
+        doomed = []
+        for process in self.processes:
+            try:
+                doomed += [*process.children(recursive=True), process]
+            except psutil.Error:
+                pass
+        for process in doomed:
+            try:
+                process.kill()
+            except psutil.Error:
+                pass
+
+
 @pytest.fixture(scope="session")
 def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
     """The Playwright browser, headless; one for the session. Firefox or WebKit that can't
     start on this machine skips the browser tests with the reason; Chromium that can't is
     an error."""
+    import psutil
     from playwright.sync_api import Error, sync_playwright
 
     global _playwright_loop
     name = request.config.getoption("--ui-browser")
+    this = psutil.Process()
+    before = set(this.children())
     playwright = sync_playwright().start()
+    driver = _Driver([found for found in this.children() if found not in before])
+    request.config.stash[_DRIVER] = driver
     _playwright_loop = asyncio._get_running_loop()
     try:
         try:
@@ -275,12 +378,16 @@ def ui_browser(request: pytest.FixtureRequest) -> Iterator[Any]:
         finally:
             # The last test's teardown may be one that runs with the loop's mark off.
             asyncio._set_running_loop(_playwright_loop)
-            browser.close()
+            # A browser already ended has failed the call that ran past its bound, and
+            # has nothing left to close.
+            if driver.ended is None:
+                driver.call("closing the browser", browser.close)
     finally:
         asyncio._set_running_loop(_playwright_loop)
         try:
-            playwright.stop()
+            driver.call("stopping Playwright", playwright.stop)
         finally:
+            del request.config.stash[_DRIVER]
             _playwright_loop = None
             asyncio._set_running_loop(None)
 
@@ -299,20 +406,23 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
     `page.emulate_media(color_scheme=...)` after its first navigation, as
     `test_browser_settings.py` does."""
     opened: list[Any] = []
+    driver = request.config.stash[_DRIVER]
 
     def open_context(shell: Any = None, *, sign_in: bool = True, **context_args: Any) -> Any:
         shell = shell if shell is not None else request.getfixturevalue("ui_shell")
         if sign_in:
-            context_args.setdefault("storage_state", _stored_sign_in(ui_browser, shell))
-        context = ui_browser.new_context(base_url=shell.url, **context_args)
+            context_args.setdefault("storage_state", _stored_sign_in(ui_browser, shell, driver))
+        context = driver.call("opening a context", ui_browser.new_context, base_url=shell.url,
+                              **context_args)
         context.set_default_timeout(WAIT_MS)
-        context.tracing.start(screenshots=True, snapshots=True)
+        driver.call("starting a trace", context.tracing.start, screenshots=True, snapshots=True)
         opened.append(context)
         if sign_in:
-            page = context.new_page()
+            page = driver.call("opening a page", context.new_page)
             _open_settled(page, "/m/ui/")
             if "color_scheme" in context_args:
-                page.emulate_media(color_scheme=context_args["color_scheme"])
+                driver.call("setting the colour scheme", page.emulate_media,
+                            color_scheme=context_args["color_scheme"])
         return context
 
     try:
@@ -330,11 +440,12 @@ def ui_contexts(ui_browser: Any, request: pytest.FixtureRequest,
                         or tmp_path_factory.getbasetemp() / "ui-traces"
                     if not traces_dir.is_dir():
                         os.makedirs(traces_dir, exist_ok=True)
-                    context.tracing.stop(path=str(traces_dir / f"{name}-{n}.zip"))
+                    driver.call("stopping a failed test's trace", context.tracing.stop,
+                                path=str(traces_dir / f"{name}-{n}.zip"))
                 else:
-                    context.tracing.stop()
+                    driver.call("stopping a trace", context.tracing.stop)
             finally:
-                context.close()
+                driver.call("closing a context", context.close)
 
 
 def _open_settled(page: Any, path: str) -> None:
@@ -370,7 +481,7 @@ def _open_settled(page: Any, path: str) -> None:
         page.remove_listener("requestfailed", on_ended)
 
 
-def _stored_sign_in(browser: Any, shell: Any) -> dict[str, Any]:
+def _stored_sign_in(browser: Any, shell: Any, driver: _Driver) -> dict[str, Any]:
     """The browser state `shell`'s one sign-in stored: signed in through the sign-in page
     the first time, and again whenever the shell no longer takes the stored cookie and
     key (a test signed out, or the session expired)."""
@@ -384,13 +495,13 @@ def _stored_sign_in(browser: Any, shell: Any) -> dict[str, Any]:
         status, _ = Session(shell.port, cookie, key).get("/m/ui/api/modules")
         if status == 200:
             return state
-    context = browser.new_context(base_url=shell.url)
+    context = driver.call("opening a context", browser.new_context, base_url=shell.url)
     try:
         context.set_default_timeout(WAIT_MS)
-        shell.sign_in(context.new_page())
-        state = context.storage_state()
+        shell.sign_in(driver.call("opening a page", context.new_page))
+        state = driver.call("reading the signed-in state", context.storage_state)
     finally:
-        context.close()
+        driver.call("closing a context", context.close)
     _SIGNED_IN[shell] = state
     return state
 
@@ -407,12 +518,28 @@ def ui_page(ui_context: Any) -> Any:
     return ui_context.pages[0]
 
 
+@pytest.fixture(scope="module")
+def ui_days() -> Any:
+    """The module's `Days`, one anchored today (`moxi_ui.testing.days`)."""
+    from .days import Days
+
+    return Days()
+
+
 @pytest.fixture
 def ui_component_check() -> Callable[..., Any]:
     """The contract check on one component (`browser.check_component`)."""
     from .browser import check_component
 
     return check_component
+
+
+@pytest.fixture
+def ui_press() -> Callable[..., Any]:
+    """The click that waits for the page to settle first (`browser.press`)."""
+    from .browser import press
+
+    return press
 
 
 @pytest.fixture

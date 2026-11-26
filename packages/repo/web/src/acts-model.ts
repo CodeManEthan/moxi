@@ -68,7 +68,7 @@ export function addRows(repo: Pick<RepoRow, "pieces">, offered: readonly Offered
 
 // -- the confirm --------------------------------------------------------------------------
 
-/** A line he adds to another tool's hook, with `Copy` for the line. */
+/** A line the user adds to another tool's hook, with `Copy` for the line. */
 export interface ChainView {
   text: string;
   line: string;
@@ -103,7 +103,7 @@ export interface ConfirmContext {
   act: Act;
   /** The repo's name on the page. */
   repo: string;
-  /** The pieces he picked (`add`, `add-repo`) or turns on (`enable`), by id. */
+  /** The pieces the user picked (`add`, `add-repo`) or turns on (`enable`), by id. */
   picked: readonly string[];
   /** The pieces offered: each one's name and doc. */
   offered: readonly Offered[];
@@ -202,7 +202,7 @@ export function writesOf(plan: Pick<Plan, "writes" | "pieces">, { act, offered =
   }
 
   const index = take((item) => item.place === "index").map(({ item }) => item);
-  // Chain lines are what he adds, drawn under `Then`.
+  // Chain lines are what the user adds, drawn under `Then`.
   take((item) => item.place === "chain");
   // An item of a place this page doesn't know is drawn as it is.
   const other = take(() => true).map(({ item }) =>
@@ -263,8 +263,8 @@ function writesPiece(plan: Pick<Plan, "writes">, piece: PlannedPiece): boolean {
     && (item.key ?? "").startsWith(`${PIECE}${piece.id}.`));
 }
 
-/** The pieces an act sends: those he picked that the plan writes. A picked piece the plan
- * lists but writes nothing of (another hand put it in since he picked it, and a `changed`
+/** The pieces an act sends: those the user picked that the plan writes. A picked piece the
+ * plan lists but writes nothing of (another hand put it in since it was picked, and a `changed`
  * answer brought the new plan) is left out, so the verb's answer names only what the
  * question named. The plan's writes are the same without it, so its digest still holds. */
 export function sentPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readonly string[]): string[] {
@@ -275,15 +275,16 @@ export function sentPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readon
 /** What a confirm says in place of its lines when the act would change nothing. */
 export const IDLE = "Nothing to write: it is already so.";
 
-/** Whether the act would change nothing: its plan writes nothing (a chain line is his to
- * add, not a write), or he picked pieces to add or turn on and it writes none of them. */
+/** Whether the act would change nothing: its plan writes nothing (a chain line is the
+ * user's to add, not a write), or the user picked pieces to add or turn on and it writes
+ * none of them. */
 function idleOf(plan: Pick<Plan, "writes" | "pieces">, act: Act, picked: readonly string[]): boolean {
   if (plan.writes.every((item) => item.place === "chain")) return true;
   return (act === "add" || act === "enable") && picked.length > 0 && sentPieces(plan, picked).length === 0;
 }
 
-/** The pieces a confirm names: those the act sends; with none left, every one he
- * picked. */
+/** The pieces a confirm names: those the act sends; with none left, every one the
+ * user picked. */
 export function namedPieces(plan: Pick<Plan, "writes" | "pieces">, picked: readonly string[]): string[] {
   const kept = sentPieces(plan, picked);
   return kept.length > 0 ? kept : [...picked];

@@ -23,6 +23,7 @@ from . import (attribution, cache, claimfile, claimhold, config, constants, dire
                machine_line, policy, wire)
 from .membership import sessions_of
 from .claimhold import AdapterMismatch, ClaimUnreachable
+from .envelope import scrub
 from .client import (DaemonClient, DaemonError, DaemonNoAnswer, DaemonOffline,
                      DaemonTimeout, VersionMismatch)
 from .record import RecordError
@@ -74,25 +75,29 @@ WAITING_NOTE = ("NOTE: {name} is bound, but its session has had no turns endpoin
                 "that does not load turns' Claude plugin never gets one; `moxi comms "
                 "doctor` lists the sessions waiting.")
 
+#: The same, in the connector's chat: the person there runs no command, so it says only
+#: that the message is held.
+WAITING_NOTE_CONNECTOR = ("NOTE: {name}'s session can't be reached right now, so the "
+                          "message is held until it is reachable.")
+
 #: `--held` to a bound `agent-N`: only its current session releases it.
 HELD_NOTE_SESSION_ONLY = ("NOTE: {name} reads this after its own next turn in this session "
                           "(when the operator types into it, or its first turn after a "
                           "/clear). Nothing wakes it for this message alone.")
 
-#: `--held` with the operator among the recipients: he has no session,
-#: so it goes to him as an ordinary message. Before the outcome line, exit 0.
+#: `--held` with the operator among the recipients: the operator has no session,
+#: so it goes as an ordinary message. Before the outcome line, exit 0.
 HELD_IGNORED_OPERATOR = ("NOTE: --held was ignored for operator: the operator has no "
-                         "session to hold it for, so it went to him as an ordinary "
-                         "message.")
+                         "session to hold it for, so it went as an ordinary message.")
 
-#: `--interrupt` with the operator among the recipients: he has no session to steer.
+#: `--interrupt` with the operator among the recipients: the operator has no session to
+#: steer.
 INTERRUPT_IGNORED_OPERATOR = ("NOTE: --interrupt was ignored for operator: the operator "
-                              "has no session to steer, so it went to him as an ordinary "
-                              "message.")
+                              "has no session to steer, so it went as an ordinary message.")
 
 INTERRUPT_IGNORED_OPERATOR_TOOL = ("NOTE: interrupt was ignored for operator: the operator "
-                                   "has no session to steer, so it went to him as an "
-                                   "ordinary message.")
+                                   "has no session to steer, so it went as an ordinary "
+                                   "message.")
 
 #: `--interrupt` beside `--held`: one says go into a running turn, the other wait for
 #: the next release point.
@@ -305,8 +310,15 @@ class Context:
     (`mcp.inprocess`). None connects to the daemon socket, as the verbs do.
 
     `cures` is the vocabulary a refusal or a note names its cure in (`CURES`): `cli`,
-    the verb's command lines and flags, or `tool`, the names and parameters of comms'
-    tools, so an agent that has only the tools can act on every cure it is given.
+    the verb's command lines and flags; `tool`, the names and parameters of comms'
+    tools, so an agent that has only the tools can act on every cure it is given; or
+    `connector`, the tools' words narrowed to the connector's own tools and parameters
+    (`send` with `reply_to` for a reply, no reply tool, no `new`).
+
+    `when_asks_open` says what an open single-reply ask does to a send (`ASKS_OPEN`):
+    `refuse`, the verb's rule, refuses a plain send while one is open; `note` posts it,
+    and any send, a reply included, carries a NOTE listing the asks still open from its
+    recipients other than the one it answers. Only the connector's tools pass `note`.
 
     `close` closes the record the context opened for itself; a `record` given at
     construction is the caller's, and stays open.
@@ -314,10 +326,14 @@ class Context:
 
     def __init__(self, record=None, db_path=None, socket_path=None, env=None, out=None,
                  backend=None, clock=None, deadline: float | None = None, daemon=None,
-                 cures: str = "cli"):
+                 cures: str = "cli", when_asks_open: str = "refuse"):
         if cures not in CURES:
             raise ValueError(f"cures must be one of {', '.join(CURES)}, not {cures!r}")
+        if when_asks_open not in ASKS_OPEN:
+            raise ValueError(f"when_asks_open must be one of {', '.join(ASKS_OPEN)}, not "
+                             f"{when_asks_open!r}")
         self.cures = cures
+        self.when_asks_open = when_asks_open
         self.env = env if env is not None else os.environ
         self.deadline = deadline
         self._client = daemon
@@ -414,16 +430,35 @@ class Context:
         self.say(text)
 
 
-#: The vocabularies a cure is named in: the verb's command lines and flags, or the
-#: names and parameters of comms' tools.
-CURES_CLI, CURES_TOOL = "cli", "tool"
-CURES = (CURES_CLI, CURES_TOOL)
+#: The vocabularies a cure is named in: the verb's command lines and flags, the names
+#: and parameters of comms' tools, or those of the connector's tools. The connector
+#: shares every tools' text that names nothing it lacks; the few that differ are
+#: rendered by `_connector`.
+CURES_CLI, CURES_TOOL, CURES_CONNECTOR = "cli", "tool", "connector"
+CURES = (CURES_CLI, CURES_TOOL, CURES_CONNECTOR)
+
+
+#: What an open single-reply ask does to a send: refuse a plain send, or post it with a
+#: NOTE listing the asks.
+ASKS_OPEN_REFUSE, ASKS_OPEN_NOTE = "refuse", "note"
+ASKS_OPEN = (ASKS_OPEN_REFUSE, ASKS_OPEN_NOTE)
 
 
 def _tool(ctx) -> bool:
-    """Does `ctx` name cures in the tools' words? A caller's own stand-in context, with
-    no `cures`, names them as the verb does."""
-    return getattr(ctx, "cures", CURES_CLI) == CURES_TOOL
+    """Does `ctx` name cures in the tools' words, comms' tools' or the connector's? A
+    caller's own stand-in context, with no `cures`, names them as the verb does."""
+    return getattr(ctx, "cures", CURES_CLI) in (CURES_TOOL, CURES_CONNECTOR)
+
+
+def _connector(ctx) -> bool:
+    """Does `ctx` name cures in the connector's words?"""
+    return getattr(ctx, "cures", CURES_CLI) == CURES_CONNECTOR
+
+
+def _noting(ctx) -> bool:
+    """Does an open single-reply ask post a send with a NOTE, not refuse it? A caller's
+    own stand-in context, with no `when_asks_open`, refuses as the verb does."""
+    return getattr(ctx, "when_asks_open", ASKS_OPEN_REFUSE) == ASKS_OPEN_NOTE
 
 
 def _keep(ctx, **facts) -> None:
@@ -818,9 +853,77 @@ def _registered_refusal(ctx: Context, name: str, row) -> int | None:
     return _REFUSED
 
 
+#: The refusal code of each reason `scoped.state` gives for a scoped sender that can't
+#: send.
+SCOPED_REFUSALS = {"undeclared": "scoped-undeclared", "conflict": "scoped-conflict",
+                   "unreadable": "scoped-unreadable"}
+
+
+def _scoped_state(module: str, parent: str, word, env):
+    """`scoped.state` for `module`'s scoped sender for `parent`, read from comms.db
+    without writing; a store that can't be opened reads as `unreadable`."""
+    import sqlite3
+
+    from . import scoped
+    from .store import StoreRefused
+    from .store.open import open_read
+
+    try:
+        conn = open_read(env=env)
+    except (StoreRefused, sqlite3.Error, OSError):
+        return scoped.state(None, module, parent, word)
+    try:
+        return scoped.state(conn, module, parent, word)
+    finally:
+        conn.close()
+
+
+def _send_scoped(args, ctx: Context, *, module: str, parent: str, word, tags,
+                 seen: dict | None = None) -> int:
+    """A send under `module`'s scoped sender for `parent`: refused when it can't send now
+    (`scoped.state`) or when `tags` name anyone but the parent, before the token is read;
+    then the module's token for the word, read through this process's credential chain,
+    presented to the daemon's `send`, which checks the same again and refuses a sender
+    inside a live session. `seen` gets the word under `word` once the scoped sender can
+    send."""
+    from . import reserved, scoped, secrets
+
+    got = _scoped_state(module, parent, word, ctx.env)
+    if not got.can_send:
+        _refuse(ctx, SCOPED_REFUSALS[got.reason], f"{got.why}. Nothing was sent.")
+        return _REFUSED
+    if seen is not None:
+        seen["word"] = got.word
+    others = sorted({identity_of(t) for t in tags} - {got.parent})
+    if others or not tags:
+        said = (f", not to {', '.join(others)}" if others else
+                ": name it as the one recipient")
+        _refuse(ctx, "scoped-recipient", f"{got.qualified} sends only to {got.parent}"
+                f"{said}. Nothing was sent.")
+        return _REFUSED
+    try:
+        chain = secrets.from_config(env=ctx.env)
+        token = chain.get(scoped.secret_id(got.word), owner=reserved.owner(module))["value"]
+    except secrets.SecretNotFound:
+        _refuse(ctx, "credential",
+                f"comms holds no token for {module}'s scoped sender word {got.word} in "
+                "this process's credential chain — nothing was sent. Run `moxi doctor`.")
+        return _REFUSED
+    except secrets.SecretError as exc:
+        _refuse(ctx, "credential", f"{exc} Nothing was sent. Run `moxi doctor`.")
+        return _FAILED
+    name, scope = split_tag(got.qualified)
+    sender = SenderIdentity(qualified=got.qualified, scope=scope or GLOBAL, name=name)
+    return _send_resolved(args, ctx, sender=sender, operator_id=None, tags=[got.parent],
+                          reply_to=None, channel_room=NAMES,
+                          project=project_key(env=ctx.env), reserved_token=token,
+                          scoped=True)
+
+
 def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
                    channel_room, project, referent=None, claim_answer=None,
-                   claim_path=None, author=None, reserved_token=None, bound=None) -> int:
+                   claim_path=None, author=None, reserved_token=None, bound=None,
+                   scoped: bool = False) -> int:
     """Everything a send does once it knows WHO is sending: the checks, the machine
     line, the length cap and the post.
 
@@ -843,6 +946,9 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
 
     `bound` is a `Sender.bound`: its token is presented as the claim's would be, and a
     refused one is checked against the binding once more (`_post_bound`).
+
+    `scoped` says `sender` is a scoped sender, posted with `reserved_token` only to a
+    daemon whose hello lists `scoped-senders`.
     """
     typed_names = author is None
     if not typed_names:
@@ -888,7 +994,7 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
     (body,) = bodies
     if operator_id is None:
         posted = (_post_bound(ctx, sender, bound, body) if bound is not None else
-                  _post_reserved(ctx, sender, reserved_token, body)
+                  _post_reserved(ctx, sender, reserved_token, body, scoped=scoped)
                   if reserved_token is not None else
                   _post_from_claim(ctx, claim_path, sender, claim_answer["token"], body))
     else:
@@ -1040,18 +1146,37 @@ NO_ANSWER = ("the daemon did not answer, so this message may have been sent; che
              "`moxi comms history` before sending it again")
 NO_ANSWER_TOOL = ("the daemon did not answer, so this message may have been sent; check "
                   "the history tool before sending it again")
+#: The connector has no history tool.
+NO_ANSWER_CONNECTOR = ("the daemon did not answer, so this message may have been sent; "
+                       "ask the agent whether it arrived before sending it again")
 
 
 def _no_answer(ctx) -> str:
+    if _connector(ctx):
+        return NO_ANSWER_CONNECTOR
     return NO_ANSWER_TOOL if _tool(ctx) else NO_ANSWER
 
 
-def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: str):
-    """A post under a reserved name, with its token. Returns the message id, or a step
-    code once the refusal is said."""
+#: The daemon's capability a send under a scoped sender needs.
+SCOPED_CAPABILITY = "scoped-senders"
+
+
+def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: str, *,
+                   scoped: bool = False):
+    """A post under a reserved name, with its token, or, with `scoped`, under a scoped
+    sender, refused before the post when the daemon running has no scoped senders.
+    Returns the message id, or a step code once the refusal is said."""
     client = None
     try:
         client = ctx.daemon()
+        if scoped and SCOPED_CAPABILITY not in (getattr(client, "capabilities", None)
+                                                or ()):
+            from .checks import restart
+
+            _refuse(ctx, "protocol-mismatch", "the comms daemon running is older than this "
+                    f"comms and has no scoped senders. Restart it ({restart()}), then send "
+                    "again. Nothing was sent.")
+            return _FAILED
         try:
             answer = client.send(sender.qualified, token, content)
         except DaemonError as exc:
@@ -1059,8 +1184,8 @@ def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: st
                 _refuse(ctx, "credential", f"comms refused the token for "
                         f"{sender.qualified} — nothing was sent. Run `moxi doctor`.")
                 return _REFUSED
-            if exc.code == wire.NAME_RESERVED:
-                _refuse(ctx, "name-reserved", f"{exc} — nothing was sent.")
+            if exc.code in _RESERVED_CODES:
+                _refuse(ctx, _RESERVED_CODES[exc.code], f"{exc} — nothing was sent.")
                 return _REFUSED
             raise
         return answer["message_id"]
@@ -1078,6 +1203,13 @@ def _post_reserved(ctx: Context, sender: SenderIdentity, token: str, content: st
     finally:
         if client is not None:
             client.close()
+
+
+#: The daemon's refusals of a post under a send-only name or a scoped sender, by the
+#: refusal code the send gives.
+_RESERVED_CODES = {wire.NAME_RESERVED: "name-reserved",
+                   wire.SCOPED_CONFLICT: "scoped-conflict",
+                   wire.SCOPED_RECIPIENT: "scoped-recipient"}
 
 
 def _post_as_operator(ctx: Context, user_id: str, token: str, content: str):
@@ -1146,13 +1278,16 @@ def _say_notes(ctx: Context, plan) -> None:
     if not plan.flagged:
         for qualified in dict.fromkeys(plan.resolved):
             if qualified in plan.waiting and qualified not in held:
-                ctx.note(_waiting_note(qualified, plan.waiting[qualified]))
+                ctx.note(_waiting_note(qualified, plan.waiting[qualified], ctx))
     for note in plan.notes + plan.ask_notes:
         ctx.note(note)
 
 
-def _waiting_note(qualified: str, seconds) -> str:
-    """The NOTE for a bound recipient with no endpoint, with how long it has had none."""
+def _waiting_note(qualified: str, seconds, ctx) -> str:
+    """The NOTE for a bound recipient with no endpoint: in the connector's words, that
+    the message is held; else with how long it has had none."""
+    if _connector(ctx):
+        return WAITING_NOTE_CONNECTOR.format(name=qualified)
     age = (cache.spoken_span(seconds) if isinstance(seconds, (int, float))
            else "a while")
     return WAITING_NOTE.format(name=qualified, age=age)
@@ -1203,7 +1338,8 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
          refusal, the `--standing` declaration and, on a `moxi comms send`, the
          never-bound check), the `session` query for each bound recipient, and the
          claim's token;
-      3. the single-reply refusal;
+      3. the single-reply refusal, or, on a context that notes open asks
+         (`when_asks_open`), the NOTE that lists them, on a reply too;
       4. the reply checks: read the referent, then a reply to `[no reply]`, `--posture
          open` on a reply to a once ask, the open-thread
          check and the rest of the `--cap` refusals;
@@ -1307,8 +1443,11 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     t_ask = {}              # qualified -> the verb's clock just before it read the name
     tiers = {}              # qualified -> its tier, from the resolve answer
     # The single-reply check: a plain send only -- no `--reply-to`
-    # (which `reply` always has), no `--new` -- and never from an exempt sender.
-    check_asks = reply_to is None and not getattr(args, "new", False) and not exempt
+    # (which `reply` always has), no `--new` -- and never from an exempt sender. A
+    # context that notes open asks runs it on a reply too, to list the others.
+    noting = _noting(ctx)
+    check_asks = ((reply_to is None or noting) and not getattr(args, "new", False)
+                  and not exempt)
     nominated, ask_notes = [], []
     try:
         resolved, deferred = [], []
@@ -1380,13 +1519,19 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
         # Right after the daemon block and AHEAD of the cache reads: each nominated ask,
         # and the replies after it, read back from the record and judged by `open_for`.
         # Only a predicate read true refuses; a read that fails lets the send through
-        # with a NOTE.
+        # with a NOTE. A context that notes open asks never refuses here: the send
+        # posts, with one NOTE listing the asks other than the one a reply answers.
         open_asks, read_notes = _open_asks(ctx, sender, nominated, resolved)
         ask_notes += read_notes
-        if open_asks:
+        if noting:
+            others = [(ask, asker) for ask, asker in open_asks
+                      if reply_to is None or str(ask.id) != str(reply_to)]
+            if others:
+                ask_notes.append(_open_asks_note(others, resolved, now=ctx.clock()))
+        elif open_asks:
             _refuse(ctx, "single-reply",
                     _ask_refusal(open_asks, tags, resolved, now=ctx.clock(), args=args,
-                                 tool=_tool(ctx)))
+                                 cures=getattr(ctx, "cures", CURES_CLI)))
             return _REFUSED, None
 
     # ---- 4. the reply checks --------------------------------------------------------
@@ -1522,7 +1667,7 @@ def _blocked(ctx: Context) -> bool:
 
 def _exempt(sender) -> bool:
     """Is this sender exempt from every posture refusal? The operator, by the name every
-    lane of his carries, and no one else."""
+    operator lane carries, and no one else."""
     return sender.qualified == OPERATOR
 
 
@@ -1725,6 +1870,10 @@ def _reply_checks(args, ctx: Context, *, sender, exempt, typed, cap, no_cap,
         names_text = _and([t for t in names_text.split(",") if t] or ["them"])
 
     def new_flag() -> str:
+        if _connector(ctx):
+            # The connector has no `new`, and no plain send of its meets the
+            # single-reply refusal.
+            return ""
         flag = _new_flag(ctx, sender, resolved)
         return (" and new: true" if flag else "") if tool else flag
 
@@ -1954,7 +2103,10 @@ def _thread_idle(ctx: Context, items, sender, epoch) -> tuple[bool, str | None]:
 def _new_flag(ctx: Context, sender, resolved) -> str:
     """` --new` when a plain send from this sender to `resolved` would meet the
     single-reply refusal, so a cure that names a new send is one the rules accept; empty
-    otherwise, and whenever that check's reads fail."""
+    otherwise, whenever that check's reads fail, and on a context that notes open asks,
+    where no plain send meets that refusal."""
+    if _noting(ctx):
+        return ""
     try:
         client = ctx.daemon()
         try:
@@ -2108,13 +2260,20 @@ def _cure_flags(args, *, tool: bool = False) -> str:
 
 
 def _ask_refusal(open_asks, tags, resolved, *, now: float, args=None,
-                 tool: bool = False) -> str:
-    """What a refused plain send prints: who asked, when, and both cures, as command
-    lines or, with `tool`, as the tools and their parameters."""
+                 cures: str = CURES_CLI) -> str:
+    """What a refused plain send prints: who asked, when, and both cures, in the
+    vocabulary `cures` names: command lines, or the tools and their parameters. The
+    connector's words name only the reply cure, as `send` with `reply_to`: it has no
+    `new`."""
     from .daemon import _epoch
     open_asks = sorted(open_asks, key=lambda pair: int(pair[0].id), reverse=True)
     newest = open_asks[0][0].id
-    if tool:
+    if cures == CURES_CONNECTOR:
+        cure = (f"send with reply_to: {newest}" if len(resolved) == 1 else
+                f"send to {_and(tags)} with reply_to: {newest}"
+                ) + _cure_flags(args, tool=True)
+        tail = "Nothing was sent."
+    elif cures == CURES_TOOL:
         cure = (f"the reply tool with message_id: {newest}" if len(resolved) == 1 else
                 f"the send tool to {_and(tags)} with reply_to: {newest}"
                 ) + _cure_flags(args, tool=True)
@@ -2145,6 +2304,61 @@ def _ask_refusal(open_asks, tags, resolved, *, now: float, args=None,
               f"  {cure}",
               f"so it closes that ask. {tail}"]
     return "\n".join(lines)
+
+
+#: How many open asks the open-asks NOTE lists, and how much of each one's first line.
+OPEN_ASKS_LISTED = 3
+ASK_LINE_MAX_CHARS = 100
+
+
+def _open_asks_note(open_asks, resolved, *, now: float) -> str:
+    """The NOTE a send carries, on a context that notes open asks, for the single-reply
+    asks to its sender still open from its recipients: newest first, at most
+    `OPEN_ASKS_LISTED` of them with a count of the rest, each with its age and its
+    text's first line, then how to answer one, in the connector's words."""
+    from .daemon import _epoch
+    open_asks = sorted(open_asks, key=lambda pair: int(pair[0].id), reverse=True)
+    count = len(open_asks)
+    whom = "this recipient" if len(set(resolved)) == 1 else "these recipients"
+    lines = [f"Still open: {count} single-reply ask{'' if count == 1 else 's'} to you "
+             f"from {whom}."]
+    for ask, asker in open_asks[:OPEN_ASKS_LISTED]:
+        line = (f"  msg {ask.id} from {asker.qualified} "
+                f"({spoken_ago(now - _epoch(ask.timestamp))})")
+        first = _ask_first_line(ask.content)
+        lines.append(f"{line}: {first}" if first else line)
+    if count > OPEN_ASKS_LISTED:
+        lines.append(f"  and {count - OPEN_ASKS_LISTED} more")
+    lines.append(("Answer it" if count == 1 else "Answer one")
+                 + " with send and reply_to set to its id.")
+    return "\n".join(lines)
+
+
+def _ask_first_line(content) -> str:
+    """An ask's first line of text below line zero, scrubbed of control and format
+    characters like any returned body, and cut to `ASK_LINE_MAX_CHARS` with `...` when
+    it is longer."""
+    _line_zero, _, body = str(content).partition("\n")
+    for raw in body.split("\n"):
+        line = scrub(raw).strip()
+        if line:
+            if len(line) > ASK_LINE_MAX_CHARS:
+                return line[:ASK_LINE_MAX_CHARS].rstrip() + "..."
+            return line
+    return ""
+
+
+def spoken_ago(seconds) -> str:
+    """How long ago, as it is read aloud: `just now`, `5 minutes ago`, `14 hours ago`,
+    `2 days ago`, or `at an unknown time` for None."""
+    if seconds is None:
+        return "at an unknown time"
+    seconds = max(0.0, float(seconds))
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size:
+            n = int(seconds // size)
+            return f"{n} {unit}{'' if n == 1 else 's'} ago"
+    return "just now"
 
 
 def _names_of(held) -> str:
@@ -2327,13 +2541,39 @@ def run_reserved(ctx: Context, args, *, module: str | None, name: str,
             code = _REFUSED
     finally:
         ctx.capture = outer
-    result = _result(code, capture, check=bool(getattr(args, "check", False)))
+    result = _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
     from . import reserved
     reserved.trace_send(module, name, sent=result.outcome == OUTCOME_SENT,
                         credential=(result.refusal is not None
                                     and result.refusal.code == "credential"),
                         holder=(reserved.MODULE_HOLDER if module else
                                 reserved.PROGRAM_HOLDER))
+    return result
+
+
+def run_scoped(ctx: Context, args, *, module: str, parent: str, word=None,
+               tags) -> SendResult:
+    """`run` for a send under `module`'s scoped sender for `parent` (`word`, or the one
+    word the module declares), to `tags`, which must name the parent alone. A send
+    refused for its credential leaves the doctor a record, as `run_reserved` does."""
+    capture, outer = _Capture(), ctx.capture
+    ctx.capture = capture
+    seen: dict = {}
+    try:
+        try:
+            code = _send_scoped(args, ctx, module=module, parent=parent, word=word,
+                                tags=list(tags), seen=seen)
+        except config.ConfigError as exc:
+            ctx.refuse("config", str(exc))
+            code = _REFUSED
+    finally:
+        ctx.capture = outer
+    result = _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
+    if seen.get("word"):
+        from . import scoped
+        scoped.trace_send(module, seen["word"], sent=result.outcome == OUTCOME_SENT,
+                          credential=(result.refusal is not None
+                                      and result.refusal.code == "credential"))
     return result
 
 
@@ -2365,7 +2605,7 @@ def run(ctx: Context, args, *, tags=None, sender=None) -> SendResult:
             code = _REFUSED
     finally:
         ctx.capture = outer
-    return _result(code, capture, check=bool(getattr(args, "check", False)))
+    return _result(code, capture, ctx, check=bool(getattr(args, "check", False)))
 
 
 def _bound(sender) -> Sender | None:
@@ -2379,14 +2619,14 @@ def _bound(sender) -> Sender | None:
     return sender
 
 
-def _result(code: int, capture: _Capture, *, check: bool) -> SendResult:
+def _result(code: int, capture: _Capture, ctx, *, check: bool) -> SendResult:
     said, notes = tuple(capture.said), tuple(capture.notes)
     if code != _OK:
         outcome, exit_code = _ENDS.get(code, (OUTCOME_FAILED, moxi_exit.ERROR))
         refusal = capture.refusal or Refusal(outcome, "\n".join(map(str, said)))
         return SendResult(outcome=outcome, refusal=refusal, notes=notes, said=said,
                           code=exit_code)
-    recipients = (_recipients(capture.plan) if capture.plan is not None else ())
+    recipients = (_recipients(capture.plan, ctx) if capture.plan is not None else ())
     if check:
         return SendResult(outcome=OUTCOME_WOULD_SEND, recipients=recipients, notes=notes,
                           said=said)
@@ -2395,7 +2635,7 @@ def _result(code: int, capture: _Capture, *, check: bool) -> SendResult:
                       notes=notes, said=said)
 
 
-def _recipients(plan) -> tuple:
+def _recipients(plan, ctx) -> tuple:
     """One `Recipient` per resolved name, in line zero's order, from the plan the checks
     made: the plan is what the post printed its lines from, so the data and the text say
     the same.
@@ -2423,8 +2663,8 @@ def _recipients(plan) -> tuple:
         elif qualified in held:
             delivery, reason = DELIVERY_HELD_COLD, cache.hold_line(held[qualified])
         elif qualified in plan.waiting:
-            delivery, reason = DELIVERY_WAITING, _waiting_note(qualified,
-                                                               plan.waiting[qualified])
+            delivery, reason = DELIVERY_WAITING, _waiting_note(
+                qualified, plan.waiting[qualified], ctx)
         else:
             delivery, reason = DELIVERY_LIVE, None
         at = cold_at.get(qualified)
@@ -2551,7 +2791,7 @@ def _delete(ctx: Context, mid: str, *, bound=None):
             _refuse(ctx, "no-identity",
                     "comms has no identity for this process to delete as: a session "
                     "deletes its own messages through its own claim socket, and the "
-                    "operator from his own terminal. Nothing was withdrawn.")
+                    "operator from a terminal outside any session. Nothing was withdrawn.")
             return _REFUSED, None
         try:
             with ctx.db() as db:

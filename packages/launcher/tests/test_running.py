@@ -55,7 +55,17 @@ def test_a_live_launch_is_given_with_its_row_and_an_ended_one_is_left_out():
     assert found[0] == api.Running(
         request_id="r-live", harness="claude", session_id=sid, target="slot", slot="3",
         project_key=None, cwd="/work/page", name=names.shown(row), identity=None,
-        created_at=row.created_at, live=True)
+        created_at=row.created_at, live=True, model="opus", effort=None)
+
+
+def test_the_model_and_effort_are_the_rows_values_and_none_where_unset():
+    kit.seed(HERE, "r-set", live=True, values={"model": "sonnet", "effort": "high"})
+    kit.seed(HERE, "r-unset", live=True, values={"model": "", "effort": None})
+    launched("r-bare")
+    by_id = {r.request_id: r for r in api.running()}
+    assert (by_id["r-set"].model, by_id["r-set"].effort) == ("sonnet", "high")
+    assert (by_id["r-unset"].model, by_id["r-unset"].effort) == (None, None)
+    assert (by_id["r-bare"].model, by_id["r-bare"].effort) == (None, None)
 
 
 def test_without_live_only_an_ended_launch_is_kept_with_live_false_newest_first():

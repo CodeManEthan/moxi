@@ -13,9 +13,17 @@
 // On the phone, through the gateway, `gateway` is true, and a component hides what the
 // phone can't reach.
 //
+// It marks the page root (the shell's `#moxi-panel`, else the document's root element)
+// with `data-reading="<n>"` while n reads that decide the page's layout are out, and takes
+// the mark away at none: each `api` read (not a post) until its answer has been drawn,
+// each `subscribe` until its first value (at most `FIRST_VALUE_MS`), each `place` until
+// its element is placed, and each read a page defers through `readLater` from when it is
+// scheduled until its answer has been drawn. A test presses only once the mark is gone, so
+// no late answer moves a control under its press.
+//
 // It also defines `<moxi-ui-form>`, the one form renderer, `<moxi-ui-confirm>`, the
-// confirm sheet, and `<moxi-ui-row>`, the two-line row of a list, so every page can use
-// them.
+// confirm sheet, `<moxi-ui-row>`, the two-line row of a list, and `<moxi-ui-rail>` with its
+// `<moxi-ui-mark>` cells, a line of step markers, so every page can use them.
 
 import { defineConfirm } from "./confirm.ts";
 import { isConfirmed, mintKey, outcomeOf, pagePath, SIGNED_OUT } from "./confirm-model.ts";
@@ -25,7 +33,10 @@ import type { Reach } from "./gateway-model.ts";
 import { fetchOpener, TabPush } from "./push.ts";
 import type { Opener } from "./push.ts";
 import { Gate } from "./hold-model.ts";
+import { waitedMs } from "./wait-model.ts";
+import { ReadingCount } from "./reading-model.ts";
 import { defineRow } from "./row.ts";
+import { defineRail } from "./rail.ts";
 import { apiTarget, checkAttributes, checkName, panelTarget, scriptUrl } from "./rules.ts";
 import { boot, where } from "./shell.ts";
 
@@ -65,6 +76,9 @@ export interface ComponentInfo {
   /** From 0 to 999, lower first: a page's place in its group, a main piece's rank or a
    * row's place among rows. Null on any other component. */
   order: number | null;
+  /** The modules whose presence takes a page's entry out of the band; its address still
+   * opens it. Null on a component that is no page. */
+  band_unless: string[] | null;
   attributes: AttributeInfo[];
 }
 
@@ -233,10 +247,44 @@ export interface FormElement extends HTMLElement {
  */
 export interface RowElement extends HTMLElement {}
 
+/**
+ * `<moxi-ui-rail>`, a line of step markers with the line through what is done, defined by
+ * this script. Each `<moxi-ui-mark>` child is one cell, in order. It draws what its marks
+ * carry and reads nothing:
+ *
+ * - a mark's `state` is one of `done`, `none`, `yours`, `failed`, `owed`, `waiting`,
+ *   `todo` and `child`, each its own shape; unset, the cell draws no marker and the line
+ *   passes through. `word` is written under the marker, `count` at its corner, and
+ *   `label` is its accessible name, used as given (else the state in words). `key` is
+ *   opaque and comes back in the event.
+ * - a mark's flags: `settled`, `here` (`▼` over the marker), `open` (a ring and
+ *   `aria-expanded`, while the page shows what the marker opened), `quiet` (drawn, not a
+ *   button) and `wide` (the label's width, showing the mark's own children over the line).
+ * - the line is solid, in `--moxi-state-done`, from the first marker through each settled
+ *   one up to and including the first not settled, and dashed after it.
+ * - cells are `--moxi-rail-cell` (56px) wide, a wide one `--moxi-rail-label` (132px).
+ * - a click, Enter or Space on a marker sends `moxi-rail-mark` from the rail, bubbling and
+ *   crossing shadow roots, with `{key}`. The rail opens nothing itself.
+ * - `size="small"`: 11 px markers, no words or counts, no buttons. `vertical`: one mark a
+ *   row, its label and word beside it, the line running down.
+ */
+export interface RailElement extends HTMLElement {}
+
+/** `<moxi-ui-mark>`, one cell of `<moxi-ui-rail>`; its attributes are listed there. Its
+ * `focus()` focuses its marker. */
+export interface MarkElement extends HTMLElement {}
+
+/** The detail of `moxi-rail-mark`: the pressed mark's `key`, null when it has none. */
+export interface RailMark {
+  key: string | null;
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     "moxi-ui-form": FormElement;
     "moxi-ui-row": RowElement;
+    "moxi-ui-rail": RailElement;
+    "moxi-ui-mark": MarkElement;
   }
 }
 
@@ -334,6 +382,14 @@ function watched(open: Opener): Opener {
   });
 }
 
+/** The page root's mark while reads that decide its layout are out: their count. */
+const READING_MARK = "data-reading";
+const reading = new ReadingCount((count) => {
+  const root = document.getElementById("moxi-panel") ?? document.documentElement;
+  if (count > 0) root.setAttribute(READING_MARK, String(count));
+  else root.removeAttribute(READING_MARK);
+}, (fn, ms) => setTimeout(fn, ms));
+
 const push = new TabPush(here.gateway ? watched(fetchOpener(key)) : fetchOpener(key), markSignedOut);
 
 // --- the contract -----------------------------------------------------------------------
@@ -398,7 +454,12 @@ export async function api(module: string, path: string, body?: object): Promise<
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  return await fetched(target, init);
+  const end = body === undefined ? reading.begin() : null;
+  try {
+    return await fetched(target, init);
+  } finally {
+    end?.();
+  }
 }
 
 async function fetched(target: string, init: RequestInit): Promise<ApiResult> {
@@ -507,7 +568,25 @@ export function subscribe(module: string, topic: string, fn: (data: any) => void
   checkName("module", module);
   checkName("topic", topic);
   if (typeof fn !== "function") throw new TypeError("subscribe takes a function");
-  return push.hub.add(`${module}.${topic}`, fn);
+  const first = reading.firstValue(fn);
+  const stop = push.hub.add(`${module}.${topic}`, first.listener);
+  return () => {
+    first.stopped();
+    stop();
+  };
+}
+
+/**
+ * Runs `read` after `ms` milliseconds: a read the page has decided on but waits to send,
+ * such as a list read again a while after a topic value, or a field's value read once
+ * typing stops. The page root's mark counts it from now until a turn after what `read`
+ * gives (its promise) has settled, so a press waits through the wait as well as the read.
+ * Gives the function that cancels it: before `read` has run, `read` never runs and the
+ * mark lets it go; after, it does nothing. Call it where the page would `clearTimeout`,
+ * and in `disconnectedCallback`.
+ */
+export function readLater(read: () => unknown, ms: number): () => void {
+  return reading.deferred(read, ms);
 }
 
 /**
@@ -528,6 +607,18 @@ export async function place(host: Element, module: string, name: string,
   checkAttributes(info, attrs);
   const url = scriptUrl(info, module, location.origin);
   if (url === null) return null;
+  const end = reading.begin();
+  try {
+    return await placeElement(host, info, url, module, name, attrs);
+  } finally {
+    end();
+  }
+}
+
+/** Loads `url`, waits for it to define the component's element, and appends one to `host`;
+ * null when the script fails to load or to define it in time. */
+async function placeElement(host: Element, info: ComponentInfo, url: string, module: string, name: string,
+                            attrs: Record<string, string>): Promise<Element | null> {
   try {
     await import(url);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -604,6 +695,46 @@ export function setTheme(mode: ThemeMode, name?: string): void {
   if (name !== undefined) document.documentElement.dataset.themeName = name;
 }
 
+/**
+ * How long a page has waited since it was connected, for a line it shows only after a
+ * while (`Reading…` once its first read has been out 400 ms). `start(onDue)`, from
+ * `connectedCallback`, notes the time and arms a timer that calls `onDue` after `dueMs`;
+ * `waitedMs()`, from `render`, is the time since on the monotonic clock
+ * (`performance.now()`), and never less than `dueMs` once that timer has fired, so the
+ * render the timer asks for always finds the wait due; `stop()`, from
+ * `disconnectedCallback`, clears the timer.
+ */
+export class WaitClock {
+  readonly dueMs: number;
+  #sinceMs = performance.now();
+  #fired = false;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(dueMs: number) {
+    this.dueMs = dueMs;
+  }
+
+  start(onDue: () => void): void {
+    this.stop();
+    this.#sinceMs = performance.now();
+    this.#fired = false;
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined;
+      this.#fired = true;
+      onDue();
+    }, this.dueMs);
+  }
+
+  stop(): void {
+    clearTimeout(this.#timer);
+    this.#timer = undefined;
+  }
+
+  waitedMs(): number {
+    return waitedMs(this.#sinceMs, performance.now(), this.dueMs, this.#fired);
+  }
+}
+
 // --- the gateway's worker ------------------------------------------------------------------
 
 const WORKER_URL = "/sw.js";
@@ -640,6 +771,7 @@ function registerWorker(): void {
 defineForm(installed);
 defineConfirm();
 defineRow();
+defineRail();
 push.start();
 if (here.gateway) registerWorker();
 addEventListener("storage", (event) => {

@@ -45,6 +45,7 @@ def test_the_defaults_with_no_file():
     assert (cfg.credentials.store, cfg.credentials.roles) == ("", ())
     assert cfg.policy.cache_callers == ("operator",)
     assert cfg.policy.labels == {}
+    assert cfg.policy.directors == ("fleet-lead",)
     assert cfg.provision.operator == "operator"
     assert cfg.block is False
     assert cfg.codex == cfg.opencode == {"defaults": {}, "agents": {}}
@@ -75,6 +76,7 @@ roles = ["calendar", "pager"]
 [policy]
 cache_callers = ["operator", "herald"]
 labels = { "console@acme" = "the build console's send-only identity" }
+directors = ["boss@global", "lead@acme", "boss"]
 
 [provision]
 operator = "alice"
@@ -107,6 +109,7 @@ def test_the_file_sets_every_table(monkeypatch):
     assert cfg.credentials.roles == ("calendar", "pager")
     assert cfg.policy.cache_callers == ("operator", "herald")
     assert cfg.policy.labels == {"console@acme": "the build console's send-only identity"}
+    assert cfg.policy.directors == ("boss", "lead@acme")
     assert cfg.provision.operator == "alice"
     assert (cfg.delivery.expiry, cfg.delivery.expiry_seconds) == ("6h", 21600)
     assert cfg.codex["defaults"] == {"sandbox": "workspace-write"}
@@ -157,6 +160,9 @@ BAD_FILES = [
     ('[credentials]\nroles = ["../up"]\n', "credentials.roles"),
     ('[policy]\ncache_callers = [""]\n', "policy.cache_callers"),
     ('[policy]\nlabels = { "x" = 1 }\n', "policy.labels"),
+    ('[policy]\ndirectors = ["bad name"]\n', "policy.directors"),
+    ('[policy]\ndirectors = ["lead@"]\n', "policy.directors"),
+    ('[policy]\ndirectors = [3]\n', "policy.directors"),
     ("[provision]\nslots = 0\n", "provision.slots"),
     ("[replay]\nmessages = 0\n", "replay.messages"),
     ("[replay]\nhours = -1\n", "replay.hours"),
@@ -278,8 +284,8 @@ def test_a_role_the_box_lists_keys_under_itself_and_an_unlisted_one_is_unknown()
     assert tokens.owner_for_role(tokens.ROLE_OPERATOR).parts == ("operator",)
 
 
-def test_the_chain_reads_the_configured_store(tmp_path):
-    store = tmp_path / "store"
+def test_the_chain_reads_the_configured_store(profile):
+    store = profile / "store"
     write_config(None, f'[credentials]\nchain = ["store"]\nstore = "{store}"\n')
     owner = tokens.owner_for_role(tokens.ROLE_OPERATOR)
     tokens.TokenStore(store).write_secret(owner, tokens.OPERATOR_SECRET_ID, "tok")
@@ -510,6 +516,8 @@ def core_state(monkeypatch, tmp_path):
     (("credentials.chain", "[]"), [], "credentials.chain", "is empty"),
     (("credentials.roles", "--add", "reader"), None, "credentials.roles",
      "one of comms' own roles"),
+    (("policy.directors", "--add", "bad name"), None, "policy.directors",
+     "holds a bad name"),
 ])
 def test_config_set_refuses_what_comms_refuses(core_state, capsys, argv, value, key,
                                                words):
@@ -593,6 +601,8 @@ def test_show_json_gives_every_key_a_label_and_none_first(capsys):
     assert keys["mcp.port"]["label"] == "Port for agents' tools"
     assert keys["connector.wait_default_s"]["label"] == "A connector call waits, by default"
     assert {name: key["unit"] for name, key in keys.items() if key["unit"]} == UNITS
+    assert {name for name, key in keys.items() if key["hurts"]} == {"policy.directors"}
+    assert keys["policy.directors"]["hurts"]["when"] == "add"
     for key in keys.values():
-        assert key["common"] is False and key["group"] is None and key["hurts"] is None
+        assert key["common"] is False and key["group"] is None
         assert key["choices"] is None and key["terminal"] is None and key["elsewhere"] is None

@@ -42,9 +42,25 @@ def fresh_page(monkeypatch, site, fake):
     table = jobs.Jobs(LB.busy)
     monkeypatch.setattr(pagehandlers, "JOBS", table)
     monkeypatch.setattr(pagehandlers, "_known", {})
+    monkeypatch.setattr(pagehandlers, "_streaks", {})
     monkeypatch.setattr(pagehandlers, "_logged", set())
     yield fake
     table.close()
+
+
+@pytest.fixture
+def restart(monkeypatch):
+    """Put a new job table in, as a page server's restart does; each one it put in is
+    closed at the end, before `monkeypatch` puts the server's own table back."""
+    made: list[jobs.Jobs] = []
+
+    def _restart() -> None:
+        made.append(jobs.Jobs(LB.busy))
+        monkeypatch.setattr(pagehandlers, "JOBS", made[-1])
+
+    yield _restart
+    for table in made:
+        table.close()
 
 
 def get(path: str, query: str = "", app=None) -> tuple[int, dict | None]:
@@ -102,6 +118,20 @@ def a_timer(name: str = "nightly", **extra) -> None:
     assert out.ok, out
 
 
+def test_a_moxi_daemon_stopped_by_hand_reads_stopped_and_counts_as_a_warning(site, fake):
+    from fake_units import Unit
+
+    site.module("notes", 'SUMMARY = "notes"\nDAEMONS = {"sync": {"command": "moxi-notes-sync"}}\n')
+    fake.modules[("notes", "sync")] = Unit("daemon", enabled=True, active=True)
+    assert acts.stop("notes/sync").code == 0
+    listed = read("/api/rows")["rows"]
+    sync = {r["id"]: r for r in listed}["notes/sync"]
+    assert (sync["verdict"]["state"], sync["verdict"]["cause"]) == ("warn", "stopped")
+    assert sync["stopped"] == store.read_module_stops()["notes/sync"]
+    # The summary block counts the rows by verdict state: a warning, not a failure.
+    assert [r["verdict"]["state"] for r in listed] == ["warn"]
+
+
 def busy_now() -> list[str]:
     status, health = get("/api/health")
     assert status == 200, health
@@ -121,7 +151,7 @@ def test_rows_lists_every_row_with_its_verdict_and_state():
     assert (web["form"], web["kind"], web["flag"], web["state"]) == (
         "written", "daemon", True, "active")
     assert web["verdict"] == {"state": "ok", "reason": web["verdict"]["reason"],
-                              "fix": None, "unknown": False, "cause": None}
+                              "fix": None, "unknown": False, "cause": "running"}
     assert web["argv"] == [PY, "-m", "http.server"] and web["has_switch"] is True
     assert (nightly["kind"], nightly["flag"], nightly["schedule"]) == ("timer", False,
                                                                       "every 1h")
@@ -137,13 +167,157 @@ def test_rows_carries_the_last_health_result_and_runs_no_check(monkeypatch):
     assert ran == []
     pagehandlers.gather(check_health=True)
     assert ran == [(PY, "-c", "pass")]
-    assert read("/api/rows")["rows"][0]["checked"] == {"state": "ok", "line": "fine"}
+    checked = read("/api/rows")["rows"][0]["checked"]
+    assert (checked["state"], checked["line"]) == ("ok", "fine")
     assert len(ran) == 1
+
+
+def test_checked_at_is_when_the_health_pass_that_ran_the_check_began(monkeypatch):
+    a_daemon(enable=True, health=[PY, "-c", "pass"])
+    monkeypatch.setattr(pagehandlers.state, "run_health", lambda argv: ("ok", "fine"))
+    before = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    passed = pagehandlers.gather(check_health=True)["rows"][0]["checked"]["at"]
+    after = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    assert before <= passed <= after
+    # A read between passes carries the kept result's pass time.
+    assert read("/api/rows")["rows"][0]["checked"]["at"] == passed
+    assert read("/api/row", "id=web")["row"]["checked"]["at"] == passed
+
+
+# --- the row's fields beyond its verdict ----------------------------------------------
+
+CLOCK = '''
+SUMMARY = "clock"
+SETTINGS = "settings.toml"
+DAEMONS = {"tick": {"command": "moxi-clock-tick"}}
+TIMERS = {"chime": {"command": "moxi-clock-chime", "at": ["09:00", "17:30"],
+                    "days": ["mon", "fri"], "switch": "chime.enabled"},
+          "nudge": {"command": "moxi-clock-nudge", "every": "15m",
+                    "switch": "nudge.enabled"}}
+'''
+
+CLOCK_SETTINGS = '''
+[chime.enabled]
+type = "bool"
+default = true
+doc = "Whether the chime runs."
+read = "use"
+
+[nudge.enabled]
+type = "bool"
+default = true
+doc = "Whether the nudge runs."
+read = "use"
+'''
+
+SLOTS = '''
+SUMMARY = "slots"
+DAEMONS = {"server": {"command": "moxi-slots-server"},
+           "keeper": {"command": "moxi-slots-keeper"}}
+'''
+
+
+def by_id() -> dict[str, dict]:
+    return {r["id"]: r for r in read("/api/rows")["rows"]}
+
+
+def clock(site) -> None:
+    site.module("clock", CLOCK)
+    site.write("moxi_clock/settings.toml", CLOCK_SETTINGS)
+
+
+def test_timing_is_a_written_or_module_timers_schedule_as_declared(site, fake):
+    from fake_units import Unit
+
+    clock(site)
+    a_daemon()
+    a_timer("hourly")
+    out = acts.add_written("weekly", [PY], is_timer=True, at=["09:00"], days=["mon"])
+    assert out.ok, out
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
+    assert acts.add_adopted("backup", "backup.timer", enable=True, is_timer=True).ok
+    rows_now = by_id()
+    assert rows_now["services/hourly"]["timing"] == {"every": "1h", "at": None, "days": None}
+    assert rows_now["services/weekly"]["timing"] == {"every": None, "at": ["09:00"],
+                                                     "days": ["mon"]}
+    assert rows_now["clock/chime"]["timing"] == {"every": None, "at": ["09:00", "17:30"],
+                                                 "days": ["mon", "fri"]}
+    assert rows_now["clock/nudge"]["timing"] == {"every": "15m", "at": None, "days": None}
+    # An adopted timer's schedule is the supervisor's, which is not read; a daemon has none.
+    assert rows_now["services/backup"]["timing"] is None
+    assert rows_now["services/web"]["timing"] is None
+    assert rows_now["clock/tick"]["timing"] is None
+
+
+def test_ends_slots_is_true_on_slots_server_only(site):
+    site.module("slots", SLOTS)
+    clock(site)
+    a_daemon("server")
+    rows_now = by_id()
+    assert {i for i, r in rows_now.items() if r["ends_slots"]} == {"slots/server"}
+    assert read("/api/row", "id=slots/server")["row"]["ends_slots"] is True
+
+
+def test_wrapped_is_true_for_an_adopted_linux_timer_only(site):
+    from services_kit import add, adopted
+
+    clock(site)
+    a_daemon()
+    a_timer("hourly")
+    add(**adopted("backup", platform="linux"))
+    add(**adopted("nightly", unit="nightly.timer", platform="win32"))
+    add(**adopted("mac", unit="mac.timer", platform="darwin"))
+    add(**adopted("served", kind="daemon", unit="served.service", platform="linux"))
+    rows_now = by_id()
+    assert {i for i, r in rows_now.items() if r["wrapped"]} == {"services/backup"}
+    assert read("/api/row", "id=backup")["row"]["wrapped"] is True
+    assert read("/api/row", "id=nightly")["row"]["wrapped"] is False
+
+
+def test_has_settings_is_true_for_a_module_row_whose_module_has_settings(site):
+    clock(site)
+    site.module("slots", SLOTS)
+    a_daemon()
+    rows_now = by_id()
+    assert {i for i, r in rows_now.items() if r["has_settings"]} == {
+        "clock/tick", "clock/chime", "clock/nudge"}
+    assert read("/api/row", "id=clock/tick")["row"]["has_settings"] is True
+    assert read("/api/row", "id=slots/keeper")["row"]["has_settings"] is False
+
+
+def test_a_settings_schema_that_cannot_be_read_gives_no_settings(site):
+    site.module("clock", CLOCK)
+    assert not any(r["has_settings"] for r in by_id().values())
+
+
+def test_last_run_carries_the_gate_lines_exit_code(fake):
+    a_timer()
+    fake.written["nightly"].runs = [
+        {"at": "2026-11-18T10:00:00Z", "result": "ran", "exit": 0, "seconds": 1.0},
+        {"at": "2026-11-18T11:00:00Z", "result": "ran", "exit": 3, "seconds": 2.5}]
+    last = by_id()["services/nightly"]["last_run"]
+    assert last == {"failed": True, "text": "exit 3", "at": "2026-11-18T11:00:00Z",
+                    "exit": 3}
+    found = read("/api/row", "id=nightly")
+    assert [r["exit"] for r in found["runs"]] == [0, 3]
+
+
+def test_since_and_pid_are_read_only_while_a_daemon_is_active(fake):
+    a_daemon(enable=True)
+    unit = fake.written["web"]
+    unit.pid, unit.since = 4242, 1_763_460_000.0
+    web = by_id()["services/web"]
+    assert (web["state"], web["pid"], web["since"]) == ("active", 4242,
+                                                       "2025-11-18T10:00:00Z")
+    unit.active, unit.failed = False, True
+    web = by_id()["services/web"]
+    assert (web["state"], web["pid"], web["since"]) == ("failed", None, None)
+    assert (web["verdict"]["state"], web["verdict"]["cause"]) == ("fail", "not-running")
 
 
 def test_a_store_that_cannot_be_read_is_state_error_with_the_reason(too_new):
     listed = read("/api/rows")
-    assert listed["state"] == "error" and listed["rows"] == []
+    assert listed["state"] == "error" and listed["rows"] == [] and listed["at"] is None
     assert "newer than" in listed["detail"]
     assert listed["detail"].endswith("fix: upgrade it with `moxi install services`")
 
@@ -195,8 +369,9 @@ def test_no_refusal_the_gateway_can_reach_names_the_store_or_the_home(store_path
         if 400 <= status < 500:
             text = json.dumps(body)
             assert not any(s in text for s in hidden), (path, text)
-    row_routes = [r.path for r in reached if r.path == "/api/row" or r.confirmed]
-    assert len(row_routes) == 7, row_routes
+    row_routes = [r.path for r in reached
+                  if r.path in ("/api/row", "/api/ends") or r.confirmed]
+    assert len(row_routes) == 8, row_routes
     for path in row_routes:
         assert answers[path] == (422, {"refused": says}), (path, answers[path])
     if spoil is not None:
@@ -258,11 +433,11 @@ def test_a_status_for_a_job_this_server_holds_no_record_of_is_unknown():
                                "code": None, "lines": [pagehandlers.UNKNOWN], "fix": None}
 
 
-def test_a_status_after_a_restart_is_unknown(monkeypatch):
+def test_a_status_after_a_restart_is_unknown(restart):
     a_daemon(enable=True)
     job = accepted(post("/api/stop", {"id": "web"}, key=KEY))
     assert ended(job)["state"] == "done"
-    monkeypatch.setattr(pagehandlers, "JOBS", jobs.Jobs(LB.busy))
+    restart()
     assert job_status(job)["state"] == "unknown"
 
 
@@ -297,13 +472,6 @@ def test_enable_and_disable_set_the_flag_and_its_unit(fake, path, act, on):
     found = ended(accepted(post(path, {"id": "web"}, key=KEY)))
     assert (found["act"], found["state"]) == (act, "done"), found
     assert store.get("web").enabled is on and fake.written["web"].enabled is on
-
-
-def test_remove_of_a_user_row_removes_it():
-    a_daemon()
-    found = ended(accepted(post("/api/remove", {"id": "web"}, key=KEY)))
-    assert (found["act"], found["state"]) == ("remove", "done"), found
-    assert store.get("web") is None
 
 
 def test_an_act_on_an_id_that_names_no_row_is_refused_before_any_job():
@@ -458,22 +626,22 @@ def test_a_held_key_for_another_act_or_row_is_refused():
     assert refused(post("/api/stop", {"id": "api"}, key=KEY)) == pagehandlers.KEY_REUSED
 
 
-def test_a_key_after_a_restart_is_acted_on_anew(fake, monkeypatch):
+def test_a_key_after_a_restart_is_acted_on_anew(fake, restart):
     a_daemon(enable=True)
     ended(accepted(post("/api/stop", {"id": "web"}, key=KEY)))
-    monkeypatch.setattr(pagehandlers, "JOBS", jobs.Jobs(LB.busy))
+    restart()
     found = ended(accepted(post("/api/stop", {"id": "web"}, key=KEY)))
     # A stop again ends where the first did.
     assert found["state"] == "done" and not fake.written["web"].active
     assert len([c for c in fake.calls if c[0] == "stop"]) == 2
 
 
-def test_a_remove_key_after_a_restart_is_refused_for_the_removed_row(monkeypatch):
+def test_a_remove_job_after_a_restart_is_refused_for_the_removed_row(restart):
     a_daemon()
-    ended(accepted(post("/api/remove", {"id": "web"}, key=KEY)))
-    monkeypatch.setattr(pagehandlers, "JOBS", jobs.Jobs(LB.busy))
-    assert "no service is named web" in refused(post("/api/remove", {"id": "web"},
-                                                     key=KEY))
+    remove = {"act": "remove", "id": "web", "job": "0" * 32}
+    ended(accepted(post("/api/act", remove)))
+    restart()
+    assert "no service is named web" in refused(post("/api/act", remove))
 
 
 # -- timers -----------------------------------------------------------------------------------
@@ -586,3 +754,239 @@ def test_an_adoption_without_its_on_or_off_ends_refused_saying_what_is_read_now(
                                              "unit": "backup.service"})))
     assert (found["state"], found["code"]) == ("refused", 2)
     assert store.get("backup") is None
+
+
+# --- a failing timer's streak ------------------------------------------------------------
+
+def run_line(hour: int, code: int = 1, result: str = "ran") -> dict:
+    return {"at": f"2026-11-18T{hour:02d}:00:00Z", "result": result, "exit": code,
+            "seconds": 1.0}
+
+
+def last_runs_calls(fake) -> list:
+    return [c for c in fake.calls if c[0] == "last_runs"]
+
+
+def failing_timer(fake, lines: list[dict]) -> None:
+    a_timer(enable=True)
+    fake.written["nightly"].runs = lines
+
+
+def test_a_streak_counts_the_newest_failed_runs_and_when_the_first_of_them_ran(fake):
+    failing_timer(fake, [run_line(9, 0), run_line(10, 1), run_line(11, 2),
+                         run_line(12, 1)])
+    nightly = by_id()["services/nightly"]
+    assert nightly["verdict"]["cause"] == "last-run"
+    assert nightly["streak"] == {"count": 3, "since": "2026-11-18T10:00:00Z",
+                                 "same_exit": False}
+
+
+def test_a_streak_of_one_exit_code_says_so(fake):
+    failing_timer(fake, [run_line(10, 1), run_line(11, 1)])
+    assert by_id()["services/nightly"]["streak"] == {
+        "count": 2, "since": "2026-11-18T10:00:00Z", "same_exit": True}
+
+
+def test_a_run_held_off_by_its_switch_ends_a_streak():
+    lines = [run_line(10, 1), run_line(11, 0, "off"), run_line(12, 1)]
+    assert pagehandlers.count_streak(lines) == {
+        "count": 1, "since": "2026-11-18T12:00:00Z", "same_exit": True}
+
+
+def test_a_timer_whose_last_run_passed_has_no_streak_and_reads_no_runs(fake):
+    failing_timer(fake, [run_line(10, 1), run_line(11, 0)])
+    assert by_id()["services/nightly"]["streak"] is None
+    assert last_runs_calls(fake) == []
+    assert pagehandlers.count_streak([run_line(10, 1), run_line(11, 0)]) is None
+    assert pagehandlers.count_streak([]) is None
+
+
+def test_a_streak_counts_back_through_at_most_fifty_run_lines(fake):
+    failing_timer(fake, [run_line(h % 24, 1) for h in range(80)])
+    nightly = by_id()["services/nightly"]
+    assert nightly["streak"]["count"] == pagehandlers.STREAK_LINES == 50
+    assert last_runs_calls(fake) == [("last_runs", "services", "nightly", 50)]
+
+
+def test_a_streak_is_read_once_per_newest_run_line(fake):
+    failing_timer(fake, [run_line(10, 1), run_line(11, 1)])
+    by_id()
+    by_id()
+    assert read("/api/row", "id=nightly")["row"]["streak"]["count"] == 2
+    assert len([c for c in last_runs_calls(fake) if c[3] == 50]) == 1
+    fake.written["nightly"].runs.append(run_line(12, 1))
+    assert by_id()["services/nightly"]["streak"]["count"] == 3
+    assert len([c for c in last_runs_calls(fake) if c[3] == 50]) == 2
+
+
+def test_a_daemon_has_no_streak(fake):
+    a_daemon(enable=True)
+    assert by_id()["services/web"]["streak"] is None
+
+
+def test_rows_carry_when_the_supervisor_was_read():
+    a_daemon()
+    before = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    at = read("/api/rows")["at"]
+    assert before <= at <= time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# --- one row's units and today's runs ----------------------------------------------------
+
+def test_a_socketless_systemd_daemons_unit_is_its_service():
+    a_daemon()
+    found = read("/api/row", "id=web")
+    assert found["unit"] == "moxi-services-web.service"
+    assert found["units"] == ["moxi-services-web.socket", "moxi-services-web.service"]
+    assert found["today"] is None
+
+
+def test_a_socket_daemons_unit_is_its_service_and_every_socket_is_listed(site, fake):
+    site.module("slots", SLOTS)
+    fake.sockets[("slots", "server")] = 1
+    found = read("/api/row", "id=slots/server")
+    assert found["unit"] == "moxi-slots-server.service"
+    assert found["units"] == ["moxi-slots-server.socket", "moxi-slots-server-1.socket",
+                              "moxi-slots-server.service"]
+
+
+def test_a_timers_unit_is_its_timer():
+    a_timer()
+    found = read("/api/row", "id=nightly")
+    assert found["unit"] == "moxi-services-nightly.timer"
+    assert found["units"] == ["moxi-services-nightly.timer", "moxi-services-nightly.service"]
+
+
+def test_an_adopted_rows_unit_is_its_own(fake):
+    from fake_units import Unit
+
+    fake.foreign["backup.service"] = Unit("daemon", enabled=True, active=True)
+    assert acts.add_adopted("backup", "backup.service", enable=True).ok
+    found = read("/api/row", "id=backup")
+    assert (found["unit"], found["units"]) == ("backup.service", ["backup.service"])
+
+
+@pytest.mark.parametrize(("supervisor", "unit"), [
+    ("launchd", "moxi.services.web"), ("schtasks", "\\Moxi\\services\\web"),
+    (None, None)])
+def test_a_rows_unit_elsewhere_is_its_one_id(fake, supervisor, unit):
+    a_daemon()
+    fake.supervisor = supervisor
+    found = read("/api/row", "id=web")
+    assert found["unit"] == unit and found["units"] == ([unit] if unit else [])
+
+
+def now_line(code: int = 0) -> dict:
+    return {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "result": "ran",
+            "exit": code, "seconds": 1.0}
+
+
+OLD_LINE = {"at": "2020-01-01T12:00:00Z", "result": "ran", "exit": 0, "seconds": 1.0}
+
+
+def test_today_counts_a_timers_runs_on_this_machines_day_from_one_read(fake):
+    a_timer()
+    fake.written["nightly"].runs = [OLD_LINE, now_line(0), now_line(1), now_line(0)]
+    found = read("/api/row", "id=nightly")
+    assert found["today"] == {"runs": 3, "failed": 1, "more": False}
+    assert len(found["runs"]) == 4
+    reads = [c for c in fake.calls if c[0] == "last_runs"]
+    assert reads == [("last_runs", "services", "nightly", pagehandlers.TODAY_LINES)]
+
+
+def test_today_with_every_line_read_today_says_there_may_be_more(fake):
+    a_timer()
+    fake.written["nightly"].runs = [OLD_LINE] + [now_line()] * 600
+    found = read("/api/row", "id=nightly")
+    assert found["today"] == {"runs": 500, "failed": 0, "more": True}
+    assert len(found["runs"]) == pagehandlers.RUNS_SHOWN == 5
+
+
+def test_today_is_null_for_a_timer_whose_runs_no_run_line_records():
+    from services_kit import add, adopted
+
+    # An adopted timer off Linux: its runs are the supervisor's, recorded in no run line.
+    add(**adopted("backup", platform="darwin" if sys.platform != "darwin" else "win32"))
+    assert read("/api/row", "id=backup")["today"] is None
+
+
+# --- a unit not yet adopted --------------------------------------------------------------
+
+def unit_read(query: str) -> dict:
+    return read("/api/unit", query)
+
+
+def test_unit_reads_a_found_timer_which_adopting_wraps(fake):
+    from fake_units import Unit
+
+    fake.foreign["backup.timer"] = Unit("timer", enabled=True)
+    assert unit_read("ref=backup.timer") == {
+        "found": True, "kind": "timer", "asks_kind": False, "enabled": True,
+        "active": True, "wraps": True, "refused": None}
+
+
+def test_unit_reads_a_found_service(fake):
+    from fake_units import Unit
+
+    fake.foreign["web.service"] = Unit("daemon", enabled=False, active=False)
+    assert unit_read("ref=web.service") == {
+        "found": True, "kind": "daemon", "asks_kind": False, "enabled": False,
+        "active": False, "wraps": False, "refused": None}
+
+
+def test_unit_says_a_missing_unit_is_not_found():
+    found = unit_read("ref=gone.service")
+    assert (found["found"], found["enabled"], found["active"], found["refused"]) == (
+        False, None, None, None)
+
+
+@pytest.mark.parametrize(("query", "says"), [
+    ("ref=moxi-notes-sync.service", "moxi's own unit namespace"),
+    ("ref=backup.socket", "is not a .service or a .timer"),
+    ("ref=backup.timer&kind=daemon", "backup.timer is a timer, not a service"),
+    ("ref=web.service&kind=timer", "web.service is a service, not a timer"),
+])
+def test_unit_refuses_what_adopting_refuses(fake, query, says):
+    found = unit_read(query)
+    assert says in found["refused"] and found["found"] is None
+    assert [c for c in fake.calls if c[0] == "status"] == []
+
+
+@pytest.mark.parametrize(("query", "says"), [
+    ("ref=backup.timer&kind=daemon", "backup.timer is a timer, not a service"),
+    ("ref=web.service&kind=timer", "web.service is a service, not a timer"),
+])
+def test_unit_answers_a_kind_that_disagrees_with_the_suffix_in_the_pages_words(fake, query, says):
+    assert unit_read(query)["refused"] == says
+
+
+@pytest.mark.parametrize("supervisor", ["launchd", "schtasks"])
+def test_unit_asks_the_kind_where_the_supervisor_cannot_tell(fake, supervisor):
+    from fake_units import Unit
+
+    fake.supervisor = supervisor
+    fake.foreign["backup"] = Unit("timer", enabled=True)
+    found = unit_read("ref=backup")
+    assert (found["kind"], found["asks_kind"], found["wraps"]) == ("daemon", True, False)
+    found = unit_read("ref=backup&kind=timer")
+    assert (found["found"], found["kind"], found["asks_kind"]) == (True, "timer", True)
+    assert ("status", ("timer",)) not in fake.kinds
+    assert ("status", {"backup": "timer"}) in fake.kinds
+
+
+def test_unit_with_no_supervisor_is_refused(fake):
+    fake.supervisor = None
+    assert "no supervisor here" in unit_read("ref=backup.timer")["refused"]
+
+
+def test_unit_that_the_supervisor_does_not_answer_is_not_said_found(monkeypatch):
+    monkeypatch.setattr(pagehandlers, "STATUS_SECONDS", 0.05)
+    monkeypatch.setattr(pagehandlers.state, "read_foreign",
+                        lambda ref, kind: time.sleep(1))
+    found = unit_read("ref=backup.timer")
+    assert (found["found"], found["enabled"], found["refused"]) == (None, None, None)
+
+
+def test_unit_is_the_desks_alone():
+    route = next(r for r in page.PAGE.routes if r.path == "/api/unit")
+    assert route.gateway is False and route.kind == "read"

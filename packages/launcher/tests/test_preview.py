@@ -116,6 +116,14 @@ def test_a_file_the_launch_names_that_cant_be_read_is_refused(tmp_path):
                         request_id="r1", modules=frozenset())
 
 
+@pytest.fixture(autouse=True)
+def no_notes(monkeypatch):
+    """notes not installed, whatever this environment holds, so a seat's handoff folder is
+    the launcher's own; the test that means notes installed says so itself."""
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
 def test_the_context_names_the_handoff_dir_only_with_a_key(tmp_path):
     values = {"harness": "claude", "cwd": str(tmp_path)}
     none = compose.context(values, request_id="r1", modules=frozenset())
@@ -127,6 +135,19 @@ def test_the_context_names_the_handoff_dir_only_with_a_key(tmp_path):
     ignored = compose.context({**values, "identity": "planner"}, request_id="r1",
                               modules=frozenset())
     assert ignored.handoff_dir is None
+
+
+def test_with_notes_and_no_notes_dir_the_context_names_no_handoff_dir(tmp_path, monkeypatch):
+    homeless = SimpleNamespace(state=modules.PRESENT, ok=True, reason="", api=SimpleNamespace(
+        handoffs_dir=lambda path, *, create=False, override=None: None))
+    real, real_load = modules.available, modules.load
+    monkeypatch.setattr(modules, "available", lambda name: name == "notes" or real(name))
+    monkeypatch.setattr(modules, "load", lambda name, interface=None:
+                        homeless if name == "notes" else real_load(name, interface=interface))
+    seat = compose.context({"harness": "claude", "cwd": str(tmp_path)}, request_id="r1",
+                           modules=frozenset(), preset_kind="seat", preset_name="lead")
+    assert seat.handoff_dir is None
+    assert not handoffs.own_handoffs_dir(create=False).exists()
 
 
 def test_the_context_never_makes_the_launchers_own_handoff_dir(tmp_path):
@@ -299,7 +320,7 @@ def test_preview_composes_what_resolve_returns(monkeypatch):
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file",
         str(Layout("launcher").state_dir() / "runs" / "r1.prompt.md"),
-        "--model", "opus", "-n", "work-opus-Nov-08 12:45", "--permission-mode", "default"]
+        "--model", "opus", "-n", "20261108-1245-work", "--permission-mode", "default"]
     assert got.target == "terminal" and got.mode == "interactive"
     # It starts nothing and writes nothing of the launcher's.
     assert not (Layout("launcher").state_dir() / "runs").exists()
@@ -383,21 +404,15 @@ def test_preview_argv_is_the_argv_launch_hands_the_target(tmp_path, monkeypatch,
         wait_for(lambda: log.exists() and log.read_text().strip(), timeout=60)
 
 
-def test_a_scratch_launch_works_in_a_dir_named_by_its_request_id(tmp_path):
-    import tempfile
-
-    # One parent per user, so no other user owns it.
-    assert common.scratch_dir("r1") == (
-        Path(tempfile.gettempdir()) / f"moxi-scratch-{os.getuid()}" / "r1"
-        if hasattr(os, "getuid") else common.scratch_root() / "r1")
+def test_a_scratch_launch_works_in_a_dir_named_by_its_session_name(tmp_path):
     resolved = Resolved({"harness": "codex", "cwd": "", "scratch": True,
-                         "target": "headless", "brief": "b"})
+                         "target": "headless", "brief": "b", "name": "planner-1"})
     got = compose.build(Request(), resolved, modules=frozenset())
-    where = str(common.scratch_dir("r1"))
+    where = str(common.scratch_root() / "planner-1")
     assert list(got.argv[3:7]) == ["-c", "check_for_update_on_startup=false", "-C", where]
     assert "--skip-git-repo-check" in got.argv and got.values["cwd"] == where
     # Only the path: the launch makes the folder.
-    assert not common.scratch_dir("r1").exists()
+    assert not common.scratch_dir("planner-1").exists()
 
 
 def test_build_takes_the_resolvers_mode(monkeypatch):
@@ -438,7 +453,7 @@ add_dir = ["{tmp_path}"]
     assert list(got.argv) == [
         "claude", "--session-id", SID, "--append-system-prompt-file", prompt_file,
         "--model", "opus", "--effort", "high", "--add-dir", str(tmp_path),
-        "-n", f"{tmp_path.name}-opus-Nov-08 12:45", "--permission-mode", "acceptEdits"]
+        "-n", f"20261108-1245-{tmp_path.name}-lead", "--permission-mode", "acceptEdits"]
     assert "handoff dir:" in got.prompt_file.text      # the seat's name is its key
     assert got.values["mode"] == "interactive" and got.values["off_posture"] is False
     resolved = presets.resolve(request)
@@ -451,8 +466,9 @@ def test_preview_of_a_scratch_codex_launch_names_the_scratch_dir():
         typed={"harness": "codex", "scratch": True, "target": "headless", "brief": "b"})),
         request_id="r9", session_id=None, actor="ann")
     got = api.preview(request)
-    assert str(common.scratch_dir("r9")) in got.argv
-    assert not common.scratch_dir("r9").exists()
+    assert got.values["name"] == "20261108-1245"
+    assert str(common.scratch_root() / "20261108-1245") in got.argv
+    assert not common.scratch_dir("20261108-1245").exists()
 
 
 def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypatch,
@@ -474,3 +490,51 @@ def test_preview_gives_the_resolvers_warnings_as_launch_does(tmp_path, monkeypat
     launched = api.launch(req)
     assert shown.warnings == launched.warnings
     assert rig.runs() == []
+
+
+def test_a_preview_shows_the_limit_mark_it_stamps(tmp_path, monkeypatch):
+    Harness.on_path(tmp_path, monkeypatch)
+    monkeypatch.setattr("moxi_launcher.slots.links", lambda module: True)
+    monkeypatch.setattr("moxi_launcher.catalog.slots_here", lambda: True)
+    work = tmp_path / "work"
+    work.mkdir()
+    req = api.LaunchRequest(typed={"recycle_at_limit": "relaunch", "warn_at": "1.5x",
+                                   "target": "slot"},
+                            cwd=str(work), request_id="r1", session_id=SID, actor="ann")
+    got = api.preview(req)
+    assert got.env["MOXI_USAGE_CROSSING_AT"] == "1.5x"
+    assert "limit_at" not in got.values
+
+
+def test_a_preview_refuses_a_scratch_launch_set_to_recycle_itself(tmp_path, monkeypatch):
+    Harness.on_path(tmp_path, monkeypatch)
+    req = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "relaunch"},
+                            request_id="r1", session_id=SID, actor="ann")
+    with pytest.raises(api.ScratchRecycle) as caught:
+        api.preview(req)
+    assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
+    assert caught.value.problem == "a scratch launch can't recycle itself"
+    off = api.LaunchRequest(typed={"scratch": True, "recycle_at_limit": "off"},
+                            request_id="r2", session_id=SID, actor="ann")
+    assert api.preview(off).values["recycle_at_limit"] == "off"
+
+
+def test_a_preview_of_a_scratch_holds_a_defaults_relaunch_off(tmp_path, monkeypatch):
+    Harness.on_path(tmp_path, monkeypatch)
+    write_presets('[defaults]\nrecycle_at_limit = "relaunch"\n'
+                  '[seat.s]\nscratch = true\n[seat.r]\nscratch = true\n'
+                  'recycle_at_limit = "relaunch"\n')
+    typed = api.LaunchRequest(typed={"scratch": True}, request_id="r1", session_id=SID,
+                              actor="ann")
+    seat = api.LaunchRequest(seat="s", request_id="r2", session_id=SID, actor="ann")
+    for req in (typed, seat):
+        got = api.preview(req)
+        assert got.values["recycle_at_limit"] == "off"
+        assert presets.SCRATCH_RECYCLE_OFF in got.warnings
+    with pytest.raises(api.ScratchRecycle):
+        api.preview(api.LaunchRequest(seat="r", request_id="r3", session_id=SID,
+                                      actor="ann"))
+    with pytest.raises(api.ScratchRecycle):
+        api.preview(api.LaunchRequest(typed={"scratch": True,
+                                             "recycle_at_limit": "relaunch"},
+                                      request_id="r4", session_id=SID, actor="ann"))

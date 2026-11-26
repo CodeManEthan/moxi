@@ -383,14 +383,21 @@ class Books:
         freed, or a `reserved` binding interval that began at or after the row was
         queued (open or closed: a name reserved and freed since still drops it). Mail to
         a reserved name is refused while it is reserved, so only a row queued before a
-        reservation matches. A conflict row isn't reserved, and keeps its mail.
+        reservation matches. A conflict row isn't reserved, and keeps its mail. A row
+        counts too when its name has the form of a word declared for scoped senders at
+        or after the row was queued (`scoped.py`) and nothing holds the name: no session
+        binds it again, so its mail would wait for nobody.
         `name` limits it to one name's rows. Nothing is written when nothing matches.
         Returns (name, id) pairs."""
         sql = ("SELECT q.name, q.message_id FROM queue q WHERE q.state = 'waiting' AND ("
                "EXISTS (SELECT 1 FROM reserved r WHERE r.name = q.name AND "
                "r.state = 'unowned' AND r.freed_at IS NULL) OR "
                "EXISTS (SELECT 1 FROM bindings b WHERE b.qualified = q.name AND "
-               "b.kind = 'reserved' AND b.bound_at >= q.queued_at))")
+               "b.kind = 'reserved' AND b.bound_at >= q.queued_at) OR "
+               "(EXISTS (SELECT 1 FROM scoped s WHERE s.freed_at IS NULL AND "
+               "s.declared_at >= q.queued_at AND (q.name GLOB '?*-' || s.word OR "
+               "q.name GLOB '?*-' || s.word || '@*')) AND NOT EXISTS (SELECT 1 FROM "
+               "bindings h WHERE h.qualified = q.name AND h.released_at IS NULL)))")
         args: tuple = ()
         if name is not None:
             sql += " AND q.name = ?"
@@ -443,6 +450,14 @@ class Books:
                          delivered=delivered,
                          expired=sorted(n for n, why in before.items() if why == EXPIRED),
                          written=True)
+
+    def archive_skipped(self) -> tuple[int, int] | None:
+        """The message ids comms.db's counter skipped for an older comms' record
+        (`archive.skipped`), or None."""
+        from .. import archive
+
+        with self._lock:
+            return archive.skipped(self._conn)
 
     def dropped_reason(self, name: str, message_id) -> str | None:
         """Why `message_id` left `name`'s queue undelivered, or None."""
@@ -662,6 +677,23 @@ def read_dropped(name: str, message_id, *, path=None, env=None) -> str | None:
     finally:
         conn.close()
     return None if row is None else row[0]
+
+
+def read_archive_skipped(*, path=None, env=None) -> tuple[int, int] | None:
+    """`Books.archive_skipped` from a read-only open, for a process that isn't the
+    daemon; None when the store isn't there."""
+    from .. import archive
+
+    try:
+        conn = open_read(Path(path) if path else None, env=env)
+    except sqlite3.Error:
+        return None
+    try:
+        return archive.skipped(conn)
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
 
 
 def dropped_by_message(conn, ids) -> dict[str, dict[str, str]]:

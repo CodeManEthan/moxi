@@ -103,6 +103,7 @@ updated: 2026-01-02
 a placeholder round
 
 - status: open
+- lead: none
 
 ## Flow
 
@@ -178,6 +179,7 @@ updated: 2026-01-02
 a placeholder round
 
 - status: open
+- lead: none
 
 ## Flow
 
@@ -855,7 +857,7 @@ def test_a_dropped_round_s_numbers_are_written_from_its_drop(rounds):
         f"- ended: dropped by operator at {LATER}, record comms:30; questions: Q1 to P1"
         "\n\n## Numbers\n\n")
     # Opened at T1 and dropped at LATER, all of it at the step that declares a stage.
-    assert "\n- time in steps: commission 769h 1m 5s\n" in text
+    assert "\n- time in steps, overlapping (steps due side by side each count the same time): commission 769h 1m 5s\n" in text
     assert "\n- questions by origin: comms 1\n" in text
     assert not retro(rounds, "b-round").exists()
 
@@ -879,3 +881,48 @@ def test_an_ending_that_holds_no_numbers_writes_no_numbers_file(rounds):
     assert note(rounds).exists() and not retro(rounds).exists()
     assert rendering.retro("proj-a", "a-round",
                            log.read(log.round_log(rounds / "a-round"))) is None
+
+
+# -- the lead ----------------------------------------------------------------------------
+
+def lead_line(rounds, slug="a-round"):
+    text = note(rounds, slug).read_text(encoding="utf-8")
+    return next(line for line in text.splitlines() if line.startswith("- lead:"))
+
+
+def test_a_note_names_the_rounds_own_lead_under_its_status(rounds):
+    from moxi_rounds import leads
+
+    leads.mark(A, "atlas-lead", by="planner")
+
+    text = note(rounds).read_text(encoding="utf-8")
+    assert "- status: open\n- lead: atlas-lead\n" in text
+
+
+def test_a_note_names_the_projects_lead_as_the_projects(rounds):
+    from moxi import cli
+
+    from moxi_rounds import leads
+
+    assert cli.main(["projects", "set", "proj-a", "--lead", "kestrel"]) == 0
+    # A note is written again by the next write to its round.
+    leads.mark(B, "builder-1", by="planner")
+    rule(text="Usage is shown in the status line.", at=T2)
+
+    assert lead_line(rounds) == "- lead: kestrel (the project's)"
+    assert lead_line(rounds, "b-round") == "- lead: builder-1"
+
+
+def test_a_note_says_the_lead_is_not_known_when_the_projects_list_cant_say(
+        rounds, monkeypatch):
+    from moxi_rounds import folders
+    from moxi_rounds.errors import RoundsError
+
+    def unread(project):
+        raise RoundsError("the projects list can't be read: it is locked")
+
+    monkeypatch.setattr(folders, "lead", unread)
+    rule(text="Usage is shown in the status line.", at=T2)
+
+    assert lead_line(rounds) == ("- lead: not known (the projects list can't be read: "
+                                 "it is locked)")

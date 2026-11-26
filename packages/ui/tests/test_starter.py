@@ -8,6 +8,7 @@ before it returns.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import socket
@@ -17,12 +18,16 @@ import textwrap
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from moxi import files, proc
 from moxi.paths import Layout, python
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui.loopback.api import RuntimeInfo, read_runtime, write_runtime
+from moxi_ui.loopback.routes import project
 
+from moxi_ui import page as page_mod
 from moxi_ui import starter as starter_mod
 from moxi_ui.router import shell_table
 from moxi_ui.starter import (
@@ -151,7 +156,7 @@ def drive(starters: Starters, body) -> None:
     asyncio.run(asyncio.wait_for(main(), 40))
 
 
-async def until(predicate, timeout: float = 5.0, what: str = "the condition"):
+async def until(predicate, timeout: float = PROC_WAIT_S, what: str = "the condition"):
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while not predicate():
@@ -505,11 +510,47 @@ def test_the_servers_data_samples_each_running_server(shell_dirs):
         # The row and its sample name the server's own pid, from its runtime file.
         assert row["pid"] == server.info.pid == row["sample"]["pid"]
         assert row["pid"] == _server_pid(server.child.popen)
-        assert row["sample"]["rss"] > 0 and row["sample"]["fds"] > 0
+        opened = "handles" if sys.platform == "win32" else "fds"
+        assert row["sample"]["rss"] > 0 and row["sample"][opened] > 0
         assert row["open"] == {"requests": 0, "streams": 0}
         assert row["starts"] == 1 and row["log"] == starters.log
 
     drive(starters, body)
+
+
+class _Process:
+    """psutil's `Process` for the sample: 4 open fds, or 232 open handles."""
+
+    def __init__(self, pid):
+        self.pid = pid
+
+    def oneshot(self):
+        return contextlib.nullcontext()
+
+    def cpu_times(self):
+        return SimpleNamespace(user=1.25, system=0.5)
+
+    def memory_info(self):
+        return SimpleNamespace(rss=30 * 1024**2)
+
+    def num_fds(self):
+        return 4
+
+    def num_handles(self):
+        return 232
+
+
+@pytest.mark.parametrize("platform, opened", [("win32", {"handles": 232}),
+                                              ("linux", {"fds": 4}), ("darwin", {"fds": 4})])
+def test_a_sample_counts_handles_on_windows_and_fds_elsewhere(monkeypatch, platform, opened):
+    psutil = pytest.importorskip("psutil")
+    monkeypatch.setattr(psutil, "Process", _Process)
+    monkeypatch.setattr(sys, "platform", platform)
+    taken = starter_mod.sample(7)
+    monkeypatch.undo()
+    assert taken == {"pid": 7, "rss": 30 * 1024**2, "cpu_s": 1.75, **opened}
+    # `/servers` sends either form as it is: no key renamed, none added.
+    assert project(taken, page_mod._SAMPLE, strict=True) == taken
 
 
 # --- exit 75: another server holds the lock ---------------------------------------------
@@ -752,7 +793,7 @@ def test_a_kill_ends_the_child_and_what_it_started_and_never_signals_the_group(
         await until(lambda: (tmp_path / "below").exists(), what="the grandchild")
         below = int((tmp_path / "below").read_text())
         child.kill()
-        assert await asyncio.wait_for(child.exited, 5) == -9
+        assert await asyncio.wait_for(child.exited, PROC_WAIT_S) == -9
         await until(lambda: _gone(below), what="the grandchild's end")
 
     asyncio.run(asyncio.wait_for(body(), 20))

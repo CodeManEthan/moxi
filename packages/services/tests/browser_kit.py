@@ -13,6 +13,11 @@ server's memory, so a new server (after an idle exit) starts from the file again
 Rows go into services' store with the shell's environment, so the store is the one the
 page server reads, under the shell's home. A `moxi` command run here sees no supervisor,
 so tests read what the page shows back from the page server (`get`), or from the store.
+
+The same `sitecustomize` can give that server a fake slots API and fixed health checks,
+so no test reaches a tmux server or a shell's port: with `slots`, each read of slots'
+API answers from a JSON file (`slots_said`), and `health` gives a module daemon's check
+by its id.
 """
 
 from __future__ import annotations
@@ -21,8 +26,21 @@ import json
 import subprocess
 import sys
 import textwrap
+import weakref
 from pathlib import Path
 from typing import Any
+
+import pytest
+
+#: Every browser test module's marks. The bound is kept by a thread that, past it, prints
+#: every thread's stack and ends the test's process: under xdist the run reports the worker
+#: crashed while running that test, and goes on in a new worker. A signal raises once
+#: inside the test, and a teardown that then waits on a browser that stopped answering
+#: would hold the worker with no end.
+MARKS = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
+         pytest.mark.skipif(not sys.platform.startswith("linux"),
+                            reason="services' page is checked in a browser on Linux; the "
+                                   "Windows and macOS runs are owed")]
 
 TESTS = Path(__file__).resolve().parent
 
@@ -46,22 +64,81 @@ SITECUSTOMIZE = textwrap.dedent('''\
             _fake.written[_name] = Unit(**_unit)
         for _key, _unit in _spec.get("modules", {{}}).items():
             _fake.modules[tuple(_key.split("/", 1))] = Unit(**_unit)
+        for _ref, _unit in _spec.get("foreign", {{}}).items():
+            _fake.foreign[_ref] = Unit(**_unit)
+        _fake.fail = {{tuple(_pair) for _pair in _spec.get("fail", [])}}
         for _module in (acts, lifecycle, state, verdict):
             _module.units = _fake
+
+        _checks = {{_id: tuple(_said) for _id, _said in _spec.get("health", {{}}).items()}}
+        _health = state.health
+
+        def _checked(row, st):
+            if row.id in _checks and st is not None and st.state == "active":
+                return _checks[row.id]
+            return _health(row, st)
+
+        state.health = _checked
+
+        if _spec.get("installed") is not None:
+            import moxi.modules
+
+            _installed, _kept = moxi.modules.installed, set(_spec["installed"])
+            moxi.modules.installed = lambda: [e for e in _installed() if e.name in _kept]
+
+        if _spec.get("slots"):
+            import types
+
+            import fake_slots
+
+            def _said():
+                with open(_spec["slots"], encoding="utf-8") as _file:
+                    return json.load(_file)
+
+            def _list_slots():
+                said = _said()
+                return fake_slots.Listing(
+                    ok=said.get("ok", True), why=said.get("why", ""),
+                    slots=tuple(fake_slots.Slot(**one) for one in said.get("slots", [])))
+
+            def _jobs():
+                return [fake_slots.Job(**one) for one in _said().get("jobs", [])]
+
+            _api = types.ModuleType("moxi_slots.api")
+            _api.list_slots, _api.jobs = _list_slots, _jobs
+            sys.modules["moxi_slots.api"] = _api
 ''')
 
 
 def fake_site(base: Path, spec: dict[str, Any]) -> Path:
     """A site directory for the shell's `PYTHONPATH` whose `sitecustomize` gives services'
-    page server a fake supervisor holding `spec`'s units: `written` by row name and
-    `modules` by `<module>/<name>`, each a `fake_units.Unit`'s fields."""
+    page server a fake supervisor holding `spec`'s units: `written` by row name,
+    `modules` by `<module>/<name>` and `foreign` (units not yet adopted) by the
+    supervisor's own name, each a `fake_units.Unit`'s fields, and `fail`, the
+    `[act, name]` pairs whose act fails. `health` gives a running module daemon's check
+    by its id, `[verdict, line]`, in place of the module's own. With `slots` true, slots'
+    API answers from `<base>/slots.json`, which `slots_said` writes. `installed`, when
+    given, names the only modules the page server finds installed, as on a small install."""
     site = base / "site"
     site.mkdir(parents=True)
     path = base / "units.json"
+    if spec.get("slots"):
+        spec = {**spec, "slots": str(slots_said(base))}
     path.write_text(json.dumps(spec), encoding="utf-8")
     (site / "sitecustomize.py").write_text(
         SITECUSTOMIZE.format(tests=str(TESTS), spec=str(path)), encoding="utf-8")
     return site
+
+
+def slots_said(base: Path, *, ok: bool = True, why: str = "", slots: tuple = (),
+               jobs: tuple = ()) -> Path:
+    """What the fake slots API answers from now on, for the site `fake_site` made under
+    `base`: a listing (`ok`, `why`, `slots`, each a `fake_slots.Slot`'s fields) and its
+    `jobs` (each a `fake_slots.Job`'s)."""
+    path = base / "slots.json"
+    path.write_text(json.dumps({"ok": ok, "why": why, "slots": list(slots), "jobs": list(jobs)}),
+                    encoding="utf-8")
+    return path
 
 
 _SEED = textwrap.dedent('''\
@@ -119,9 +196,23 @@ def moxi(shell, *args: str) -> subprocess.CompletedProcess:
     return done
 
 
+#: One signed-in session per shell for the reads a test makes without a browser. Each
+#: sign-in is a session, and the shell keeps at most 20, dropping the oldest first: a new
+#: one per read would soon drop the browser's own.
+_SESSIONS: weakref.WeakKeyDictionary[Any, Any] = weakref.WeakKeyDictionary()
+
+
+def session(shell) -> Any:
+    """The shell's one signed-in session for reads without a browser."""
+    found = _SESSIONS.get(shell)
+    if found is None or found.get("/m/ui/api/modules")[0] != 200:
+        found = _SESSIONS[shell] = shell.session()
+    return found
+
+
 def get(shell, path: str) -> Any:
     """GET `path` on services' page, through the shell, signed in with no browser."""
-    status, data = shell.session().request("GET", f"/m/services/{path}")
+    status, data = session(shell).request("GET", f"/m/services/{path}")
     assert status == 200, (path, status, data)
     return data
 

@@ -7,6 +7,12 @@
 // first and the rest behind `More`, under their sub-heads, and its foot. The rows,
 // counts and words come from `settings-model.ts`; the addresses from `find-model.ts`.
 //
+// A table a module keeps in a file of its own (`table_title` on its keys) is drawn after
+// the module's other keys and their `More` line, never behind it: one open block under the
+// table's title and line, its rows under their sub-heads, and the foot names its file. A
+// table whose file can't be read shows its error and fix and no row. When the module's own
+// config file can't be read, the pane says so and the tables' blocks stay editable.
+//
 // ui's pane ends, after its More, with the Phone group while the gateway is installed
 // (`GET /api/gateway/state`, read with ui's section and every 30 s while ui is shown):
 // `Phone access` as a word with where phones reach it, `Phone port`, then the phones
@@ -51,9 +57,9 @@ import {
 } from "./save-model.ts";
 import type { SaveResult } from "./save-model.ts";
 import {
-  blocksOf, CORE, defaultOf, drawnKeys, isPhoneKey, listEntries, LOCKED, moduleOrder, moreWords, NOTHING_HERE, paneKeys,
-  paneState, PATH_HINT, PHONE_MODULE, READING, READING_AFTER_MS, readFailed, rowOf, splitMore, totalChanged,
-  unreadableWords, valueOf,
+  blocksOf, CORE, defaultOf, drawnKeys, isPhoneKey, listEntries, LOCKED, moduleOrder, moreWords, NOTHING_HERE, ownKeys,
+  paneKeys, paneState, PATH_HINT, PHONE_MODULE, READING, READING_AFTER_MS, readFailed, readKeys, readonlyKey, rowOf,
+  splitMore, tableFileWords, tablesOf, totalChanged, unreadableWords, valueOf,
 } from "./settings-model.ts";
 import type { Control, Row, Section, Setting, Toggle } from "./settings-model.ts";
 
@@ -184,7 +190,12 @@ const STYLES = css`
   .foot { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 18px; font-size: 13px;
           line-height: 18px; color: var(--moxi-text-dim); border-top: 1px solid var(--moxi-border); margin-top: 6px;
           padding: 12px 0 28px; }
+  .foot .files { display: grid; min-width: 0; }
   .foot .file { overflow-wrap: anywhere; min-width: 0; }
+  .tblh { font-size: 14px; line-height: 20px; color: var(--moxi-text); border-top: 1px solid var(--moxi-border);
+          margin-top: 6px; padding: 11px 0 2px; }
+  .tbll { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); padding-bottom: 2px; }
+  .tbl .unreadable { padding-top: 6px; }
   .foot a { color: var(--moxi-text); text-decoration: none; }
   .foot.after { border-top: 0; margin-top: 0; }
   .set.un .lb { font-weight: 600; }
@@ -406,7 +417,7 @@ export class UiSettings extends LitElement {
     for (const section of data.sections as Section[]) {
       if (typeof section?.module !== "string") continue;
       this.#held.sections.set(section.module, section);
-      if (section.error === null && Array.isArray(section.keys)) this.#held.pending.refresh(section.module, section.keys);
+      if (Array.isArray(section.keys)) this.#held.pending.refresh(section.module, readKeys(section));
     }
     for (const name of [...this.#held.sections.keys()]) {
       if (!listed.includes(name)) this.#held.sections.delete(name);
@@ -773,14 +784,14 @@ export class UiSettings extends LitElement {
     if (groups.length === 0) return nothing;
     return html`<div class="cols res" data-part=${kind}>${groups.map((group, i) => {
       const section = this.#held.sections.get(group.module) as Section;
-      const off = section.readonly || this.#saving === group.module;
+      const saving = this.#saving === group.module;
       const ruled = i > 0 ? "ln" : "";
       return html`<div class=${`mods ${ruled}`} data-group-of=${group.module}>
           <a href=${`/m/ui/settings/${group.module}`} data-open=${group.module}
             @click=${(event: MouseEvent) => this.#openModule(event, group.module)}>${group.module}</a>
           <small data-line="tally">${group.tally}</small></div>
         <section class=${`pane ${ruled}`} data-part="group" data-module=${group.module}>
-          ${group.keys.map((key) => this.#row(section, key, off, query))}
+          ${group.keys.map((key) => this.#row(section, key, readonlyKey(section, key) || saving, query))}
           ${group.more !== null ? html`<p class="morein" data-line="more-in">${group.more.replace(/ · Show them$/, "")} · <button
               type="button" class="link" data-act="show-all" @click=${() => this.#showAll(group.module)}>Show them</button></p>`
             : nothing}
@@ -848,11 +859,7 @@ export class UiSettings extends LitElement {
         return html`${this.#slow ? html`<p class="note" data-line="reading">${READING}</p>` : nothing}${ask}${missing}`;
       case "unreadable": {
         const it = section as Section;
-        return html`<div class="unreadable" data-part="unreadable">
-            <p data-line="unreadable">${unreadableWords(it)}</p>
-            ${it.fix ? html`<p class="fix" data-line="fix">Fix: <code>${it.fix}</code>
-              ${this.#copyButton(it.fix)}</p>` : nothing}
-          </div>${ask}${this.#foot(it, ask !== nothing)}${missing}`;
+        return html`${this.#unreadable(it)}${ask}${this.#foot(it, ask !== nothing)}${missing}`;
       }
       case "empty":
         return html`<p class="note" data-line="empty">${NOTHING_HERE}</p>${ask}${this.#foot(section as Section, ask !== nothing)}${missing}`;
@@ -861,20 +868,46 @@ export class UiSettings extends LitElement {
     }
   }
 
+  /** Why the module's own config file can't be read, and its fix. */
+  #unreadable(section: Section) {
+    return html`<div class="unreadable" data-part="unreadable">
+        <p data-line="unreadable">${unreadableWords(section)}</p>
+        ${section.fix ? html`<p class="fix" data-line="fix">Fix: <code>${section.fix}</code>
+          ${this.#copyButton(section.fix)}</p>` : nothing}
+      </div>`;
+  }
+
   #rows(section: Section, at: Address) {
     const keys = paneKeys(section.module, section.keys);
-    const { first, more } = splitMore(keys);
-    const off = section.readonly || this.#saving === section.module;
+    const { first, more } = splitMore(ownKeys(keys));
+    const saving = this.#saving === section.module;
+    const off = section.readonly || saving;
     const phone = section.module === PHONE_MODULE ? this.#phoneGroup(section, at, off) : nothing;
-    if (more === null) return html`${this.#blocks(section, first, off)}${phone}`;
+    const head = section.error !== null ? this.#unreadable(section) : nothing;
+    const tables = this.#tables(section, keys, saving);
+    if (more === null) return html`${head}${this.#blocks(section, first, off)}${tables}${phone}`;
     const words = moreWords(more);
-    return html`${this.#blocks(section, first, off)}
+    return html`${head}${this.#blocks(section, first, off)}
       <div class="more" data-part="more" ?data-open=${at.more}>
         <span><b>More</b><span data-line="more">${words.text}${words.changed ? ` · ${words.changed}` : ""}</span></span>
         <button type="button" class="link" aria-expanded=${String(at.more)} @click=${() => this.#toggleMore()}
           >${at.more ? "Hide" : "Show"}</button>
       </div>
-      ${at.more ? this.#blocks(section, more, off) : nothing}${phone}`;
+      ${at.more ? this.#blocks(section, more, off) : nothing}${tables}${phone}`;
+  }
+
+  /** Each table's open block: its title, its line, then its rows under their sub-heads, or
+   * its file's error and fix. Its rows are read-only only while a save runs. */
+  #tables(section: Section, keys: Setting[], saving: boolean) {
+    return tablesOf(section.keys, keys).map((table) => html`<div class="tbl" data-part="table" data-table=${table.title}>
+      <div class="tblh" data-line="table-title">${table.title}</div>
+      ${table.line !== null ? html`<p class="tbll" data-line="table-line">${table.line}</p>` : nothing}
+      ${table.error !== null ? html`<div class="unreadable" data-part="table-error">
+          <p data-line="table-error">${table.error}</p>
+          ${table.fix !== null ? html`<p class="fix" data-line="table-fix">Fix: <code>${table.fix}</code>
+            ${this.#copyButton(table.fix)}</p>` : nothing}</div>`
+        : this.#blocks(section, table.keys, saving)}
+    </div>`);
   }
 
   /** ui's Phone group, after its More, while the gateway is installed: `Phone access` and
@@ -944,6 +977,10 @@ export class UiSettings extends LitElement {
           ? html` · <button type="button" class="link" data-act="reset" ?disabled=${locked}
               @click=${() => { pending.reset(module, key); this.#changed(module); }}>Reset</button>` : nothing}</span>` : nothing}
       </div>` : nothing}
+      ${row.refused !== null || row.warning !== null ? html`<div class="l2"><span class="said">${row.refused !== null
+          ? html`<span data-line="refused">${this.#marked(row.refused, query)}</span>` : nothing}${row.refused !== null
+          && row.warning !== null ? " " : ""}${row.warning !== null
+          ? html`<span data-line="warning">${this.#marked(row.warning, query)}</span>` : nothing}</span></div>` : nothing}
       ${this.#access(module, key)}
       ${row.terminal !== null ? html`<div class="l2"><span class="said"><span data-line="terminal">${row.terminal.lead} <code>${
           row.terminal.command}</code></span> ${this.#copyButton(row.terminal.command)}</span></div>` : nothing}
@@ -1241,8 +1278,10 @@ export class UiSettings extends LitElement {
 
   #foot(section: Section, after = false) {
     const page = this.#pageOf(section.module);
+    const tables = tablesOf(section.keys, []).map(tableFileWords).filter((line): line is string => line !== null);
     return html`<div class=${after ? "foot after" : "foot"} data-part="foot">
-      <span class="file" data-line="file">${section.file ? `Kept in ${section.file}` : ""}</span>
+      <span class="files"><span class="file" data-line="file">${section.file ? `Kept in ${section.file}` : ""}</span>${
+        tables.map((line) => html`<span class="file" data-line="table-file">${line}</span>`)}</span>
       ${page !== null ? html`<a href=${`/m/${section.module}/${page.route}`} data-module=${section.module}
         data-route=${page.route} data-line="page">${page.title}</a>` : nothing}
     </div>`;

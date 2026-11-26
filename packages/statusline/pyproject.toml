@@ -21,7 +21,7 @@ dependencies = ["moxi>=0.1.11,<0.2"]
 
 [project.optional-dependencies]
 # The browser UI shell: with it, the status line page shows there.
-ui = ["moxi-ui>=0.2,<0.3"]
+ui = ["moxi-ui>=0.2.8,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

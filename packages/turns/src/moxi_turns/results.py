@@ -23,9 +23,13 @@ from typing import Any, ClassVar
 #: the guard list at its tool calls. `after-tool`: an `after-tool` row's text reaches the
 #: model after the tool. `usage`: the session reports usage (Claude's readings, Codex's
 #: limits). `mcp-token`: the Codex host's `mcp.reload`. `environ`: the `environ` method.
+#: `fork`: the `fork` method, a fork of the session's main loop. `keep`: the `keep` option
+#: of `deliver`, `fork` and `fork.continue`, and the `ack` method. `stale-agents`: the
+#: endpoint judges which `waiting` subagents are stale, and every reader of its agent list
+#: (`agents`, `facts.agents`, the busy checks) reads them `idle`.
 CAPABILITIES = ("deliver", "only-if-idle", "steer", "stop-handler", "clear", "exit",
                 "compact", "agents", "stop-shells", "guards", "after-tool", "usage",
-                "mcp-token", "environ")
+                "mcp-token", "environ", "fork", "keep", "stale-agents")
 
 #: The most names one `environ` call may ask.
 ENV_MAX_NAMES = 64
@@ -113,6 +117,12 @@ LOST_UNKNOWN = "unknown delivery"
 #: learn because the endpoint no longer serves, or the call carried no `ref` to look it up
 #: by. No endpoint sends it.
 LOST_UNANSWERED = "unanswered"
+
+#: The reason prefix of a fork's `Lost` when the harness refused to start the fork.
+LOST_DENIED = "denied"
+#: The reason prefix of a fork's `Lost` when the fork went away with no answer: the
+#: harness did not take its task, or its warm-up never answered.
+LOST_GONE = "gone"
 
 #: The library's `Failed` reason for a command it wrote and got no answer to. The command
 #: may still run.
@@ -240,6 +250,10 @@ class Agent(_Value):
     `kind` is one of `AGENT_KINDS`, `state` one of `AGENT_STATES`. `final` is True when its
     latest notice is a final one (done, failed or stopped), False when not, and None when
     the harness gives no notice to read. `parent_id` is the agent that spawned it, or None.
+    `is_fork` is True for a fork of the session's main loop (Claude Code lists one as a
+    subagent): the main loop's own work, not a subagent's, which the stale judgment never
+    judges. `last_write_at` is the newest write (Unix seconds) the
+    stale judgment read for a `waiting` subagent it judged, else None.
     """
 
     id: str
@@ -248,6 +262,8 @@ class Agent(_Value):
     final: bool | None
     description: str | None = None
     parent_id: str | None = None
+    is_fork: bool = False
+    last_write_at: float | None = None
 
     @property
     def busy(self) -> bool:
@@ -420,12 +436,15 @@ class Agents(_Value):
 @dataclass(frozen=True)
 class Started(_Value):
     """A delivery went in: the harness turn that took it. For a steer, given when the
-    harness confirmed it took the text."""
+    harness confirmed it took the text. For a fork, `agent_id` names the fork the harness
+    started (on Claude Code its subagent's agent id), and `turn_id` is None; every other
+    delivery's `agent_id` is None."""
 
     KIND = "started"
     turn_id: str | None
     delivery: str | None = None
     ref: str | None = None
+    agent_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -477,13 +496,17 @@ class Lost(_Value):
 
 @dataclass(frozen=True)
 class Ended(_Value):
-    """The turn that took a delivery ended, with its outcome (one of `OUTCOMES`)."""
+    """The turn that took a delivery ended, with its outcome (one of `OUTCOMES`) and
+    `answer`, the turn's final text: on Claude Code the assistant's final visible text,
+    on Codex the turn's last agent message; None when the turn had no text, on either
+    harness, and where the harness gave none."""
 
     KIND = "ended"
     turn_id: str | None
     outcome: str
     delivery: str | None = None
     ref: str | None = None
+    answer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -538,7 +561,8 @@ class SessionEvent:
     """What a listener is called with: the event and the session's facts.
 
     `event` is `ready` (observe only), `start` (adds start context), `prompt`, `turn`,
-    `gone`, `after-tool`, `usage` or `codex_limits`; `source` is a `ready`'s or a
+    `gone`, `after-tool`, `usage`, `codex_limits` or `load` (observe only: a Claude Code
+    endpoint learned its session's id for the first time); `source` is a `ready`'s or a
     `start`'s source; `turn_id` and `outcome` are a `turn`'s; `reason` is a `gone`'s.
     `env` is the session's environment, which the endpoint inherited from the session.
 
@@ -552,8 +576,15 @@ class SessionEvent:
       `is_error`, `point` (`after`, or `pre` where the harness has only a pre-tool point)
       and `record_path`, the file the harness writes this session's records to (None
       where it has none).
-    - On `prompt`: `text`, the prompt as the harness gave it, and `origin`, its origin
-      kind (`composer`, `plugin`, ...), None where the harness gives none.
+    - On `prompt`: `text`, the prompt as the harness gave it, except on the turn a
+      steer the harness held opens, where it is the steer's text (the harness's prompt
+      there only points at the text it holds); `origin`, its origin kind (`composer`,
+      `plugin`, ...), None where the harness gives none; and `own`,
+      true when that origin is on turns' `prompt.own_origins`, so the person typed it;
+      `delivery_by` and `delivery_senders`, the `by` and `senders` of the turns delivery
+      that is this prompt, both None for a prompt turns did not hand in (`senders` an
+      empty tuple when the delivery named none); and `opens`, true when the prompt opens
+      a turn, false when it joins a main-loop turn already running.
     - On `usage`: `usage`, the harness's usage reading as given, unparsed, and
       `received_at`, when it arrived (Unix seconds).
     - On `codex_limits`: `payload`, the limits reading as given, unparsed, `received_at`,
@@ -581,6 +612,10 @@ class SessionEvent:
     received_at: float | None = None
     payload: dict[str, Any] | None = None
     kind: str | None = None
+    own: bool | None = None
+    delivery_by: str | None = None
+    delivery_senders: tuple[str, ...] | None = None
+    opens: bool | None = None
 
 
 _KINDS: dict[str, type[_Value]] = {
@@ -622,7 +657,8 @@ __all__ = ["CAPABILITIES", "ENV_MAX_NAMES", "MCP_SETTLE_S", "OUTCOMES",
            "DELIVERY_HOW", "AGENT_KINDS", "AGENT_STATES",
            "BUSY_STATES", "REF_MAX_BYTES", "ERROR_GONE", "ERROR_CAPABILITY",
            "ERROR_STOP_HANDLER_TAKEN", "ERRORS", "REFUSED_GONE", "LOST_UNTIED",
-           "LOST_EXPIRED", "LOST_UNKNOWN", "LOST_UNANSWERED", "FAILED_UNANSWERED",
+           "LOST_EXPIRED", "LOST_UNKNOWN", "LOST_UNANSWERED", "LOST_DENIED", "LOST_GONE",
+           "FAILED_UNANSWERED",
            "FAILED_TIMEOUT", "SHELL_UNLISTED", "NOTIFICATIONS", "check_ref",
            "DeliveryRef", "OpenTurn", "Agent", "LeftShell", "Shells", "Ready",
            "TurnStarted", "TurnSteered", "TurnEnded", "Gone", "Facts", "Agents", "Started",

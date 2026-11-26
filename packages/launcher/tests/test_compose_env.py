@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from moxi import modules
+from moxi.paths import Layout
 
 from moxi_launcher import compose, store
 from moxi_launcher.compose import Additions, Context, claude, codex, common
@@ -130,25 +131,54 @@ def test_the_stamps_with_turns_the_additions_usage_and_notes():
 
 def test_a_value_for_a_module_that_cannot_load_is_not_stamped_and_the_launch_goes_on(
         monkeypatch):
-    # A replayed row can carry warn_at or notes_dir after usage or notes was removed.
+    # A replayed row can carry warn_at, notes_dir or subconscious after usage, notes or
+    # memory was removed.
     real = modules.load
     monkeypatch.setattr(modules, "load", lambda name, **kw: (
-        SimpleNamespace(ok=False, api=None) if name in ("usage", "notes")
+        SimpleNamespace(ok=False, api=None) if name in ("usage", "notes", "memory")
         else real(name, **kw)))
     assert common.stamps("r1", warn_at="1.5x", notes_dir="/notes") == {
         "MOXI_LAUNCHER_REQUEST": "r1"}
     assert common.option_stamps({"recycle_at_limit": "compact", "limit_at": "1x"}) == {}
+    assert common.option_stamps({"subconscious": "automatic"}) == {}
+
+
+@pytest.mark.parametrize("mode", ["automatic", "on-demand"])
+def test_the_subconscious_row_stamps_its_mode_and_route_under_memorys_variables(mode):
+    assert common.option_stamps({"subconscious": mode}) == {
+        "MOXI_MEMORY_SUBCONSCIOUS": mode, "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "subagent"}
+    assert common.option_stamps({"subconscious": mode, "subconscious_route": "slot"}) == {
+        "MOXI_MEMORY_SUBCONSCIOUS": mode, "MOXI_MEMORY_SUBCONSCIOUS_ROUTE": "slot"}
+    assert common.option_stamps({"subconscious": "off"}) == {}
+    assert common.option_stamps({"subconscious": "off", "subconscious_route": "slot"}) == {}
 
 
 @pytest.mark.parametrize("harness, extra", [("claude", {}), ("codex", {})])
 def test_a_launch_stamps_the_grant_only_with_turns(harness, extra):
     values = {"harness": harness, "cwd": "/work"}
     sid = SID if harness == "claude" else None
+    warn = {"MOXI_USAGE_WARN_AT": "2x"}
     without = compose.compose(values, ctx(session_id=sid))
-    assert without.env == {"MOXI_LAUNCHER_REQUEST": "r1"}
+    assert without.env == {**warn, "MOXI_LAUNCHER_REQUEST": "r1"}
     with_turns = compose.compose(values, ctx(session_id=sid, modules=frozenset({"turns"}),
                                              host="/host"))
-    assert with_turns.env == {"MOXI_TURNS_COMMANDS": "exit", "MOXI_LAUNCHER_REQUEST": "r1"}
+    assert with_turns.env == {"MOXI_TURNS_COMMANDS": "exit", **warn,
+                              "MOXI_LAUNCHER_REQUEST": "r1"}
+
+
+@pytest.mark.parametrize(("values", "warm"), [
+    ({"keep_warm": "on"}, True),
+    ({"keep_warm": "off"}, False),
+    ({"target": "headless", "keep_warm": "off"}, False),
+    ({"target": "headless", "keep_warm": "on"}, True),
+    # The resolver left the row out: the install doesn't offer it, and it reads off.
+    ({}, False),
+])
+def test_a_claude_launch_is_stamped_and_told_keep_warm_only_when_made_on(values, warm):
+    got = claude.compose({"harness": "claude", "cwd": "/work", **values}, ctx(brief="b"))
+    assert (got.env.get(common.KEEP_WARM_ENV) == "on") is warm
+    assert ("keep warm:     " + common.KEEP_WARM_LINE in got.prompt_file.text) is warm
+    assert got.values["keep_warm"] == values.get("keep_warm", "off")
 
 
 def test_the_rows_that_stamp():
@@ -175,7 +205,7 @@ def test_the_childs_env_is_the_scrubbed_caller_with_the_stamps():
     assert env["MOXI_LAUNCHER_REQUEST"] == "r1" and env["PATH"] == "/usr/bin"
     assert not any(name.startswith("CLAUDE") for name in env) and "AI_AGENT" not in env
     # A launch records the stamps only, never the caller's environment.
-    assert composition.env == {"MOXI_LAUNCHER_REQUEST": "r1"}
+    assert composition.env == {"MOXI_USAGE_WARN_AT": "2x", "MOXI_LAUNCHER_REQUEST": "r1"}
 
 
 # -- sizes ----------------------------------------------------------------------------------
@@ -229,3 +259,74 @@ def test_on_windows_the_whole_line_is_limited():
     codex.compose(values, ctx(session_id=None, brief=brief[:20_000], windows=True))
     with pytest.raises(common.TooLong, match="the command line"):
         codex.compose(values, ctx(session_id=None, brief=brief + "w" * 400, windows=True))
+
+
+# -- the limit mark -------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("values", [
+    {"warn_at": "2x"}, {"warn_at": "1.5x", "limit_at": "1x"}, {"warn_at": "off"}, {}])
+def test_a_row_recorded_with_the_retired_compact_stamps_no_crossing(values):
+    assert common.option_stamps({"recycle_at_limit": "compact", **values}) == {}
+    assert common.option_stamps({"recycle_at_limit": "off", **values}) == {}
+
+
+#: A Claude slot launch in a folder, which can recycle itself once it relaunches at a mark.
+SLOT_LAUNCH = {"harness": "claude", "target": "slot", "cwd": "/work",
+               "recycle_at_limit": "relaunch"}
+
+
+@pytest.fixture
+def slot_here(monkeypatch):
+    """slots runs here and notes is not installed, so the launcher keeps the handoffs."""
+    from moxi_launcher import catalog
+
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+@pytest.mark.parametrize("warn_at", ["1x", "1.5x", "2x"])
+def test_a_relaunch_launch_crosses_at_its_warn_at(slot_here, warn_at):
+    # The relaunch line rides on usage's warning.
+    values = {**SLOT_LAUNCH, "warn_at": warn_at}
+    assert common.limit_mark(values) == warn_at
+    assert common.relaunch_holds(values)
+    assert common.option_stamps(values) == {"MOXI_USAGE_CROSSING_AT": warn_at}
+
+
+@pytest.mark.parametrize("change", [
+    {"target": "terminal"}, {"harness": "codex"}, {"scratch": True}, {"warn_at": "off"},
+    {"warn_at": ""}, {"recycle_at_limit": "off"}])
+def test_a_relaunch_launch_that_cannot_recycle_itself_is_not_stamped(slot_here, change):
+    values = {**SLOT_LAUNCH, "warn_at": "2x", **change}
+    assert not common.relaunch_holds(values)
+    assert common.option_stamps(values) == {}
+
+
+def test_a_relaunch_launch_where_slots_do_not_run_is_not_stamped(slot_here, monkeypatch):
+    from moxi_launcher import catalog
+
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    assert common.option_stamps({**SLOT_LAUNCH, "warn_at": "2x"}) == {}
+
+
+def test_a_relaunch_launch_with_no_notes_dir_is_not_stamped(slot_here, monkeypatch):
+    # notes installed and giving the folder no notes directory: no handoff folder.
+    from moxi_launcher import handoffs
+
+    def homeless(cwd, **kw):
+        raise handoffs.NoNotesDir(cwd)
+
+    monkeypatch.setattr(handoffs, "handoff_dir", homeless)
+    assert common.option_stamps({**SLOT_LAUNCH, "warn_at": "2x"}) == {}
+
+
+def test_a_config_naming_a_default_mark_moves_no_launch_mark():
+    # usage keeps no default mark; a config still naming one is refused by usage and read
+    # by no launch.
+    path = Layout("usage").config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('[marks]\ndefault = "1.5x"\n', encoding="utf-8")
+    assert common.limit_mark({"recycle_at_limit": "relaunch", "warn_at": ""}) == ""
+    assert common.option_stamps({"recycle_at_limit": "relaunch", "warn_at": ""}) == {}

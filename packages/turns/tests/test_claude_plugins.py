@@ -46,10 +46,11 @@ def test_the_runner_reports_the_version_its_manifest_names():
     assert f"const MOD_VERSION = '{manifest['version']}'" in source
 
 
-#: The runner version that speaks each leg. Claude Code runs a user-scope plugin from a
-#: cache kept per version, so a runner on a new leg needs a new version, or an install
-#: made before it keeps running the old leg.
-RUNNER_VERSION_OF_LEG = {4: "0.2.1"}
+#: The runner version that speaks each leg, the latest when a leg had several. Claude Code
+#: runs a user-scope plugin from a cache kept per version, so a runner on a new leg, or a
+#: runner changed on the same leg, needs a new version, or an install made before it keeps
+#: running the old one.
+RUNNER_VERSION_OF_LEG = {5: "0.3.2"}
 
 
 def test_the_runner_speaks_the_endpoints_leg_under_the_version_named_for_it():

@@ -32,7 +32,10 @@ run exits 2 before measuring. In order:
    and the idle gate's `MOXI_TEST_IDLE=<line>@<deadline>`, the deadline `--wait-s` seconds
    from the first session's start (300 by default), shared by every session.
    `MOXI_TEST_TIMED_SLACK` passes through; the verb reads it once for the record and
-   exits 2 on a value the kit would refuse. Browser packages take the check's browser
+   exits 2 on a value the kit would refuse. The temp stays on disk as a check's does
+   (`moxi_dev.temp.for_check`), since the record is what checks are held to: a
+   `MOXI_TEST_TEMP=ram` reaches the sessions as `disk`, the verb says so on one line,
+   and a value the kit would refuse exits 2. Browser packages take the check's browser
    handling. Each session writes its `durations.json` under `.moxi-dev/timed-run/`. A
    session that collects no test is a package with no timed test.
 5. Read each session's tests, their `timed` entries and the gate's figures, and keep the
@@ -66,7 +69,7 @@ from pathlib import Path
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from . import check, timed_record
+from . import check, temp, timed_record
 from .durations import fcntl, msvcrt
 from .testing import (DURATIONS_ENV, FINDING_ENV, IDLE_ENV, TIERS_ENV, TIMED_ENV,
                       TIMED_LOCK_FD_ENV, TIMED_SLACK_ENV)
@@ -298,6 +301,14 @@ def run_timed(start: Path, opts: Options, *, env: Mapping[str, str] | None = Non
     fd = None
     try:
         check_options(opts)
+        # Its durations feed the machine record the checks are held to, and a check
+        # keeps its temp on disk: so does every timed run.
+        try:
+            env, temp_why = temp.for_check(env)
+        except temp.TempError as exc:
+            raise TimedError(str(exc)) from exc
+        if temp_why:
+            print(f"moxi-dev timed: temp disk ({temp_why})", flush=True)
         tree = find_tree(start)
         result.commit = tree.commit + ("+dirty" if tree.dirty else "")
         record_dir = opts.record_dir or tree.record_dir

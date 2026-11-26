@@ -4,10 +4,12 @@ the rebuild and the relabel, and the starters that return at once."""
 
 import json
 import os
+import re
 import time
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
+from moxi_secrets import REDACT_VERSION
 from moxi_sessions import api
 
 from moxi_memory import index, ingest, links, rows, start, state, table
@@ -167,6 +169,32 @@ def test_subagents_only_with_the_switch_and_under_the_main_session():
                     (r.thread_id, "0190c000-0000-7000-8000-0000000c0de9")}
     sc = state.connect()
     assert table.row(sc, "codex", "0190c000-0000-7000-8000-0000000c0de9") is None
+
+
+def test_a_recall_forks_transcript_stays_out_of_the_index_even_with_subagents_on():
+    from moxi_memory import recalls
+
+    t = claude()
+    t.user("main prompt")
+    plain = t.subagent("a0190b0000000001")
+    plain.user("subagent work item")
+    fork = t.subagent("a0190b00000000f1")
+    fork.user("fork work item")
+    t.write()
+    with_subagents = config(**{"index.include_subagents": True})
+    run("all", config=with_subagents)
+    assert "fork work item" in texts()     # read before its id reached the log
+    with recalls.session_lock(t.session_id):
+        recalls.put_line(t.session_id, {"recall": "r1", "state": recalls.BACK,
+                                        "harness": "claude", "fork": "a0190b00000000f1"})
+    fork.user("fork second item")
+    t.write()
+    run(config=with_subagents)
+    assert not any("fork" in x for x in texts())
+    assert "subagent work item" in texts()
+    run("rebuild", config=with_subagents)
+    assert not any("fork" in x for x in texts())
+    assert "subagent work item" in texts()
 
 
 def test_imported_codex_threads_are_skipped_and_compressed_ones_counted():
@@ -340,15 +368,6 @@ def test_a_patch_to_an_env_file_keeps_only_the_path():
     r.write()
     run()
     assert texts() == ["apply_patch(/work/app/.env)"] and texts("tails") == []
-
-
-@pytest.mark.parametrize("value", [
-    "cat > /x/.env <<EOF\nA=1\nEOF", "cat ~/.ssh/id_rsa && echo done",
-    ["bash", "-lc", "cat /x/.env | head -n 3"], "*** Update File: /x/.env\n+A=1",
-    {"a": ["not this", {"b": "then /x/.env with words"}]}])
-def test_the_path_found_is_one_word(value):
-    found = rows.secret_path(value)
-    assert found is not None and found.split() == [found]
 
 
 def _runs(count, size, seed):
@@ -778,7 +797,7 @@ def test_starters_return_before_their_child_finishes(tmp_path, monkeypatch):
         began = time.monotonic()
         go()
         assert time.monotonic() - began < 1 and not done.exists()
-    wait_for(done.exists, timeout=10)
+    wait_for(done.exists, timeout=PROC_WAIT_S)
 
 
 def test_a_turn_starts_at_most_one_child_per_session_per_minute(monkeypatch):
@@ -799,3 +818,314 @@ def test_the_real_child_ingests_detached():
     start.start_walk()
     wait_for(lambda: index.current() is not None and "detached child text" in texts(),
              timeout=30)
+
+
+# -- the version rebuild: rows stored under an older redact ------------------------------
+
+#: A token with the allow mark beside it, and one split by a zero-width space: rows an
+#: older redact stored whole.
+MARKED = f"marked {TOKEN}  # gitleaks:allow"
+SPLIT = f"split {TOKEN[:12]}​{TOKEN[12:]}"
+#: Pieces of the token that no stored text may hold once it is redacted again.
+PIECES = (TOKEN[4:12], TOKEN[12:])
+SUBAGENTS = {"index.include_subagents": True}
+CHILD = "0190c000-0000-7000-8000-0000000c0de9"
+GONE = "0190b000-0000-7000-8000-00000000dead"
+
+
+def old_way(planted):
+    """Store each row and tail that begins with a word of `planted` as its raw text, and
+    take `redact_version` out of the generation's meta: a generation an older redact
+    stored."""
+    with index.writer() as w:
+        conn = w.connect()
+        try:
+            for word, raw in planted.items():
+                hit = 0
+                for table_name in ("rows", "tails"):
+                    hit += conn.execute(f"UPDATE {table_name} SET text = ? WHERE text LIKE ?",
+                                        (raw, f"{word} %")).rowcount
+                assert hit, word
+            conn.execute("DELETE FROM meta WHERE key = ?", (index.REDACT_VERSION_KEY,))
+        finally:
+            conn.close()
+    with index.open_read() as rd:
+        assert index.stored_redact_version(rd.conn) == 1
+
+
+def sources():
+    with index.open_read() as rd:
+        return set(rd.conn.execute("SELECT harness, source FROM sources"))
+
+
+def redacted_again(report, before, words):
+    """What every version rebuild gives: no session dropped, the version recorded, every
+    old source still there, and each planted row searchable with placeholders and no
+    piece of the token."""
+    from moxi_memory import search
+
+    assert report.dropped == 0
+    with index.open_read() as rd:
+        assert index.stored_redact_version(rd.conn) == rows.redact_version() == REDACT_VERSION
+        assert index.meta_get(rd.conn, ingest.REPLACED_KEY) == "1"
+    assert before <= sources()
+    stored = texts() + texts("tails")
+    assert not any(piece in text for piece in PIECES for text in stored)
+    for word in words:
+        assert any(text.startswith(word) and "[REDACTED:" in text for text in stored), word
+        hits = search.search(word, results=True, subagents=True).hits
+        assert hits, word
+    for piece in PIECES:
+        assert not search.search(piece, results=True, subagents=True).hits
+
+
+def row_of(word):
+    return next(text for text in texts() + texts("tails") if text.startswith(word))
+
+
+def test_a_version_rebuild_keeps_a_gone_subagents_rows_and_reads_its_main_again():
+    on = config(**SUBAGENTS)
+    t = claude()
+    t.user(f"pelican {MARKED}")
+    sub = t.subagent()
+    sub._count = 100
+    sub.user(f"heron {SPLIT}")
+    call = sub.request().tool_use("Read", {"file_path": "/work/project/.env"})
+    sub.tool_result(call, "A=1")
+    t.write()
+    run(config=on)
+    calls = {("claude", str(sub.path))}
+    with index.open_read() as rd:
+        assert calls <= set(rd.conn.execute("SELECT harness, source FROM secret_calls"))
+    old_way({"pelican": f"pelican {MARKED}", "heron": f"heron {SPLIT}"})
+    before = sources()
+    os.remove(sub.path)
+
+    report = run("rebuild", config=on)
+    redacted_again(report, before, ("pelican", "heron"))
+    assert row_of("pelican") == rows.redact(f"pelican {MARKED}", ("credentials", "broad"))
+    with index.open_read() as rd:
+        assert calls <= set(rd.conn.execute("SELECT harness, source FROM secret_calls"))
+        agents = {r[0] for r in rd.conn.execute(
+            "SELECT agent_id FROM rows WHERE text LIKE 'heron %'")}
+    assert agents == {"a0190b0000000001"}
+
+
+def test_a_version_rebuild_keeps_a_gone_codex_parent_and_reads_its_spawned_thread():
+    on = config(**SUBAGENTS)
+    r = T.CodexRollout(api.root("codex"))
+    r.turn()
+    r.user(f"osprey {MARKED}")
+    c = r.tool_call("exec", "ls")
+    r.tool_output(c, f"kestrel {SPLIT}")
+    child = r.spawn(CHILD, "explore")
+    child.turn()
+    child.user(f"plover {SPLIT}")
+    r.write()
+    child.write()
+    run(config=on)
+    old_way({"osprey": f"osprey {MARKED}", "kestrel": f"kestrel {SPLIT}",
+             "plover": f"plover {SPLIT}"})
+    before = sources()
+    os.remove(r.path)
+
+    report = run("rebuild", config=on)
+    redacted_again(report, before, ("osprey", "kestrel", "plover"))
+    assert row_of("plover") == rows.redact(f"plover {SPLIT}", ("credentials", "broad"))
+    assert table.row(state.connect(), "codex", r.thread_id) is not None
+
+
+def test_a_version_rebuild_keeps_what_no_source_read_to_its_end_gives():
+    t = claude()
+    t.user("live prompt")
+    sub = t.subagent()
+    sub._count = 100
+    sub.user(f"heron {SPLIT}")
+    t.write()
+    gone = claude(GONE, serial=500)
+    gone.user(f"egret {SPLIT}")
+    gone.write()
+    r = T.CodexRollout(api.root("codex"))
+    r.turn()
+    r.user(f"osprey {MARKED}")
+    r.write()
+    run(config=config(**SUBAGENTS))
+    old_way({"heron": f"heron {SPLIT}", "egret": f"egret {SPLIT}",
+             "osprey": f"osprey {MARKED}"})
+    before = sources()
+    os.remove(gone.path)
+
+    # codex left out by `harnesses`, subagents off, one session wholly gone
+    report = run("rebuild", config=config(harnesses=["claude", "opencode"]))
+    redacted_again(report, before, ("heron", "egret", "osprey"))
+    sc = state.connect()
+    for harness, sid in (("claude", gone.session_id), ("codex", r.thread_id),
+                         ("claude", t.session_id)):
+        assert table.row(sc, harness, sid) is not None, sid
+
+
+def test_a_version_rebuild_keeps_the_rows_of_a_root_that_couldnt_be_listed(monkeypatch):
+    r = T.CodexRollout(api.root("codex"))
+    r.turn()
+    r.user(f"osprey {MARKED}")
+    r.write()
+    t = claude()
+    t.user(f"pelican {SPLIT}")
+    t.write()
+    run()
+    old_way({"osprey": f"osprey {MARKED}", "pelican": f"pelican {SPLIT}"})
+    before = sources()
+    real = api.corpus
+
+    def corpus_failing(harness, **kw):
+        if harness == "codex":
+            raise OSError("the root can't be listed")
+        return real(harness, **kw)
+
+    monkeypatch.setattr(api, "corpus", corpus_failing)
+    report = run("rebuild")
+    redacted_again(report, before, ("osprey", "pelican"))
+    assert table.row(state.connect(), "codex", r.thread_id) is not None
+
+
+# -- the trim of a stored cut ------------------------------------------------------------
+
+SETS = ("credentials", "broad")
+
+
+def head_cut(body, gone=500):
+    return f"{body} [... {gone} more characters cut]"
+
+
+def tail_cut(body, gone=500):
+    return f"[... {gone} earlier characters cut] {body}"
+
+
+def test_a_kept_head_cut_loses_the_run_at_its_cut_and_counts_it():
+    fragment = TOKEN[:30]
+    body = "some words before it " * 6 + fragment
+    got = rows.recut_head(head_cut(body), rows.MESSAGE_CHARS, SETS,
+                          edge_chars=rows.EDGE_CHARS)
+    assert fragment not in got and TOKEN[:12] not in got
+    kept, gone = re.fullmatch(r"(.*) \[\.\.\. ([0-9]+) more characters cut\]", got,
+                              re.S).groups()
+    assert body.startswith(kept) and int(gone) == 500 + len(body) - len(kept)
+    # the whitespace it stops at is at least 64 characters from the cut
+    assert len(body) - len(kept) >= rows.EDGE_CHARS
+
+
+def test_a_kept_tail_cut_loses_its_first_run_and_counts_it():
+    fragment = TOKEN[10:]
+    body = fragment + " and some words after it" * 6
+    got = rows.recut_tail(tail_cut(body), 1000, SETS, edge_chars=rows.EDGE_CHARS)
+    assert fragment not in got
+    gone, kept = re.fullmatch(r"\[\.\.\. ([0-9]+) earlier characters cut\] (.*)", got,
+                              re.S).groups()
+    assert body.endswith(kept) and int(gone) == 500 + len(body) - len(kept)
+
+
+def test_a_token_split_by_a_control_python_reads_as_whitespace_loses_its_stored_part():
+    body = "words before " + "A" * 70 + "\x1f" + "B" * 70
+    got = rows.recut_head(head_cut(body), rows.MESSAGE_CHARS, SETS,
+                          edge_chars=rows.EDGE_CHARS)
+    assert "A" not in got.replace("[... ", "") and got.startswith("words before")
+    got = rows.recut_tail(tail_cut("A" * 70 + "\x1f" + "B" * 70 + " words after"), 1000,
+                          SETS, edge_chars=rows.EDGE_CHARS)
+    assert got.endswith(" words after") and "B" not in got
+
+
+def test_the_span_stops_at_a_plain_space_64_characters_out_and_see_through_counts_nothing():
+    got = rows.recut_head(head_cut("keep " + "y" * 70), rows.MESSAGE_CHARS, SETS,
+                          edge_chars=rows.EDGE_CHARS)
+    assert got == "keep [... 571 more characters cut]"
+    # 61 counted characters lie between the cut and the space before "a": the 40
+    # zero-width spaces count nothing, so the span runs to the text's start
+    body = "first " + "a" * 30 + " " + "b" * 30 + "​" * 40
+    got = rows.recut_head(head_cut(body), rows.MESSAGE_CHARS, SETS,
+                          edge_chars=rows.EDGE_CHARS)
+    assert got == f" [... {500 + len(body)} more characters cut]"
+    # a text with no stored cut, and a recut with no edge, are not trimmed
+    assert rows.recut_head(body, rows.MESSAGE_CHARS, SETS,
+                           edge_chars=rows.EDGE_CHARS) == body
+    assert rows.recut_head(head_cut(body), rows.MESSAGE_CHARS, SETS) == head_cut(body)
+
+
+def test_a_version_rebuild_trims_a_kept_cut_row_and_not_a_row_read_again():
+    long = "word " * 4000
+    t = claude()
+    t.user(f"pelican {long}")
+    t.write()
+    gone = claude(GONE, serial=500)
+    gone.user(f"egret {long}")
+    gone.write()
+    run()
+    read_before = row_of("pelican")
+    assert read_before.endswith("more characters cut]")
+    planted = head_cut("egret " + "word " * 40 + TOKEN[:30])
+    old_way({"egret": planted})
+    os.remove(gone.path)
+    run("rebuild")
+    assert row_of("pelican") == read_before
+    egret = row_of("egret")
+    assert TOKEN[:12] not in egret and egret.startswith("egret word")
+    gone_count = int(re.search(r"([0-9]+) more characters cut", egret).group(1))
+    assert gone_count > 500
+
+
+# -- once, and by hand -----------------------------------------------------------------
+
+def test_an_ingest_into_an_old_generation_leaves_its_rows_and_starts_no_rebuild():
+    t = claude()
+    t.user(f"pelican {MARKED}")
+    t.write()
+    run()
+    old_way({"pelican": f"pelican {MARKED}"})
+    new = claude("0190b000-0000-7000-8000-00000000c1a1", serial=200)
+    new.user(f"heron {SPLIT}")
+    new.write()
+    started = []
+    report = run(then=started.append)
+    assert report.dropped is None and started == []
+    assert row_of("pelican") == f"pelican {MARKED}"
+    assert not any(piece in row_of("heron") for piece in PIECES)
+    with index.open_read() as rd:
+        assert index.stored_redact_version(rd.conn) == 1
+    assert state.read_request(state.connect()) is None
+
+
+def test_the_version_rebuild_runs_once_and_a_failed_one_leaves_the_old_generation(
+        monkeypatch):
+    t = claude()
+    t.user(f"pelican {MARKED}")
+    t.write()
+    gone = claude(GONE, serial=500)
+    gone.user(f"egret {SPLIT}")
+    gone.write()
+    run()
+    old_way({"pelican": f"pelican {MARKED}", "egret": f"egret {SPLIT}"})
+    os.remove(gone.path)
+    current = index.current()
+
+    def raises(self):
+        raise RuntimeError("the disk is full")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(ingest.Ingest, "copy_unread", raises)
+        with pytest.raises(RuntimeError):
+            run("rebuild")
+    assert index.current() == current
+    with index.open_read() as rd:
+        assert index.stored_redact_version(rd.conn) == 1
+    started = []
+    run(then=started.append)
+    assert started == [] and state.read_request(state.connect()) is None
+
+    report = run("rebuild")                 # the next typed reindex is a version rebuild
+    assert report.dropped == 0 and "egret" in " ".join(texts())
+    read_once = row_of("pelican")
+    report = run("rebuild")                 # and the one after it is an ordinary rebuild
+    assert report.dropped == 1 and not any(x.startswith("egret") for x in texts())
+    assert row_of("pelican") == read_once
+    with index.open_read() as rd:
+        assert index.meta_get(rd.conn, ingest.REPLACED_KEY) is None
+        assert index.stored_redact_version(rd.conn) == REDACT_VERSION

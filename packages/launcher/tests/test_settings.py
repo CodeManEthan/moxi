@@ -5,6 +5,8 @@ from __future__ import annotations
 import itertools
 import json
 
+import pytest
+
 from moxi import cli
 from moxi.config import COMMON_MAX, DEFAULT, FILE, Schema
 from moxi.paths import Layout
@@ -28,12 +30,12 @@ DEFAULTS = {
     "relaunch.pass_env": [],
     "relaunch.director_pass_env": [],
     "relaunch.notice_retry_s": 30,
-    "recycle.limit_wait_s": 1800,
     "keep_warm.subagent_cap": 3,
     "keep_warm.director_cap": 10,
-    "name.template": "<project>-<model>-<date:mmm-dd hh:mm>",
+    "name.template": "<date>-<time>-<project>-<agent>",
     "name.templates": {},
     "page.launch_wait_s": 600,
+    "park.wait_s": 300,
     "records.keep_days": 90,
 }
 #: The list settings whose defaults are texts: checked for their count only.
@@ -48,8 +50,12 @@ def test_with_no_file_every_key_has_its_default():
         assert current.source(key) == DEFAULT
 
 
+#: The retired keys a config file may still set: each read as unset, with a warning.
+LEFT_OUT = {"recycle.limit_wait_s"}
+
+
 def test_the_schema_declares_exactly_these_keys():
-    assert set(settings.schema().keys) == set(DEFAULTS) | set(TEXTS)
+    assert set(settings.schema().keys) == set(DEFAULTS) | set(TEXTS) | LEFT_OUT
     current = settings.current()
     for key, count in TEXTS.items():
         assert len(current[key]) == count and all(isinstance(t, str) for t in current[key])
@@ -81,8 +87,8 @@ COMMON = ["startup.trust_dialog", "startup.dev_channels_dialog", "startup.bypass
           "runs.keep_days", "relaunch.fallback", "relaunch.pass_env", "records.keep_days"]
 #: The sub-heads behind More, in the order they first appear, and the keys under each.
 GROUPS = {
-    "Waits": ["ready.wait_s", "first.wait_s", "startup.wait_s", "recycle.limit_wait_s",
-              "page.launch_wait_s"],
+    "Waits": ["ready.wait_s", "first.wait_s", "startup.wait_s",
+              "page.launch_wait_s", "park.wait_s"],
     "Relaunch": ["relaunch.wait_s", "relaunch.person_s", "relaunch.dialog_s",
                  "relaunch.name_wait_s", "relaunch.follow_s", "relaunch.director_pass_env",
                  "relaunch.notice_retry_s"],
@@ -95,9 +101,22 @@ TEMPLATES = {"name.template", "name.templates"}
 
 
 def show_json(capsys) -> dict:
+    """The launcher's own keys in `moxi config launcher show --json`; the launch defaults'
+    rows, listed after them, are `test_defaults.py`'s."""
     capsys.readouterr()
     assert cli.main(["config", "launcher", "show", "--json"]) == 0
-    return {key["name"]: key for key in json.loads(capsys.readouterr().out)}
+    return {key["name"]: key for key in json.loads(capsys.readouterr().out)
+            if "table_title" not in key}
+
+
+def test_show_json_lists_the_launch_defaults_after_the_launchers_own_keys(capsys):
+    capsys.readouterr()
+    assert cli.main(["config", "launcher", "show", "--json"]) == 0
+    items = json.loads(capsys.readouterr().out)
+    tabled = [i for i, key in enumerate(items) if "table_title" in key]
+    assert tabled and tabled == list(range(tabled[0], len(items)))
+    assert {items[i]["table_title"] for i in tabled} == {"Launch defaults"}
+    assert "defaults.permission_mode" in {items[i]["name"] for i in tabled}
 
 
 def test_the_schema_passes_the_cores_check_with_its_page_fields():
@@ -168,3 +187,18 @@ def test_show_json_keeps_each_groups_keys_together_behind_more(capsys):
             if not key["common"] and not key["elsewhere"]]
     runs = [group for group, _ in itertools.groupby(more) if group]
     assert len(runs) == len(set(runs)), runs
+
+
+def test_a_file_still_setting_the_limit_wait_reads_with_it_left_out(tmp_path, monkeypatch):
+    from moxi import config
+
+    key = settings.schema().keys["recycle.limit_wait_s"]
+    assert key.retired and key.left_out
+    path = tmp_path / "config.toml"
+    path.write_text("[recycle]\nlimit_wait_s = 600\n[ready]\nwait_s = 7\n")
+    read = config.load("launcher", settings.schema(), path=path)
+    assert read["ready.wait_s"] == 7 and "recycle.limit_wait_s" not in read
+    assert list(read.left_out) == ["recycle.limit_wait_s"]
+    assert "remove recycle.limit_wait_s" in read.left_out["recycle.limit_wait_s"]
+    with pytest.raises(config.ConfigError, match="is retired"):
+        config.set_value("launcher", "recycle.limit_wait_s", 60, by="test")

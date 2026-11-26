@@ -85,7 +85,7 @@ from pathlib import Path
 
 from moxi import ipc
 
-from . import (attribution, bindings, cache, claimfile, config, constants, directory,
+from . import (archive, attribution, bindings, cache, claimfile, config, constants, directory,
                membership, replies, wire)
 from .store import books as books_mod
 from .mcp import tokens as mcp_tokens_mod
@@ -94,12 +94,13 @@ from .machine_line import COLD_AT_LIVE, POSTURE_ONCE, parse as parse_machine_lin
 from .record import AUTHOR_IDENTITY, AUTHOR_OPERATOR, Message
 from . import kinds as kinds_mod
 from . import reserved as reserved_mod
+from . import scoped as scoped_mod
 from .paths import comms_db, daemon_socket
 from .record import Forbidden
 from .replies import SentEntry
 from .provision import NAMES
-from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, is_auto_name, qualify, split_tag,
-                      tag_matches)
+from .scoping import (GLOBAL, NAME_RE, OPERATOR_NAME, identity_of, is_auto_name, qualify,
+                      split_tag, tag_matches)
 
 log = logging.getLogger("comms.daemon")
 
@@ -191,9 +192,9 @@ SOURCES_UNREAD = ("startup", "clear", "compact")
 #: before the turn. 8 s, the last step, is eighty times that timer and leaves room for a
 #: loaded machine; a window costs at most this many reads.
 RELEASE_SETTLE_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
-# The operator's identity, `OPERATOR_NAME`. He has no session to hold mail for, so
-# `[held]` is read as absent for him: his mail is live when a session of his is bound and
-# waits as offline mail otherwise.
+# The operator's identity, `OPERATOR_NAME`. The operator has no session to hold mail for,
+# so `[held]` is read as absent for the operator, whose mail is live when an operator
+# session is bound and waits as offline mail otherwise.
 
 #: The doctor record a daemon that can't open comms.db leaves, and a start that opens it
 #: clears.
@@ -360,8 +361,15 @@ class Daemon:
                  start_trim_thread: bool = True, history_path=None,
                  first_start=None, kinds=None, settings=None,
                  cache_store=cache.MISSING, serve_tools: bool = False,
-                 mcp_port: int | None = None, on_fatal=None):
+                 mcp_port: int | None = None, on_fatal=None,
+                 respawn_adapters: bool = False):
         self.record = record
+        #: What replaces a Claude session's adapter that died while `claude` runs, at
+        #: once (`adapters.respawn.Respawner`): made at `start()` when
+        #: `respawn_adapters`, which `main` passes. A daemon a test or an embedding
+        #: caller builds starts no adapter unless it asks; a test may set its own.
+        self.respawn_adapters = respawn_adapters
+        self.respawner = None
         #: The adapter kinds a register may name: the built-in four and each kind the
         #: `moxi.comms.kinds` group declares (`kinds.load`), read once at construction.
         self.kinds = kinds if kinds is not None else kinds_mod.load()
@@ -655,6 +663,14 @@ class Daemon:
         # declare, which catches a module installed before comms and a store restored
         # from a backup. A failure is logged; the names stay as they were.
         self._reconcile_reserved()
+        # boot: an older comms' record named in `[archive] record` keeps its own message
+        # ids: the counter moves past them once, so an id there is the archive's
+        # (`archive.py`). A failure is logged; the counter stays as it was.
+        try:
+            archive.skip_ids(self.record)
+        except Exception:  # noqa: BLE001 - the archive never stops a start
+            log.warning("moving the message counter past the archive's ids failed",
+                        exc_info=True)
         # boot: the delivery books, fenced BEFORE any method is answered: every row a
         # binding of the last daemon held (handed, or in a digest whose turn never
         # reported) waits again, and every digest it left open ends `fenced`. Then the
@@ -698,6 +714,14 @@ class Daemon:
             self._hold_routed()
         if self._start_trim_thread:
             self._spawn(self._trim_loop)
+        # boot: the daemon serves, so a Claude session whose adapter died while no daemon
+        # ran gets a new one now, with no prompt.
+        if self.respawn_adapters and self.respawner is None:
+            from .adapters.respawn import Respawner
+
+            self.respawner = Respawner(self._stop)
+        if self.respawner is not None:
+            self.respawner.sweep()
 
     def _settle_endpoint(self) -> None:
         """Serve comms' tools, or settle why not: `[mcp] enabled` and `[mcp] port`, read
@@ -1148,6 +1172,12 @@ class Daemon:
                 # once whatever stood in its way has gone.
                 raise Refusal(reserved_mod.bind_refusal(held_for), code=wire.NAME_RESERVED,
                               name=q)
+            scoped_form = scoped_mod.form_of(db, q)
+            if scoped_form is not None:
+                # Once a module declares a word, no session binds a name of its form,
+                # held before or not: a holder that had it keeps it until it releases.
+                raise Refusal(scoped_mod.bind_refusal(scoped_form), code=wire.NAME_RESERVED,
+                              name=q)
             if q in self.bindings:
                 held = self.bindings[q]
                 raise Refusal(
@@ -1233,8 +1263,14 @@ class Daemon:
             if self._stopping:
                 raise DaemonStopping()
             row = reserved_mod.lookup(db, who)
+            # A name of a declared word's form that a live session holds is that
+            # session's, and sends as any binding does; otherwise it is a scoped sender.
+            found = (None if row is not None or who in self.bindings
+                     else scoped_mod.form_of(db, who))
         if row is not None:
             return self._send_reserved(conn, row, token, content)
+        if found is not None:
+            return self._send_scoped(conn, found, token, content)
         with self._lock, self._db() as db:
             if self._stopping:
                 raise DaemonStopping()
@@ -1292,6 +1328,50 @@ class Daemon:
         message = self.record.post_as_reserved(name, self._names_channel(), content)
         log.info("send %s under %s, held by %s", message.id, name,
                  "a program" if program else row["module"])
+        return {"message_id": str(message.id)}
+
+    def _send_scoped(self, conn, found, token, content: str) -> dict:
+        """A `send` under a scoped sender (`scoped.py`): only its module's token for the
+        word sends under it, never from inside a session, and only to its parent: a line
+        zero that names anyone else, or the parent and another, is refused before
+        anything is posted. A scoped sender in conflict sends nothing: its word declared
+        by two modules, or its name held with no live binding here (a binding still open
+        in the store). A name a live session binds, or a send-only name, never reaches
+        this path: the send is checked against its holder's credential and refused
+        `credential` (docs/protocol.md)."""
+        name = found.qualified
+        with self._lock, self._db() as db:
+            why = scoped_mod.conflict_why(db, found, bound=name in self.bindings)
+        if why:
+            raise Refusal(f"{why}: nothing sends under it", code=wire.SCOPED_CONFLICT,
+                          name=name)
+        row = found.row
+        given_raw = (hashlib.sha256(token.encode()).digest()
+                     if isinstance(token, str) else None)
+        if given_raw is not None:
+            with self._lock:
+                session_token = any(hmac.compare_digest(b.token_hash, given_raw)
+                                    for b in self.bindings.values() if b.token_hash)
+            if session_token:
+                raise Refusal(f"{name} is {row['module']}'s scoped sender for "
+                              f"{found.parent}: a session's token never sends under it",
+                              code=wire.NAME_RESERVED, name=name)
+        self._refuse_session_peer(conn, name)
+        given = reserved_mod.token_hash(token) if isinstance(token, str) else ""
+        if not row["token_hash"] or not hmac.compare_digest(row["token_hash"], given):
+            raise Refusal("posting credential refused", code=wire.CREDENTIAL,
+                          credential=True)
+        ml = parse_machine_line(content)
+        named = {identity_of(t) for t in ml.recipients} if ml is not None else set()
+        if named != {found.parent}:
+            others = sorted(named - {found.parent})
+            said = (f"it names {', '.join(others)}" if others else
+                    "it names no recipient")
+            raise Refusal(f"{name} sends only to {found.parent}, and {said}: nothing was "
+                          "posted", code=wire.SCOPED_RECIPIENT, name=name)
+        message = self.record.post_as_reserved(name, self._names_channel(), content)
+        log.info("send %s under %s, %s's scoped sender for %s", message.id, name,
+                 row["module"], found.parent)
         return {"message_id": str(message.id)}
 
     def _refuse_session_peer(self, conn, name: str) -> None:
@@ -1494,7 +1574,13 @@ class Daemon:
     def _deregister(self, conn) -> None:
         """A connection closed: each binding it held ends. Its handed mail not yet
         handled is queued again for the name's next binding. A peer that stopped reading
-        is dropped by `moxi.ipc` after the write deadline, and ends here the same way."""
+        is dropped by `moxi.ipc` after the write deadline, and ends here the same way.
+
+        Each ended binding whose bind named a claim goes to the respawner, outside the
+        lock and never while the daemon stops: when the claim is a Claude session's whose
+        adapter died while `claude` runs, it starts a new adapter at once, on a thread
+        of its own (`adapters.respawn.Respawner`). A bind that was refused made no
+        binding, so its connection's end comes to nothing here."""
         with self._lock:
             # The ping counters die with the connection that fed them: the next
             # process to hold this name comes in on a new connection and starts its
@@ -1533,6 +1619,10 @@ class Daemon:
             claims = {b.claim_key for b in gone if b.claim_key}
             if claims:
                 self.mcp_tokens.revoke_ended(claims)
+                with self._lock:
+                    stopping = self._stopping
+                if self.respawner is not None and not stopping:
+                    self.respawner.on_drop(claims)
 
     # ------------------------------------------------------------------ the tool token
     def _mcp_token(self, conn, params: dict) -> dict:
@@ -1899,7 +1989,8 @@ class Daemon:
         `identity` is a qualified name, taken literally, exactly as `kind="agents"`
         prints it. `message_id` names the message to explain; without one the daemon
         picks the newest it can see for this identity, which is what a person wants when
-        they ask why an agent has gone quiet.
+        they ask why an agent has gone quiet. A message from an older comms' record
+        answers `archive` (`archive.explained`) and no case.
         """
         identity = str(frame.get("identity") or "")
         asked = frame.get("message_id")
@@ -1938,10 +2029,20 @@ class Daemon:
         except Exception:                                          # noqa: BLE001
             log.exception("explain: could not read the cursor of %s", identity)
             row = None
-        cursor = books_mod.explain_cursor(row, message_id)
+        # An id comms.db skipped for an older comms' record is that record's message:
+        # comms.db's books hold nothing of its delivery, so neither its cursor's
+        # comparison, its drop rows nor the classifier are read for it.
+        older = None
+        if message_id is not None and self.books.is_open:
+            try:
+                older = archive.explained(self.books.archive_skipped(), message_id,
+                                          identity)
+            except Exception:                                      # noqa: BLE001
+                log.exception("explain: could not read the archive's ids")
+        cursor = books_mod.explain_cursor(row, None if older else message_id)
         case = case_error = None
         dropped = None
-        if message_id is not None and self.books.is_open:
+        if older is None and message_id is not None and self.books.is_open:
             try:
                 dropped = self.books.dropped_reason(identity, message_id)
             except (TypeError, ValueError):
@@ -1949,7 +2050,9 @@ class Daemon:
             except Exception:                                      # noqa: BLE001
                 log.exception("explain: could not read why %s left %s's queue",
                               message_id, identity)
-        if dropped is not None:
+        if older is not None:
+            case = None                 # no case: the facts that would make one are gone
+        elif dropped is not None:
             case = dropped
         elif message_id is not None and message_id in waiting:
             # Queued BEFORE the cursor: a queued id is not `cursor-behind-it`, whose
@@ -1978,7 +2081,8 @@ class Daemon:
                 "activity_for": None if activity is None else now - activity,
                 "cursor": cursor,
                 "case": case,
-                "case_error": case_error}
+                "case_error": case_error,
+                "archive": older}
 
     def _resolve_query(self, frame: dict) -> dict:
         """Tier/route RESOLUTION for the send verb -- never a liveness check."""
@@ -2033,6 +2137,11 @@ class Daemon:
             r = self._resolve(db, tag)
             # The row decides, bound or not: a reserved name is never a recipient.
             if r.resolvable and reserved_mod.unmailable(db, r.qualified):
+                r.send_only = True
+            # Nor is a name of a declared word's form that nothing holds: no session can
+            # bind it, and its scoped sender receives nothing.
+            elif (r.resolvable and r.binding is None
+                  and scoped_mod.unmailable(db, r.qualified)):
                 r.send_only = True
             return r
 
@@ -3833,7 +3942,7 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
              if (args.backend or resolved) == LOCAL else None)
     first_start = provision.first_start(store) if store is not None else None
     daemon = Daemon(record, first_start=first_start, settings=settings, serve_tools=True,
-                    on_fatal=lambda why: stopping.set())
+                    on_fatal=lambda why: stopping.set(), respawn_adapters=True)
     try:
         daemon.start()
     except RuntimeError as exc:

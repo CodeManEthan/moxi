@@ -3,8 +3,8 @@
 // It spawns the session's endpoint, reports the session's main-loop turns to it, puts in
 // what it hands over (a submit, a steer, a /clear, /exit or /compact), and asks it at
 // SessionStart, UserPromptSubmit and Stop. The runner reads no setting: its bounds are the
-// constants below, and the endpoint's first line carries `stop_wait_ms` and
-// `listen_wait_ms`.
+// constants below, and the endpoint's first line carries `stop_wait_ms`, `listen_wait_ms`
+// and `prompt_wait_ms`.
 //
 // The endpoint command: `MOXI_TURNS_ENDPOINT` in the session's environment, which a launch
 // through turns' launch additions sets; else the one `endpoint.json` beside this plugin
@@ -16,8 +16,8 @@
 // endpoint's half, moxi_turns.claude_leg, states it in full; the runner's part:
 //
 // Endpoint to runner: one JSON object per line on the child's stdout, by `op`:
-//   hello    {op, leg: 4, mod_sock, stop_wait_ms, listen_wait_ms, endpoint_version, pid,
-//            stop_after_clear, guards, after_tool_wait_ms, floors}
+//   hello    {op, leg: 5, mod_sock, stop_wait_ms, listen_wait_ms, prompt_wait_ms,
+//            endpoint_version, pid, stop_after_clear, guards, after_tool_wait_ms, floors}
 //            the first line. Before it the runner sends nothing, and it sends nothing to an
 //            endpoint whose leg it does not speak. `stop_after_clear` false: after a clear
 //            the runner stops no shell (each listed one is left, `not-stopped-after-clear`).
@@ -25,39 +25,56 @@
 //   guards   {op, table}   the guard table again, at each ready; it replaces the one held
 //   floors   {op, rows}    every after-tool row's floor, at each change; replaces the map
 //   failed   {op, leg, error}   the endpoint could not start: its only line
-//   submit   {op, delivery, kind, text, nonce}
+//   submit   {op, delivery, kind, text, nonce, note?}
 //            opens the submit's window and calls $.prompt.submit with the line
-//            `moxi-turns-window: <nonce>` first (entry, below); one window at a time
+//            `moxi-turns-window: <nonce>` first (entry, below); one window at a time.
+//            `note` comes only on a held steer's submit: its text (the held note, below)
 //   append   {op, delivery, text}             a steer: $.session.append, a user row
 //   live     {op, ask}                        the live facts: answered on POST /live
 //   agents   {op, ask}                        $.agent.list(): answered on POST /agents
 //   command  {op, request, name: clear|exit|compact, stop_shells}
 //            $.command.run, which the gate re-checks; with stop_shells, the shell stop
 //            (below) around it
+//   fork     {op, delivery, text}   a fork of the main loop with text as its task (the
+//            fork, below)
+//   fork.continue {op, delivery, agent_id, text}   the fork, which has answered, gets text
+//            as its next round (the fork, below)
 //
 // Runner to endpoint: HTTP POST with a JSON body to `mod_sock`, answered with a JSON object.
 //   /report  {seq, kind, ...} through one ordered queue, each sent once the one before it
 //            landed; `seq` counts from 1 per runner load, in the order sent. Kinds:
 //              session        {session_id, mod_version}  first, once the hello came
 //              turn.start     {turn_id}
-//              turn.complete  {turn_id, reason, is_aborted}
+//              turn.complete  {turn_id, reason, is_aborted, answer}  answer: the turn's
+//                             final visible text
 //              submit.close   {delivery, end, reason}  the submit settled: end is resolve,
 //                             drop (reason: the gate's code, else `dropped`; `unsupported`
 //                             when the gate is not loaded and nothing was submitted) or
 //                             fail (reason: words). Sent whenever it settles, after a
-//                             bound's report too.
+//                             bound's report too. A held steer's submit that another
+//                             request made needless closes `carried`, nothing submitted.
 //              submit.bound   {delivery, reason}  the runner's bound (below)
 //              append.done    {delivery}  $.session.append resolved without a deny
 //              append.failed  {delivery, reason}
+//              append.held    {delivery}  the steer went in, but its turn ended before
+//                             any request carried it (the held note, below)
 //              command.done   {request, state: ran|refused|failed, reason, new_session_id,
 //                             shells?}  with stop_shells a `ran` carries
 //                             shells: {stopped: [id], left: [{id, why}], complete}
+//              fork.started   {delivery, agent_id}  the fork's spawn resolved, or a
+//                             further round's text was delivered
+//              fork.done      {delivery, answer, reason, is_aborted}  its task round's
+//                             turn.complete
+//              fork.lost      {delivery, reason}  reason starts `denied` or `gone`
 //   /ask/context {event: ready|prompt, source, session_id}  -> {context: string | null}
 //                a ready adds `transcript_path` (the hook input's); a prompt adds `text` (the
-//                hook input's `prompt`) and `origin` (below)
+//                hook input's `prompt`), `origin` (below) and `opens`, true when no
+//                main-loop turn is open as the hook runs (false: it joins the running turn)
 //   /ask/stop    {turn_id, session_id, stop_hook_active, task_types, crons}
 //                                                          -> {reason: string | null}
-//   /live        {ask, agents, draft}                      -> {}  (agents null: unreadable)
+//   /live        {ask, agents, draft}                      -> {}  `agents` the list's
+//                entries, {id, type, status, parentId?, teammateId?}, which the endpoint
+//                judges and counts (agents null: unreadable)
 //   /agents      {ask, entries}                            -> {}  each entry as the engine
 //                gives it, {id, type, description, status, parentId?, teammateId?}; the
 //                endpoint maps the states (entries null: unreadable)
@@ -79,8 +96,9 @@
 //
 // The internal leg rule: no hook waits on the endpoint longer than a bound this plugin's
 // own timer keeps, and a request that misses its bound counts as unanswered. A reporting
-// hook waits at most 1 s for its report; the Stop ask stop_wait_ms + 1 s; a context ask
-// listen_wait_ms + 1 s; a ready waits at most 2 s for the first line.
+// hook waits at most 1 s for its report; the Stop ask stop_wait_ms + 1 s; a ready's context
+// ask listen_wait_ms + 1 s; a prompt's prompt_wait_ms + 1 s (the session's prompt bound,
+// listen_wait_ms when the line names none); a ready waits at most 2 s for the first line.
 //
 // The queue: a report made before the first line waits in the queue and is sent after the
 // session report once the line comes; one whose hook stopped waiting (the 1 s) stays queued
@@ -202,6 +220,12 @@
 // catch makes no trip, since it gets 1 s: it refuses "turns could not check this call"
 // when `next` was not called and a covering entry declared `on_error` deny, else it
 // passes the call on.
+// No table yet: until the endpoint has sent a table (on the hello or a `guards` line) the
+// runner can't tell whether question mode is on, so it refuses every `AskUserQuestion`
+// call, a subagent's too, with "turns' guards aren't loaded, so question mode can't check
+// this call; ask in prose", and logs the refusal; the catch refuses it the same way. Every
+// other call passes with no trip, as with an empty table. A headless session is not
+// refused, and a table that came stays when the endpoint ends.
 //
 // The ask step: at `classic.PermissionRequest` the runner matches the `ask` entries
 // against the hook input's `tool_name`, `tool_input` and `agent_id`, the same way. Nothing
@@ -239,8 +263,8 @@
 // After-tool: `floors` maps each after-tool row (a listener row naming `after-tool`) to
 // its floor in tokens; an empty map means no row, and the runner never asks. Once a call's
 // `next(e)` resolved with a result or an error (not a deny, and never for the runner's own
-// calls), the runner asks /ask/after-tool naming the rows the floors let through, bounded
-// by `after_tool_wait_ms` plus 1 s: on the main loop (no `agentId`) a row is skipped while
+// calls or a held fork's), the runner asks /ask/after-tool naming the rows the floors let
+// through, bounded by `after_tool_wait_ms` plus 1 s: on the main loop (no `agentId`) a row is skipped while
 // the context's tokens, from the last `session.measure` or turn-end reading since the last
 // SessionStart, are below its floor; an agent's call, or a context not known, skips none.
 // With every row skipped no trip is made. The answer's `context` goes into the result's
@@ -254,17 +278,85 @@
 // turn-end reading does. The context's `tokens` in either is what the floors are read
 // against.
 //
+// The fork: on a `fork` line the runner spawns a fork of the main loop with
+// `$.agent.spawn({subagentType: 'fork', prompt: WARM_UP, description: 'subconscious'})`.
+// The warm-up asks for one word and says the task follows, so the task runs as the fork's
+// first resumed round: Claude Code announces a resumed round's answer to the main loop,
+// and not the first answer of a fork a plugin spawned. A spawn answered `{deny}`, one
+// that throws, and one that names no agent report `fork.lost` `denied: ...`. Else the
+// runner holds the agent id (below) and reports `fork.started`, then waits for the
+// fork's first turn.complete, the warm-up's, at most 30 s, and reports nothing of its
+// answer; none in that time, or one whose reason is not `answer`, reports `fork.lost`
+// `gone: ...`. Then it sends the task with `$.session.send({to: {agentId}, text})`, and a
+// send that throws or is not delivered reports `fork.lost` `gone: ...`. The round's
+// turn.complete, within the line's `round_timeout_ms` (the asker's bound; 120 s when the
+// line has none), reports `fork.done` with its answer; none in that time reports
+// `fork.lost` `gone: ...`. On a `fork.continue` line a fork that has answered gets
+// its next round: a fork the runner still holds (a round open) reports `fork.lost`
+// `denied: ...` and nothing is sent; else the runner holds the id for the new delivery and
+// sends the text the same way, `fork.started` once it is delivered, then `fork.done` or
+// `fork.lost` as for the task round. A fork's turn.complete is never reported as a turn.
+// The runner leaves the engine's notice of a finished round (a prompt of origin
+// `task-notification`) as the engine sends it.
+//
+// Held forks: the runner holds a fork's agent id from its spawn, and from a further
+// round's line, until the fork's own turn.complete for that round; only the end of the
+// process that holds the map lets go of it otherwise. A /clear, a compaction or a resume
+// lets go of nothing, so a fork still running after one keeps its calls the fork's.
+// A warm-up or round its bound ends reports `fork.lost` `gone: ...` at once, but the fork
+// may still be running, so its id stays held until that late turn.complete, which lets
+// the id go and reports nothing; a `fork.continue` line for it meanwhile is refused as
+// for any open round. A warm-up that ends other than `answer` and a send that fails let
+// the id go when they report `fork.lost`, since no turn of the fork is running then. A
+// tool call carrying a held id is the fork's: the guards judge it at the call step and
+// the ask step as any call, and the runner makes no after-tool ask for it. A fork's calls reach this hook with this plugin as
+// `next.origin.plugin`, as the runner's own do, so origin alone tells nothing: a call is
+// the runner's own, judged by no guard, only when it carries no `agentId` at all and
+// comes from this plugin (or is a TaskStop of a task the runner is stopping now). A call
+// with an `agentId` the runner does not hold is judged and asked after as any other.
+//
 // The prompt's origin: the /ask/context prompt ask (classic.UserPromptSubmit, which runs
 // inside a prompt's `next(e)`) carries the origin of the prompt the `prompt.submit` hook
 // has in flight: the one whose text equals the hook input's, else the only one in flight.
 // While one of the runner's own submits is in flight only a text match counts; none:
 // null.
+//
+// The held note: a steer goes in as a plugin note, which Claude Code sends with the turn's
+// next request. A turn that makes no further request (the steer came while the model
+// wrote its last answer) ends with the note unsent, and Claude Code holds it for the
+// session's next request, whichever starts it. The runner keeps each steer appended into
+// the open main turn, with its text, until that turn's turn.complete. There it reads
+// `$.session.messages({as: 'api'})`, the messages the next request is built from: a steer
+// whose text is in a user message after the last assistant message was carried by no
+// request of the turn, and the runner reports `append.held` for it, ahead of the
+// turn.complete. A read that fails reports none held. An append that resolves while no
+// main turn is open reports `append.held` in place of `append.done`, since no request is
+// on its way to carry it.
+//
+// The endpoint then hands the held steer back on a `submit` line with its text as `note`.
+// Before it submits, the runner reads the messages again: the note may have gone out with
+// another request since (the person's prompt went first, or a delivery the endpoint handed
+// before the held report). A note in a user message before the last assistant message, or
+// any note while a main turn is open (that turn's requests carry it), was carried: the
+// runner submits nothing and reports `submit.close` with end `carried`. A note in no
+// user message is gone (a /clear or a compaction dropped it), and so is one whose messages
+// cannot be read: the runner submits the note's text itself as the prompt, so the message
+// still reaches the model. Otherwise the note is still held, and the runner submits the
+// line's `text`, the prompt that points at it, so the model reads the note once.
+//
+// A compaction inside that turn's first request may still drop the note, after the runner
+// read it held. So the runner keeps the steer it pointed at until the turn.complete of the
+// main turn that starts next, and reads the messages there once more: a note in no user
+// message before the last assistant message reached no request of the turn, and the
+// runner reports `append.held` for the steer again, ahead of the turn.complete. The
+// endpoint then hands it back once more, on a `submit` line read as above, and never a
+// third time. A read that fails there reports nothing, as at any turn's end.
 
 import type { EngineInterface, Register } from 'claude-code'
 
 type Dollar = EngineInterface
 
-const MOD_VERSION = '0.2.1'
+const MOD_VERSION = '0.3.2'
 const GATE = 'moxi-turns-gate'
 const MARGIN_MS = 1000
 const REPORT_WAIT_MS = 1000
@@ -278,15 +370,28 @@ const IDLE_FAIL_MS = 5000
 const SEND_TRIES = 5
 const SEND_RETRY_MS = 100
 const QUEUE_MAX = 1000
-const BUSY_AGENT = new Set(['pending', 'running', 'waiting'])
 const GATE_DROP = /^moxi-turns-gate: .*\(([a-z-]+)\)$/
 const NONCE_LINE = 'moxi-turns-window: '
-const LEG = 4
+const LEG = 5
 const PLUGIN = 'moxi-turns'
+/** A fork's first round: one word, then its task comes as the first resumed round. */
+export const WARM_UP = 'Answer with only the word READY. Your real task comes in the next message.'
+/** What the session's agent list calls a fork the runner spawned. */
+const FORK_DESCRIPTION = 'subconscious'
+/** How long the runner waits for a fork's warm-up to complete. */
+const WARM_UP_WAIT_MS = 30_000
+/** How long the runner waits for a fork's round to complete when its line sets no bound. */
+const ROUND_WAIT_MS = 120_000
+/** The longest round bound a line may set: the longest timer the runtime keeps. */
+const ROUND_WAIT_MAX_MS = 2 ** 31 - 1
 /** A guard's bound when its entry names none. */
 const GUARD_DEADLINE_MS = 500
 /** The catch's refusal: it decides at once and names no guard. */
 const CANNOT_CHECK = 'turns could not check this call'
+/** The tool question mode guards: refused while no guard table has come. */
+const QUESTION_TOOL = 'AskUserQuestion'
+/** The refusal of an `AskUserQuestion` call while no guard table has come. */
+export const NO_TABLE_DENY = "turns' guards aren't loaded, so question mode can't check this call; ask in prose"
 /** The keys of a `tool.call` envelope that are no argument of the tool. */
 const NOT_INPUT = new Set(['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent'])
 const SHELL_STOP_MS = 10_000
@@ -305,7 +410,7 @@ const HOOK_TIMES_MAX = 1000
 const ENDPOINT = { plugin: 'moxi-turns', key: 'endpoint' } as const
 const COMMAND = { plugin: 'moxi-turns', key: 'command' } as const
 
-type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; stopAfterClear: boolean; afterToolWaitMs: number }
+type Hello = { sock: string; stopWaitMs: number; listenWaitMs: number; promptWaitMs: number; stopAfterClear: boolean; afterToolWaitMs: number }
 type Json = Record<string, unknown>
 type Report = { kind: string; fields: Json; seq: number; landed: Promise<void>; land: () => void }
 /** One entry of the guard table, ready to match. */
@@ -343,6 +448,18 @@ type Win = {
   timer: { cancel: () => void } | null
 }
 
+/** Where a held steer's note stands as its own submit comes (`noteStands`). */
+export type NoteStands = 'held' | 'carried' | 'gone'
+
+/** A steer appended into the open main turn: its delivery and its text. */
+export type Steer = { delivery: string; text: string }
+
+/** A turn.complete of a held fork. */
+type ForkEnd = { reason: unknown; isAborted: boolean; answer: unknown }
+/** A fork the runner holds: its delivery, the ends it has not taken yet, and its waiter.
+ *  `lapsed`: its round's bound ended it, and the fork's own turn.complete lets it go. */
+export type Fork = { delivery: string; ends: ForkEnd[]; wake: (() => void) | null; lapsed?: boolean }
+
 /** What a SessionStart's ready ask carries from its hook input. */
 type ReadyFacts = { source: unknown; session_id: unknown; transcript_path: unknown }
 
@@ -360,6 +477,11 @@ let ended = false
 let helloSeen: () => void = () => {}
 let helloP = new Promise<void>(resolve => { helloSeen = resolve })
 let turnOpen: string | null = null
+/** The steers appended into the open main turn, in order, each until its turn.complete. */
+let steers: Steer[] = []
+/** The held steer whose pointing prompt the runner submitted last, with its note, until the
+ *  turn.complete of the main turn that started next (`turnId`, set at its turn.start). */
+let pointed: { delivery: string; note: string; turnId: string | null } | null = null
 let win: Win | null = null
 let seq = 0
 let queue: Report[] = []
@@ -378,6 +500,8 @@ const stopping = new Set<string>()
 let ownCommands = 0
 /** The guard table the endpoint sent last, in its order. */
 let guards: Guard[] = []
+/** Set once the endpoint has sent a table, empty or not. */
+let tableSeen = false
 /** The prompts waiting for a main turn, in the order seen. */
 let waiting: Seen[] = []
 /** The prompts of the main turn now running (or of the last one, until the next starts). */
@@ -388,6 +512,10 @@ let ownSubmits = 0
 let floors: Record<string, number> = {}
 /** The main loop's context in tokens, from the last reading since the last SessionStart. */
 let contextTokens: number | null = null
+/** The forks the runner holds, by agent id, each until its round's turn.complete (its
+ *  delivery's end, or after a round its bound ended). Nothing else empties it: a /clear,
+ *  a compaction or a resume keeps every entry. */
+const held = new Map<string, Fork>()
 
 const log = ($: Dollar, text: string): void => {
   try {
@@ -544,6 +672,8 @@ function settle($: Dollar, w: Win, end: 'resolve' | 'drop' | 'fail', reason: str
   w.closed = true
   stopTimer(w)
   if (win === w) win = null
+  // A submit that did not go in opens no turn whose end could read the note.
+  if (end !== 'resolve' && pointed?.delivery === w.delivery && pointed.turnId === null) pointed = null
   void report($, 'submit.close', { delivery: w.delivery, end, reason })
 }
 
@@ -567,7 +697,9 @@ async function writeSock($: Dollar): Promise<void> {
   await $.state.set(ENDPOINT, { sock: hello.sock })
 }
 
-async function openWindow($: Dollar, delivery: string, text: string, nonce: string): Promise<void> {
+/** Open the window of `delivery` and submit `text` in it. `note`: the held note `text`
+ *  points at, which the end of the turn the submit opens reads again (`pointed`). */
+async function openWindow($: Dollar, delivery: string, text: string, nonce: string, note?: string): Promise<void> {
   // A new submit means the endpoint closed the last window. If that submit is still
   // pending it reports its settle when it comes; its bound no longer counts.
   if (win !== null) {
@@ -586,6 +718,7 @@ async function openWindow($: Dollar, delivery: string, text: string, nonce: stri
   }
   const w: Win = { delivery, closed: false, bounded: false, timer: null }
   win = w
+  if (note !== undefined) pointed = { delivery, note, turnId: null }
   arm($, w, IDLE_FAIL_MS)
   let submitted: ReturnType<Dollar['prompt']['submit']>
   // Counted in flight until the call settles, whatever the window does: a bound or the
@@ -626,12 +759,19 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : und
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : d)
 
 async function live($: Dollar, askId: unknown): Promise<void> {
-  // An unreadable subagent list is unknown, sent as null, which the endpoint counts as
-  // busy: never as 0. An unreadable box counts as a draft.
-  let agents: number | null = null
+  // The list's entries go unjudged and uncounted: the endpoint judges the waiting ones
+  // and counts the busy. An unreadable subagent list is unknown, sent as null, which the
+  // endpoint counts as busy: never as 0. An unreadable box counts as a draft.
+  let agents: Record<string, unknown>[] | null = null
   let draft = true
   try {
-    agents = (await $.agent.list()).filter(a => BUSY_AGENT.has(String(a.status))).length
+    agents = (await $.agent.list()).map(a => ({
+      id: a.id,
+      type: a.type,
+      status: a.status,
+      ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
+      ...(a.teammateId !== undefined ? { teammateId: a.teammateId } : {}),
+    }))
   } catch {
     agents = null
   }
@@ -666,11 +806,244 @@ async function append($: Dollar, delivery: string, text: string): Promise<void> 
   try {
     const r = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })
     const deny = (r as { deny?: string }).deny
-    if (deny !== undefined) void report($, 'append.failed', { delivery, reason: deny })
-    else void report($, 'append.done', { delivery })
+    if (deny !== undefined) {
+      void report($, 'append.failed', { delivery, reason: deny })
+    } else if (turnOpen === null) {
+      // The turn ended while the call ran: no request is on its way to carry the note.
+      log($, `steer ${delivery} went in after its turn ended; it is held`)
+      void report($, 'append.held', { delivery })
+    } else {
+      steers.push({ delivery, text })
+      void report($, 'append.done', { delivery })
+    }
   } catch (err) {
     void report($, 'append.failed', { delivery, reason: String(err) })
   }
+}
+
+/** The steers of `of` that no request carried: each whose text is in a user message after
+ *  the last assistant message of `messages`, the messages the next request is built from
+ *  (`$.session.messages({as: 'api'})`). Anything else read carries nothing. */
+export function unsent(messages: unknown, of: readonly Steer[]): string[] {
+  if (!Array.isArray(messages) || of.length === 0) return []
+  const last = messages.findLastIndex(m => (m as { role?: unknown } | null)?.role === 'assistant')
+  const texts: string[] = []
+  for (const m of messages.slice(last + 1)) {
+    const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown }
+    if (role !== 'user' || !Array.isArray(content)) continue
+    for (const b of content) {
+      const { type, text } = (b ?? {}) as { type?: unknown; text?: unknown }
+      if (type === 'text' && typeof text === 'string') texts.push(text)
+    }
+  }
+  return of.filter(s => s.text !== '' && texts.some(t => t.includes(s.text))).map(s => s.delivery)
+}
+
+/** Where a held steer's note stands when its own submit comes, read from `messages`, the
+ *  messages the next request is built from (`$.session.messages({as: 'api'})`), and
+ *  `turnIsOpen`, whether a main turn is open: `gone` when no user message holds it (or
+ *  `messages` is no list); `carried` when a user message before the last assistant
+ *  message holds it, or when it is anywhere while a main turn is open (that turn's
+ *  requests carry it); else `held`. */
+export function noteStands(messages: unknown, note: string, turnIsOpen: boolean): NoteStands {
+  const { carried, trailing } = noteRows(messages, note)
+  if (!carried && !trailing) return 'gone'
+  if (turnIsOpen) return 'carried'
+  return carried && !trailing ? 'carried' : 'held'
+}
+
+/** Whether a request carried `note`: a user message of `messages` before the last
+ *  assistant message holds it. */
+export function noteReached(messages: unknown, note: string): boolean {
+  return noteRows(messages, note).carried
+}
+
+/** Where user messages of `messages` hold `note`: `carried`, one before the last assistant
+ *  message; `trailing`, one after it. Neither when `messages` is no list. */
+function noteRows(messages: unknown, note: string): { carried: boolean; trailing: boolean } {
+  let carried = false
+  let trailing = false
+  if (!Array.isArray(messages)) return { carried, trailing }
+  const last = messages.findLastIndex(m => (m as { role?: unknown } | null)?.role === 'assistant')
+  messages.forEach((m, i) => {
+    const { role, content } = (m ?? {}) as { role?: unknown; content?: unknown }
+    if (role !== 'user' || !Array.isArray(content)) return
+    for (const b of content) {
+      const { type, text } = (b ?? {}) as { type?: unknown; text?: unknown }
+      if (type !== 'text' || typeof text !== 'string' || !text.includes(note)) continue
+      if (i > last) trailing = true
+      else carried = true
+    }
+  })
+  return { carried, trailing }
+}
+
+/** Whether the note `p` points at reached no request of the turn that just completed; false
+ *  when the messages cannot be read, as at any turn's end. */
+async function noteMissed($: Dollar, p: { delivery: string; note: string }): Promise<boolean> {
+  try {
+    return !noteReached(await $.session.messages({ as: 'api' }), p.note)
+  } catch (err) {
+    log($, `the messages were not read at the end of held steer ${p.delivery}'s turn, so its note reads carried: ${String(err)}`)
+    return false
+  }
+}
+
+/** Where the note of the held steer `delivery` stands as its submit comes; `gone` when the
+ *  messages cannot be read, so the note's text goes in itself and is never lost. */
+async function heldNote($: Dollar, delivery: string, note: string): Promise<NoteStands> {
+  try {
+    return noteStands(await $.session.messages({ as: 'api' }), note, turnOpen !== null)
+  } catch (err) {
+    log($, `the messages were not read at held steer ${delivery}'s submit: ${String(err)}`)
+    return 'gone'
+  }
+}
+
+/** The steers of the turn that just completed which Claude Code holds for the next
+ *  request; none when the messages cannot be read. */
+async function heldSteers($: Dollar, of: readonly Steer[]): Promise<string[]> {
+  if (of.length === 0) return []
+  try {
+    return unsent(await $.session.messages({ as: 'api' }), of)
+  } catch (err) {
+    log($, `the messages were not read, so no steer reads held: ${String(err)}`)
+    return []
+  }
+}
+
+// -- the fork ---------------------------------------------------------------------------
+
+/** What a fork needs of the engine and the leg; the runner passes `$`'s own calls. */
+export type ForkEngine = {
+  spawn: (args: { subagentType: string; prompt: string; description: string }) => Promise<{ agentId?: string; deny?: string }>
+  send: (args: { to: { agentId: string }; text: string }) => Promise<{ isDelivered: boolean; reason?: string }>
+  after: (ms: number, then: () => void) => { cancel: () => void }
+  report: (kind: 'fork.started' | 'fork.done' | 'fork.lost', fields: Json) => void
+}
+
+/** The fork's next turn.complete, or undefined when none comes within `ms`. */
+async function forkEnd(engine: ForkEngine, f: Fork, ms: number): Promise<ForkEnd | undefined> {
+  if (f.ends.length === 0) {
+    let wake: () => void = () => {}
+    const woke = new Promise<void>(resolve => { wake = resolve })
+    f.wake = wake
+    const timer = engine.after(ms, wake)
+    await woke
+    f.wake = null
+    timer.cancel()
+  }
+  return f.ends.shift()
+}
+
+/** A turn.complete in an agent's loop: a held fork's waiter takes it. One that ends a
+ *  round its bound already ended lets the fork's id go, and nothing more. */
+export function noteForkEnd(forks: Map<string, Fork>, agentId: unknown, e: { reason: unknown; isAborted: unknown; answer: unknown }): void {
+  const f = typeof agentId === 'string' ? forks.get(agentId) : undefined
+  if (f === undefined) return
+  if (f.lapsed === true) {
+    forks.delete(agentId as string)
+    return
+  }
+  f.ends.push({ reason: e.reason, isAborted: e.isAborted === true, answer: e.answer })
+  f.wake?.()
+}
+
+/** A line's `round_timeout_ms`: the asker's bound on the round, or the default when the
+ *  line has none or one that is not a number above 0 and within the runtime's timers. */
+export function roundWaitMs(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= ROUND_WAIT_MAX_MS ? value : ROUND_WAIT_MS
+}
+
+/** The `fork` line: spawn with the warm-up, then give the task as the first resumed round,
+ *  waiting `roundMs` for its answer. `forks` holds the fork's id from the spawn until its
+ *  own turn.complete for the round. */
+export async function runFork(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, text: string, roundMs = ROUND_WAIT_MS): Promise<void> {
+  const lostBefore = (reason: string) => engine.report('fork.lost', { delivery, reason })
+  let agentId: string | undefined
+  try {
+    const r = await engine.spawn({ subagentType: 'fork', prompt: WARM_UP, description: FORK_DESCRIPTION })
+    if (r.deny !== undefined) return lostBefore(`denied: ${r.deny}`)
+    agentId = r.agentId
+  } catch (err) {
+    return lostBefore(`denied: the spawn failed: ${String(err)}`)
+  }
+  if (typeof agentId !== 'string' || agentId === '') return lostBefore('denied: the spawn named no agent')
+  const f: Fork = { delivery, ends: [], wake: null }
+  forks.set(agentId, f)
+  engine.report('fork.started', { delivery, agent_id: agentId })
+  const warm = await forkEnd(engine, f, WARM_UP_WAIT_MS)
+  if (warm === undefined) return lapse(engine, f, `the warm-up did not complete within ${WARM_UP_WAIT_MS / 1000} s`)
+  if (warm.reason !== 'answer' || warm.isAborted) return forkLost(engine, forks, agentId, f, `the warm-up ended ${warm.isAborted ? 'aborted' : String(warm.reason)}`)
+  await round(engine, forks, agentId, f, text, false, roundMs)
+}
+
+/** The `fork.continue` line: a fork that has answered gets `text` as its next round,
+ *  waiting `roundMs` for its answer. */
+export async function runRound(engine: ForkEngine, forks: Map<string, Fork>, delivery: string, agentId: string, text: string, roundMs = ROUND_WAIT_MS): Promise<void> {
+  if (forks.has(agentId)) {
+    engine.report('fork.lost', { delivery, reason: 'denied: a round of the fork is still open' })
+    return
+  }
+  const f: Fork = { delivery, ends: [], wake: null }
+  forks.set(agentId, f)
+  await round(engine, forks, agentId, f, text, true, roundMs)
+}
+
+/** The fork's delivery settles lost, gone, with no turn of it running: the runner lets go
+ *  of its id. */
+function forkLost(engine: ForkEngine, forks: Map<string, Fork>, agentId: string, f: Fork, why: string): void {
+  if (forks.get(agentId) === f) forks.delete(agentId)
+  engine.report('fork.lost', { delivery: f.delivery, reason: `gone: ${why}` })
+}
+
+/** A bound ended the fork's turn: its delivery settles lost, gone, at once, but the fork
+ *  may still be running, so the runner holds its id until the fork's own turn.complete,
+ *  which reports nothing further. */
+function lapse(engine: ForkEngine, f: Fork, why: string): void {
+  f.lapsed = true
+  engine.report('fork.lost', { delivery: f.delivery, reason: `gone: ${why}` })
+}
+
+/** One round of a held fork: send `text`, then its turn.complete within `ms` is the
+ *  delivery's end. `started`: report the start once the engine took the text (a further
+ *  round's). */
+async function round(engine: ForkEngine, forks: Map<string, Fork>, agentId: string, f: Fork, text: string, started: boolean, ms: number): Promise<void> {
+  let sent: { isDelivered: boolean; reason?: string }
+  try {
+    sent = await engine.send({ to: { agentId }, text })
+  } catch (err) {
+    return forkLost(engine, forks, agentId, f, `the task was not sent: ${String(err)}`)
+  }
+  if (!sent.isDelivered) return forkLost(engine, forks, agentId, f, `the task was not delivered: ${sent.reason ?? 'no reason given'}`)
+  if (started) engine.report('fork.started', { delivery: f.delivery, agent_id: agentId })
+  const end = await forkEnd(engine, f, ms)
+  if (end === undefined) return lapse(engine, f, `the fork did not answer within ${ms / 1000} s`)
+  if (forks.get(agentId) === f) forks.delete(agentId)
+  engine.report('fork.done', { delivery: f.delivery, answer: typeof end.answer === 'string' ? end.answer : null, reason: end.reason, is_aborted: end.isAborted })
+}
+
+/** The runner's own fork engine: `$`'s spawn, send and clock, and the report queue. */
+function forkEngine($: Dollar): ForkEngine {
+  return {
+    spawn: args => $.agent.spawn(args),
+    send: args => $.session.send(args),
+    after: (ms, then) => $.clock.after(ms, then),
+    report: (kind, fields) => void report($, kind, fields),
+  }
+}
+
+/** Is this tool call the runner's own, judged by no guard? Only a call with no `agentId`
+ *  at all, from this plugin or a TaskStop of a task the runner is stopping now. A call
+ *  with any `agentId`, a fork's among them, is never the runner's own. */
+export function ownCall(originPlugin: unknown, agentId: unknown, tool: unknown, taskId: unknown, stoppingNow: ReadonlySet<string>): boolean {
+  if (!isMain(agentId)) return false
+  return originPlugin === PLUGIN || (tool === 'TaskStop' && stoppingNow.has(String(taskId)))
+}
+
+/** Is this tool call a fork's the runner holds? */
+export function heldFork(forks: ReadonlyMap<string, unknown>, agentId: unknown): boolean {
+  return typeof agentId === 'string' && forks.has(agentId)
 }
 
 type Name = 'clear' | 'exit' | 'compact'
@@ -842,7 +1215,7 @@ async function onLine($: Dollar, line: string): Promise<void> {
     let land: () => void = () => {}
     const landed = new Promise<void>(resolve => { land = resolve })
     queue.unshift({ kind: 'session', fields: { session_id: sessionId, mod_version: MOD_VERSION }, seq: 0, landed, land })
-    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), stopAfterClear: m.stop_after_clear !== false, afterToolWaitMs: num(m.after_tool_wait_ms, AFTER_TOOL_WAIT_MS) }
+    hello = { sock, stopWaitMs: num(m.stop_wait_ms, 2000), listenWaitMs: num(m.listen_wait_ms, 2000), promptWaitMs: num(m.prompt_wait_ms, num(m.listen_wait_ms, 2000)), stopAfterClear: m.stop_after_clear !== false, afterToolWaitMs: num(m.after_tool_wait_ms, AFTER_TOOL_WAIT_MS) }
     if (m.guards !== undefined) takeTable($, m.guards)
     if (m.floors !== undefined) takeFloors($, m.floors)
     helloSeen()
@@ -866,7 +1239,22 @@ async function onLine($: Dollar, line: string): Promise<void> {
       // Without a nonce the gate would drop the prompt: submit nothing, say so.
       void report($, 'submit.close', { delivery, end: 'fail', reason: 'the submit line carries no window nonce' })
     } else {
-      await openWindow($, delivery, str(m.text) ?? '', nonce)
+      const note = str(m.note)
+      const stands = note === undefined ? undefined : await heldNote($, delivery, note)
+      if (stands === 'carried') {
+        // A new submit means the endpoint closed the last window, as at openWindow.
+        if (win !== null) {
+          stopTimer(win)
+          win = null
+        }
+        log($, `held steer ${delivery} needs no turn of its own: another request carried its note`)
+        void report($, 'submit.close', { delivery, end: 'carried', reason: null })
+      } else if (stands === 'gone') {
+        log($, `held steer ${delivery}'s note is gone from the messages; its text is the prompt`)
+        await openWindow($, delivery, note ?? '', nonce)
+      } else {
+        await openWindow($, delivery, str(m.text) ?? '', nonce, note)
+      }
     }
   } else if (op === 'append' && delivery !== undefined) {
     await append($, delivery, str(m.text) ?? '')
@@ -874,6 +1262,10 @@ async function onLine($: Dollar, line: string): Promise<void> {
     await live($, m.ask)
   } else if (op === 'agents') {
     await agentList($, m.ask)
+  } else if (op === 'fork' && delivery !== undefined) {
+    await runFork(forkEngine($), held, delivery, str(m.text) ?? '', roundWaitMs(m.round_timeout_ms))
+  } else if (op === 'fork.continue' && delivery !== undefined && str(m.agent_id) !== undefined && m.agent_id !== '') {
+    await runRound(forkEngine($), held, delivery, m.agent_id as string, str(m.text) ?? '', roundWaitMs(m.round_timeout_ms))
   } else if (op === 'command' && str(m.request) !== undefined && (m.name === 'clear' || m.name === 'exit' || m.name === 'compact')) {
     await command($, m.request as string, m.name, m.stop_shells === true && m.name !== 'exit')
   } else {
@@ -1110,6 +1502,14 @@ function takeTable($: Dollar, v: unknown): void {
   if (Array.isArray(v) && table.length !== v.length) log($, `${v.length - table.length} guard entries were not entries and are left out`)
   for (const g of table) if (g.bad !== null) log($, `guard ${g.id}: ${g.bad}`)
   guards = table
+  tableSeen = true
+}
+
+/** Is this call refused because no guard table has come? Only an `AskUserQuestion` call,
+ *  before the endpoint's first table, in a session not known to be headless: question mode
+ *  may be on, and nothing can check the call. */
+export function noTableRefuses(tool: unknown, seen: boolean, headlessNow: boolean | undefined): boolean {
+  return !seen && headlessNow !== true && tool === QUESTION_TOOL
 }
 
 /** What the table says of one call. */
@@ -1427,8 +1827,8 @@ export const register: Register = on => {
       if (e.agent_id !== undefined || headless === true || hello === undefined || ended) return behind(hook, performance.now(), await next(e))
       const w = win
       // turns' own entry hook: the bound is raised by this ask's bound while it runs.
-      if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.listenWaitMs + MARGIN_MS)
-      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt) }, hello.listenWaitMs + MARGIN_MS)
+      if (w !== null && turnOpen === null) arm($, w, IDLE_FAIL_MS + hello.promptWaitMs + MARGIN_MS)
+      const answer = await ask($, '/ask/context', { event: 'prompt', source: null, session_id: e.session_id, text: e.prompt ?? null, origin: originOf(e.prompt), opens: turnOpen === null }, hello.promptWaitMs + MARGIN_MS)
       if (w !== null && win === w && turnOpen === null) arm($, w, IDLE_FAIL_MS)
       return withContext(behind(hook, performance.now(), await next(e)), answer?.context)
     } finally {
@@ -1444,6 +1844,8 @@ export const register: Register = on => {
       if (e.agentId === undefined && headless !== true) openList(e.text)
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = e.turnId
+      steers = []
+      if (pointed !== null && pointed.turnId === null) pointed.turnId = e.turnId
       stopTimer(win)
       await reportAndWait($, 'turn.start', { turn_id: e.turnId })
       return behind(hook, performance.now(), await next(e))
@@ -1456,9 +1858,24 @@ export const register: Register = on => {
     const hook = watch()
     try {
       if (e.agentId === undefined && e.isAborted) dropMainLoopCalls()
+      if (e.agentId !== undefined) noteForkEnd(held, e.agentId, e)
       if (e.agentId !== undefined || headless === true || ended) return behind(hook, performance.now(), await next(e))
       turnOpen = null
-      await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted })
+      const mine = steers
+      steers = []
+      for (const delivery of await heldSteers($, mine)) {
+        log($, `steer ${delivery} was carried by no request of turn ${e.turnId}; it is held`)
+        void report($, 'append.held', { delivery })
+      }
+      if (pointed !== null && pointed.turnId === e.turnId) {
+        const p = pointed
+        pointed = null
+        if (await noteMissed($, p)) {
+          log($, `held steer ${p.delivery}'s note reached no request of turn ${e.turnId}; it is held again`)
+          void report($, 'append.held', { delivery: p.delivery })
+        }
+      }
+      await reportAndWait($, 'turn.complete', { turn_id: e.turnId, reason: e.reason, is_aborted: e.isAborted, answer: e.answer })
       if (win !== null) arm($, win, IDLE_FAIL_MS)
       // A reading at every turn's end, whatever the measures said (the plain call is free).
       try {
@@ -1536,16 +1953,22 @@ export const register: Register = on => {
 
   // Every loop's tool calls pass here: each one in flight marks the list, and the guards
   // judge it. The hook's time leaves out the tool's own run (`next`) and the guard trip.
-  // The runner's own calls (its TaskStop) are never judged and mark nothing.
+  // The runner's own calls (its TaskStop) are never judged and mark nothing; a held
+  // fork's calls are judged and get no after-tool ask.
   on('tool.call', async ($, e, next) => {
     const hook = watch()
     const id = e.tool_use_id
-    const own = next.origin.plugin === PLUGIN || (e.tool === 'TaskStop' && stopping.has(String((e as Json).task_id)))
+    const own = ownCall(next.origin.plugin, e.agentId, e.tool, (e as Json).task_id, stopping)
+    const forks = heldFork(held, e.agentId)
     if (!own) {
       inflight.set(id, e.agentId)
       tasksMarked = true
     }
     try {
+      if (!own && noTableRefuses(e.tool, tableSeen, headless)) {
+        log($, `refused ${QUESTION_TOOL}: no guard table has come from the endpoint`)
+        return { deny: NO_TABLE_DENY }
+      }
       const d = own || headless === true || guards.length === 0 ? null : decide(guards, e.tool, e.agentId, inputOf(e as Json))
       let lines: string[] = []
       if (d !== null && (d.covering.length > 0 || d.broken.length > 0)) {
@@ -1555,7 +1978,7 @@ export const register: Register = on => {
       }
       const r = behind(hook, performance.now(), await next(e))
       if (own || headless === true) return r
-      return withLines(r, [...lines, ...(await afterTool($, hook, e as Json, r))])
+      return withLines(r, [...lines, ...(forks ? [] : await afterTool($, hook, e as Json, r))])
     } finally {
       if (!own) {
         inflight.delete(id)
@@ -1566,7 +1989,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => {
     // A grace of 1 s: decide at once, with no trip.
     if (next.called) return next(e)
-    const own = next.origin.plugin === PLUGIN || (e.tool === 'TaskStop' && stopping.has(String((e as Json).task_id)))
+    const own = ownCall(next.origin.plugin, e.agentId, e.tool, (e as Json).task_id, stopping)
+    if (!own && noTableRefuses(e.tool, tableSeen, headless)) return { deny: NO_TABLE_DENY }
     if (!own && catchRefuses(guards, e as Json)) return { deny: CANNOT_CHECK }
     if (!own) tasksMarked = true
     return next(e)

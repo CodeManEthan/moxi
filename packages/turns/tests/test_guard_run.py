@@ -519,6 +519,66 @@ def test_the_table_comes_from_turns_config_and_custom_files(turns_env, tmp_path)
         runner.close()
 
 
+#: How many times `counted_sessions` was asked, and what it answers.
+SESSIONS_ASKED = []
+SESSIONS_ANSWER = {"value": True}
+
+
+def counted_sessions(env):
+    SESSIONS_ASKED.append(env.get("TEST_GUARD_STAMP"))
+    return SESSIONS_ANSWER["value"]
+
+
+def test_a_sessions_function_is_asked_once_and_kept_across_reloads(turns_env, monkeypatch,
+                                                                   caplog):
+    from moxi_turns import guards
+
+    real = guards.load
+    rows = [Guard("kept", {"claude": ("Bash",)}, deny="no",
+                  sessions="test_guard_run:counted_sessions"),
+            Guard("broken", {"claude": ("Read",)}, deny="no",
+                  sessions="nowhere_at_all.mod:fn")]
+
+    def load(on, **kw):
+        return real(on, entries=[SimpleNamespace(name="mod", load=lambda: SimpleNamespace(
+            GUARDS=rows))], switches=lambda module, key: (False, None), **kw)
+
+    monkeypatch.setattr(guards, "load", load)
+    SESSIONS_ASKED.clear()
+    SESSIONS_ANSWER["value"] = True
+    runner = GuardRunner("claude", env={"TEST_GUARD_STAMP": "1"},
+                         settings=lambda: ([], 3000))
+    try:
+        with caplog.at_level("WARNING", logger="moxi.turns.guards"):
+            assert [e["id"] for e in runner.reload()] == ["mod.kept"]
+            SESSIONS_ANSWER["value"] = False
+            assert [e["id"] for e in runner.reload()] == ["mod.kept"]
+        assert runner.entries[0].by == ("sessions",)
+        assert SESSIONS_ASKED == ["1"]
+        said = [r.getMessage() for r in caplog.records
+                if "nowhere_at_all.mod:fn reads off" in r.getMessage()]
+        assert len(said) == 1
+    finally:
+        runner.close()
+    # A new runner is a new session: it asks again.
+    other = GuardRunner("claude", env={}, settings=lambda: ([], 3000))
+    try:
+        assert other.reload() == [] and SESSIONS_ASKED == ["1", None]
+    finally:
+        other.close()
+
+
+def test_a_guard_on_by_its_sessions_function_alone_has_no_off_fix():
+    from moxi_turns.guards.run import _off_fix
+
+    g = Guard("g", {"claude": ("Bash",)}, deny="no", switch="mod.sw", sessions="a.b:c")
+    found = Found("mod.g", g, "module", module="mod")
+    assert _off_fix(Entry.of("mod.g", {"calls": ["Bash"]}, found=found,
+                             by=("sessions",))) is None
+    assert _off_fix(Entry.of("mod.g", {"calls": ["Bash"]}, found=found,
+                             by=("switch", "sessions"))) == "moxi config set mod mod.sw false"
+
+
 # -- on the Claude leg -------------------------------------------------------------------
 
 @pytest.fixture
@@ -546,10 +606,10 @@ def leg_rig(turns_env, rig):
         w.close()
 
 
-def test_the_hello_carries_claudes_table_and_the_leg_is_4(leg_rig):
+def test_the_hello_carries_claudes_table_and_the_leg_is_5(leg_rig):
     ep, runner, r = leg_rig(judged("a", lambda c: None, match={"command": "rm"}),
                             data_only("b", "no", calls=("Agent",)))
-    assert leg.LEG == 4 and runner.first["leg"] == 4
+    assert leg.LEG == 5 and runner.first["leg"] == 5
     assert leg.PATH_GUARD == "/ask/guard" and leg.PATH_GUARD in leg.PATHS
     assert runner.first["guards"] == [
         {"id": "t.a", "calls": ["Bash"], "who": "any", "match": {"command": "rm"},

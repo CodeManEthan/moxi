@@ -7,7 +7,7 @@ import time
 
 import moxi_turns as turns
 import pytest
-from moxi_dev.testing import timed_slack, wait_for
+from moxi_dev.testing import PROC_WAIT_S, timed_slack, wait_for
 
 from moxi_memory import (clock, index, links, listener, listeners, settings, start, state,
                          table)
@@ -103,12 +103,14 @@ def when(newest):
 
 # -- the registration ------------------------------------------------------------------
 
-def test_the_four_rows_in_order():
+def test_the_six_rows_in_order():
     assert listeners.LISTENERS == (
         (("start",), "moxi_memory.listener:start"),
         (("start",), "moxi_memory.listener:lists"),
         (("prompt",), "moxi_memory.listener:prompt"),
+        (("prompt",), "moxi_memory.listener:subconscious"),
         (("turn", "gone"), "moxi_memory.listener:fire"),
+        (("gone",), "moxi_memory.listener:subconscious_gone"),
     )
     for _events, target in listeners.LISTENERS:
         name = target.split(":")[1]
@@ -328,7 +330,8 @@ def _late_identity(comms, conn, shop) -> float:
     took = time.monotonic() - began
     assert text == f"recent sessions in shop:\n- p  {when(10.0)}  codex"
     assert fake.asked == [{"MOXI_COMMS_CLAIM": "x"}]
-    wait_for(lambda: table.row(conn, "claude", "me").identity == "planner", timeout=5)
+    wait_for(lambda: table.row(conn, "claude", "me").identity == "planner",
+             timeout=PROC_WAIT_S)
     return took
 
 

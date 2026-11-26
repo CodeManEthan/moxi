@@ -20,7 +20,7 @@ from playwright.sync_api import expect
 
 import fixture_kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 KEY = re.compile(r"^[A-Za-z0-9_-]{43}$")
 NOT_SENT = "the module didn't get the act"

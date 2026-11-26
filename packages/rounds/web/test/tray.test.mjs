@@ -1,0 +1,392 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  ACT_ID, BODY_MAX_BYTES, bodyOf, chipOf, correctionFound, DRAFT_TEXT_MAX, DRAFTS_MAX, draftOf, EACH, eachLeadWords,
+  isAnswerable, kindWords, leadsKnown, messageWords, mintId, overCap, postsOf, recipientWords, noLeadWords, readBackOf, receiptLines, RULE_LINE,
+  RULE_LINE_ALONE, sameRuling, sendable, sendWords, Tray, trayKey,
+} from "../src/tray.ts";
+
+const UTC = {
+  time: (at) => new Date(at * 1000).toISOString().slice(11, 16),
+  day: (at) => new Date(at * 1000).toISOString().slice(0, 10),
+};
+const TODAY = "2026-11-21";
+const AT = "2026-11-21T11:40:00Z";
+
+let n = 0;
+const mint = () => `a${String(n++).padStart(42, "0")}`;
+const LEADS = { "kestrel/billing-export": "atlas", "kestrel/ledger": null };
+const leadOf = (holder) => LEADS[holder];
+const each = { comms: true, to: EACH, leadOf };
+
+/** A storage in memory, as the browser's `localStorage` behaves. */
+function memory() {
+  const kept = new Map();
+  return { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => kept.set(key, String(value)), kept };
+}
+
+const draft = (kind, more = {}, holder = "kestrel/billing-export", item = "Q1") =>
+  draftOf(holder, item, kind, more, mint);
+
+test("an act id is 43 characters of the URL-safe alphabet", () => {
+  const id = mintId();
+  assert.match(id, ACT_ID);
+  assert.notEqual(mintId(), id);
+  assert.equal(mintId((bytes) => bytes.fill(255)), "_".repeat(42) + "8");
+});
+
+test("each kind's chip says who records it", () => {
+  for (const kind of ["pick", "accept", "reject", "read-back", "done", "park", "unpark"]) {
+    assert.equal(chipOf(draft(kind), each), "page records it on Send");
+  }
+  assert.equal(chipOf(draft("words", { text: "the second" }), each), "atlas words and records it");
+  assert.equal(chipOf(draft("correct", { text: "no" }), each), "atlas words and records it");
+  assert.equal(chipOf(draft("explain"), each), "goes to atlas; nothing to record");
+  assert.equal(chipOf(draft("words", { text: "x" }), { ...each, to: "builder-1" }), "builder-1 words and records it");
+});
+
+test("a draft with no lead under each says to pick an agent, and is left out of Send", () => {
+  const none = draft("pick", { chose: "a" }, "kestrel/ledger");
+  assert.equal(chipOf(none, each), noLeadWords("kestrel/ledger"));
+  assert.equal(chipOf(none, each), "No lead for kestrel/ledger: pick an agent to send it to");
+  const other = draft("pick", { chose: "b" });
+  assert.deepEqual(sendable([none, other], each).map((one) => one.act), [other.act]);
+  assert.equal(chipOf(none, { ...each, to: "builder-1" }), "page records it on Send");
+  assert.equal(sendable([none, other], { ...each, to: "builder-1" }).length, 2);
+});
+
+test("a project's draft whose lead the page can't tell goes, for the server to find", () => {
+  const project = draft("pick", { chose: "a" }, "kestrel", "P1");
+  assert.equal(chipOf(project, each), "page records it on Send");
+  assert.equal(sendable([project], each).length, 1);
+});
+
+test("a project's lead reads (the project's) in the chips, the Send now name and the To picker's default", () => {
+  const leads = { "kestrel/billing-export": "atlas", "kestrel/ledger": "kestrel-lead", kestrel: "kestrel-lead" };
+  const reach = { comms: true, to: EACH, leadOf: (holder) => leads[holder],
+                  fromProject: (holder) => holder !== "kestrel/billing-export" };
+  const own = draft("words", { text: "mine" });
+  const ledger = draft("words", { text: "theirs" }, "kestrel/ledger", "Q2");
+  const project = draft("explain", {}, "kestrel", "P1");
+  assert.equal(chipOf(own, reach), "atlas words and records it");
+  assert.equal(chipOf(ledger, reach), "kestrel-lead (the project's) words and records it");
+  assert.equal(chipOf(project, reach), "goes to kestrel-lead (the project's); nothing to record");
+  assert.equal(recipientWords(ledger, reach), "kestrel-lead (the project's)");
+  assert.equal(eachLeadWords([own, ledger, project], reach), "Each round's lead: atlas, kestrel-lead (the project's)");
+  assert.equal(eachLeadWords([], reach), "Each round's lead");
+  // An agent picked is named as it is.
+  assert.equal(recipientWords(ledger, { ...reach, to: "builder-1" }), "builder-1");
+  assert.equal(recipientWords(draft("pick", {}, "kestrel/payroll"), { ...reach, leadOf: () => null }), null);
+});
+
+test("a project with no lead offers no send to a lead, before any send and once the server keeps its draft", () => {
+  const words = draft("words", { text: "Yes, ship it." }, "beta", "P1");
+  const pick = draft("pick", { chose: "a" }, "beta", "P2");
+  // Before any send: the board reads no lead for the project.
+  const board = { comms: true, to: EACH, leadOf: leadsKnown((holder) => (holder === "beta" ? null : undefined), [words]) };
+  assert.equal(recipientWords(words, board), null);
+  assert.equal(chipOf(words, board), noLeadWords("beta"));
+  assert.deepEqual(sendable([words, pick], board), []);
+  // The board can't tell, so the page names "the lead" until the server answers.
+  const unknown = (holder) => undefined;
+  assert.equal(recipientWords(words, { ...board, leadOf: leadsKnown(unknown, [words]) }), "the lead");
+  // The server keeps it for having no lead: every draft of the holder then offers the picker only.
+  const kept = { ...words, receipt: { act: words.act, holder: "beta", item: "P1", kind: "words", state: "kept",
+                                      reason: noLeadWords("beta"), fix: null } };
+  const after = { comms: true, to: EACH, leadOf: leadsKnown(unknown, [kept, pick]) };
+  assert.equal(recipientWords(kept, after), null);
+  assert.equal(recipientWords(pick, after), null);
+  assert.equal(chipOf(kept, after), noLeadWords("beta"));
+  assert.deepEqual(sendable([kept, pick], after), []);
+  assert.equal(eachLeadWords([kept, pick], after), "Each round's lead");
+  // An agent picked takes them, and a lead the board reads later wins over the kept answer.
+  assert.deepEqual(sendable([kept, pick], { ...after, to: "builder-1" }).map((one) => one.act), [kept.act, pick.act]);
+  assert.equal(recipientWords(kept, { ...after, to: "builder-1" }), "builder-1");
+  assert.equal(leadsKnown(() => "beta-lead", [kept])("beta"), "beta-lead");
+  // A draft kept for another reason, or a kept draft of another holder, tells nothing of this one's lead.
+  const alone = { ...kept, receipt: { ...kept.receipt, reason: "comms is not installed", fix: "moxi rounds rule" } };
+  assert.equal(leadsKnown(unknown, [alone])("beta"), undefined);
+  assert.equal(leadsKnown(unknown, [kept])("gamma"), undefined);
+});
+
+test("Sent lists each message a send made, and comms' refusal of one", () => {
+  assert.equal(messageWords({ to: "atlas", at: AT, id: "m1", delivery: "live", refused: null }, { today: TODAY, clock: UTC }),
+               "Message to atlas at 11:40, comms m1");
+  assert.equal(messageWords({ to: "atlas", at: AT, id: null, delivery: null, refused: "offline: no daemon" },
+                            { today: TODAY, clock: UTC }),
+               "Message to atlas at 11:40 not sent: offline: no daemon");
+});
+
+test("a draft over the answers route's caps stays in the tray, and a Send goes in posts within them", () => {
+  const long = draft("words", { text: "x".repeat(DRAFT_TEXT_MAX + 1) });
+  assert.match(overCap(long), /^Too long to send: 20,001 characters, and the most is 20,000/);
+  assert.equal(overCap(draft("words", { text: "x".repeat(DRAFT_TEXT_MAX) })), null);
+  assert.deepEqual(sendable([long], each), []);
+  const many = Array.from({ length: DRAFTS_MAX + 1 }, () => draft("pick", { chose: "a" }));
+  assert.deepEqual(postsOf([long, ...many], EACH).map((one) => one.length), [DRAFTS_MAX, 1]);
+  const big = Array.from({ length: 60 }, () => draft("words", { text: "y".repeat(DRAFT_TEXT_MAX) }));
+  const posts = postsOf(big, EACH);
+  assert.ok(posts.length > 1);
+  assert.equal(posts.flat().length, 60);
+  for (const post of posts) {
+    assert.ok(new TextEncoder().encode(JSON.stringify(bodyOf(post, EACH))).length <= BODY_MAX_BYTES);
+  }
+});
+
+test("a recorded draft not told says so, with Send again", () => {
+  const one = { ...draft("pick", { chose: "a" }), receipt: { act: "x", holder: "h", item: "Q1", kind: "pick",
+                                                            state: "recorded-not-told", not_told: "no daemon" } };
+  assert.equal(chipOf(one, each), "recorded, not told: Send again");
+  assert.equal(chipOf(one, { comms: false, to: EACH, leadOf }), "recorded, not told: Send again");
+});
+
+test("with no comms the page's kinds say the page records them and own words show the command", () => {
+  const alone = { comms: false, to: EACH, leadOf };
+  assert.equal(chipOf(draft("park"), alone), "page records it");
+  assert.equal(chipOf(draft("pick", { chose: "a" }, "kestrel/ledger"), alone), "page records it");
+  // The words stay out of the command, whatever they hold, so it reads the same in any shell.
+  assert.equal(chipOf(draft("words", { text: 'say "b", costs $5 and `date`\nline two' }), alone),
+               "moxi rounds rule kestrel/billing-export Q1 --text TEXT --record PTR");
+  assert.equal(chipOf(draft("correct", { text: "no" }, "kestrel/billing-export", "C2"), alone),
+               "moxi rounds rule kestrel/billing-export --text TEXT --supersedes C2 --record PTR");
+  const mixed = [draft("words", { text: "x" }), draft("park"), draft("pick", { chose: "a" }, "kestrel/ledger")];
+  assert.equal(sendable(mixed, alone).length, 2);
+  assert.equal(sendWords(mixed, alone), "Record 2 answers");
+  assert.equal(sendWords(mixed, each), "Send");
+});
+
+test("the rule line names what the page records and what goes to the agent", () => {
+  assert.match(RULE_LINE, /^On Send the page records picks, decisions, read-backs, done jobs, parks and unparks at once\./);
+  assert.match(RULE_LINE, /Your own words and explain requests go to the agent to word and record\.$/);
+  assert.match(RULE_LINE_ALONE, /command shown/);
+});
+
+test("the body holds the drafts as lists of one length and the To choice", () => {
+  const a = draft("pick", { chose: "b" });
+  const b = draft("words", { text: "  mine  " });
+  assert.deepEqual(bodyOf([a, b], EACH), {
+    act: [a.act, b.act], holder: [a.holder, b.holder], item: ["Q1", "Q1"], kind: ["pick", "words"],
+    chose: ["b", ""], text: ["", "mine"], tell: ["", ""], to: "each",
+  });
+});
+
+test("the tray keeps its drafts across a reload, one per page server", () => {
+  const store = memory();
+  const tray = new Tray(store, trayKey("http://127.0.0.1:8800"));
+  const a = draft("pick", { chose: "b", about: "Which?" });
+  tray.add(a);
+  tray.add(draft("park", {}, "kestrel/billing-export", "Q2"));
+  const again = new Tray(store, trayKey("http://127.0.0.1:8800"));
+  assert.deepEqual(again.drafts.map((one) => [one.act, one.kind, one.chose, one.about]),
+                   [[a.act, "pick", "b", "Which?"], [tray.drafts[1].act, "park", null, ""]]);
+  assert.equal(new Tray(store, trayKey("http://127.0.0.1:9900")).drafts.length, 0);
+});
+
+test("a second answer to one item replaces the draft never sent", () => {
+  const tray = new Tray(memory(), "k");
+  tray.add(draft("pick", { chose: "a" }));
+  const words = draft("words", { text: "neither" });
+  tray.add(words);
+  assert.deepEqual(tray.drafts.map((one) => one.act), [words.act]);
+});
+
+test("a tray whose storage can't be read or written still holds its drafts", () => {
+  const broken = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("full"); } };
+  const tray = new Tray(broken, "k");
+  tray.add(draft("park"));
+  assert.equal(tray.drafts.length, 1);
+  const bad = memory();
+  bad.setItem("k", "{not json");
+  assert.equal(new Tray(bad, "k").drafts.length, 0);
+  bad.setItem("k", JSON.stringify({ drafts: [{ act: "short", holder: "h", item: "Q1", kind: "pick" }] }));
+  assert.equal(new Tray(bad, "k").drafts.length, 0);
+});
+
+test("a send's answers move recorded and sent drafts to Sent and keep the rest, across a reload", () => {
+  const store = memory();
+  const tray = new Tray(store, "k");
+  const pick = draft("pick", { chose: "b" });
+  const words = draft("words", { text: "mine" }, "kestrel/billing-export", "Q2");
+  const kept = draft("park", {}, "kestrel/ledger", "Q3");
+  const refused = draft("done", {}, "kestrel/billing-export", "B1.W1");
+  const told = draft("park", {}, "kestrel/billing-export", "Q4");
+  [pick, words, kept, refused, told].forEach((one) => tray.add(one));
+  const base = (one) => ({ act: one.act, holder: one.holder, item: one.item, kind: one.kind });
+  tray.take([
+    { ...base(pick), state: "recorded", ruling: { id: "C4", text: "b" } },
+    { ...base(words), state: "sent", message: { to: "atlas", at: AT, id: "m1", delivery: "delivered" } },
+    { ...base(kept), state: "kept", reason: noLeadWords("kestrel/ledger") },
+    { ...base(refused), state: "refused", reason: "no wait B1.W1" },
+    { ...base(told), state: "recorded-not-told", not_told: "comms is down" },
+  ], [{ to: "atlas", at: AT, id: "m1", delivery: "delivered", refused: null }]);
+  const again = new Tray(store, "k");
+  assert.deepEqual(again.sent.map((one) => one.act), [pick.act, words.act]);
+  assert.deepEqual(again.drafts.map((one) => [one.act, one.receipt.state]),
+                   [[kept.act, "kept"], [refused.act, "refused"], [told.act, "recorded-not-told"]]);
+  assert.equal(again.value.messages.length, 1);
+  assert.equal(again.of("kestrel/billing-export", "Q1").act, pick.act);
+  again.clearSent();
+  assert.equal(new Tray(store, "k").sent.length, 0);
+});
+
+test("Send again gives a not-told draft a tell id, and its taken message moves it to Sent", () => {
+  const tray = new Tray(memory(), "k");
+  const park = draft("park");
+  tray.add(park);
+  const base = { act: park.act, holder: park.holder, item: "Q1", kind: "park" };
+  tray.take([{ ...base, state: "recorded-not-told", record: "page:rounds/x@t", ruling: { id: "C9", text: "park:Q1" },
+               not_told: "down" }]);
+  const [going] = tray.toSend([park.act], mint);
+  assert.match(going.tell, /^a/);
+  assert.equal(tray.toSend([park.act], mint)[0].tell, going.tell);
+  tray.take([{ ...base, tell: going.tell, state: "refused", reason: "comms did not send it: still down" }]);
+  assert.equal(tray.drafts[0].receipt.state, "recorded-not-told");
+  assert.equal(tray.drafts[0].tell, null);
+  const [next] = tray.toSend([park.act], mint);
+  tray.take([{ ...base, tell: next.tell, state: "recorded", message: { to: "atlas", at: AT, id: "m2", delivery: "d" } }]);
+  assert.equal(tray.drafts.length, 0);
+  assert.equal(tray.sent[0].receipt.record, "page:rounds/x@t");
+  assert.equal(tray.sent[0].receipt.message.id, "m2");
+});
+
+test("a question the page parked offers Unpark, and one open again its form, whatever the tray holds", () => {
+  const tray = new Tray(memory(), "k");
+  const park = draft("park");
+  tray.add(park);
+  const base = { act: park.act, holder: park.holder, item: "Q1", kind: "park" };
+  tray.take([{ ...base, state: "recorded-not-told", ruling: { id: "C9", text: "park:Q1" }, not_told: "down" }]);
+  const row = tray.of(park.holder, "Q1");
+  assert.equal(row.receipt.state, "recorded-not-told");
+  // Read before the park shows, the record still says open: no form until it is read again.
+  assert.equal(isAnswerable("question", "open", row, { fresh: false }), false);
+  assert.equal(isAnswerable("question", "parked", row, { fresh: true }), true);
+  const unpark = draft("unpark");
+  tray.add(unpark);
+  tray.take([{ ...base, act: unpark.act, kind: "unpark", state: "recorded", ruling: { id: "C10", text: "revoke:C9" } }]);
+  assert.equal(tray.of(park.holder, "Q1").act, park.act);
+  assert.equal(isAnswerable("question", "open", tray.of(park.holder, "Q1"), { fresh: true }), true);
+  assert.equal(isAnswerable("question", "open", tray.sent[0], { fresh: true }), true);
+  // Ruled, it offers nothing; a question with no row offers its form.
+  assert.equal(isAnswerable("question", "ruled", tray.sent[0], { fresh: true }), false);
+  assert.equal(isAnswerable("question", "open", null, { fresh: true }), true);
+});
+
+test("an item other than a question offers its form until an answer of its did something", () => {
+  const accept = draft("accept", {}, "kestrel/billing-export", "B1.M1");
+  const as = (state) => ({ ...accept, receipt: { act: accept.act, holder: accept.holder, item: "B1.M1", kind: "accept",
+                                                  state } });
+  assert.equal(isAnswerable("decision", "open", null, { fresh: true }), true);
+  assert.equal(isAnswerable("decision", "open", accept, { fresh: true }), true);
+  for (const state of ["refused", "kept"]) assert.equal(isAnswerable("decision", "open", as(state), { fresh: true }), true);
+  for (const state of ["recorded", "recorded-not-told"]) {
+    assert.equal(isAnswerable("decision", "open", as(state), { fresh: true }), false);
+  }
+});
+
+test("a page-recorded act's receipt reads its record, its telling and what rounds holds", () => {
+  const pick = { ...draft("pick", { chose: "b" }), receipt: {
+    act: "x", holder: "kestrel/billing-export", item: "Q1", kind: "pick", state: "recorded",
+    record: "page:rounds/x@2026-11-21T11:40:00Z", at: AT, ruling: { id: "C4", text: "Keep the old export" },
+    message: { to: "atlas", at: AT, id: "m1", delivery: "delivered" }, freed: ["B1"], left: 2 } };
+  assert.deepEqual(receiptLines(pick, { today: TODAY, clock: UTC }).map((one) => one.text), [
+    "Pick b", "Recorded by this page at 11:40", "page:rounds/x@2026-11-21T11:40:00Z", "Told atlas at 11:40, comms m1",
+    "Recorded as C4: Keep the old export", "B1 can start",
+  ]);
+  assert.equal(receiptLines(pick, { today: TODAY, clock: UTC })[4].offer, "read-back");
+  assert.equal(readBackOf(pick), "C4");
+  const done = { ...draft("done", { text: "ran it" }, "kestrel/billing-export", "B1.W1"), receipt: {
+    act: "y", holder: "h", item: "B1.W1", kind: "done", state: "recorded-not-told", at: AT, done: "B1.W1",
+    closed: true, not_told: "comms is down" } };
+  const lines = receiptLines(done, { today: TODAY, clock: UTC });
+  assert.deepEqual(lines.map((one) => one.text), [
+    'I\'ve done it: "ran it"', "Recorded by this page at 11:40", "Not told: comms is down", "B1.W1 marked done",
+    "The round closed.",
+  ]);
+  assert.equal(lines[2].offer, "send-again");
+  const park = { ...draft("park"), receipt: { act: "z", holder: "h", item: "Q1", kind: "park", state: "recorded",
+                                              at: AT, left: 1 } };
+  assert.deepEqual(receiptLines(park, { today: TODAY, clock: UTC }).slice(2).map((one) => one.text),
+                   ["Q1 parked", "1 question left"]);
+});
+
+test("a refused or kept draft's receipt says why, and the fix the lead can run", () => {
+  const busy = { ...draft("pick", { chose: "a" }), receipt: { act: "x", holder: "h", item: "Q1", kind: "pick",
+    state: "refused", busy: true, reason: "the round's lock is held", fix: "moxi rounds rule h Q1 --chose a" } };
+  assert.deepEqual(receiptLines(busy, { today: TODAY, clock: UTC }).map((one) => one.text), [
+    "The round is busy: the round's lock is held", "The lead can run:", "moxi rounds rule h Q1 --chose a"]);
+  const kept = { ...draft("park"), receipt: { act: "x", holder: "h", item: "Q1", kind: "park", state: "kept",
+                                              reason: noLeadWords("h") } };
+  assert.deepEqual(receiptLines(kept, { today: TODAY, clock: UTC }).map((one) => one.text), [noLeadWords("h")]);
+});
+
+test("a sent own-words draft reads recorded once a ruling with the message's pointer appears", () => {
+  const sent = { ...draft("words", { text: "the second, but later" }), receipt: {
+    act: "x", holder: "h", item: "Q1", kind: "words", state: "sent", command: "moxi rounds rule h Q1 --text x --record comms:m1",
+    message: { to: "atlas", at: AT, id: "m1", delivery: "delivered" } } };
+  const lines = (one) => receiptLines(one, { today: TODAY, clock: UTC }).map((line) => line.text);
+  assert.deepEqual(lines(sent), ['"the second, but later"',
+    "Sent to atlas at 11:40, comms m1. That message is the pointer.", "With atlas, not recorded yet",
+    "moxi rounds rule h Q1 --text x --record comms:m1"]);
+  assert.equal(readBackOf(sent), null);
+  const ruled = { ...sent, found: { id: "C7", text: "b, after B1", record: "comms:m1", actor: "atlas", at: AT, shown: false } };
+  assert.deepEqual(lines(ruled).slice(2), ["Recorded as C7: b, after B1", "by atlas"]);
+  assert.equal(readBackOf(ruled), "C7");
+  const other = { ...sent, found: { ...ruled.found, record: "comms:m9" } };
+  assert.deepEqual(lines(other).slice(2), ["Ruled as C7 from comms:m9, not from this message"]);
+});
+
+test("a sent correction reads recorded, by its actor, once the corrected ruling's record names what replaced it", () => {
+  const sent = { ...draft("correct", { text: "the first, not the second" }, "kestrel/billing-export", "C3"), receipt: {
+    act: "x", holder: "kestrel/billing-export", item: "C3", kind: "correct", state: "sent",
+    command: "moxi rounds rule kestrel/billing-export Q1 --supersedes C3 --record comms:m2",
+    message: { to: "atlas", at: AT, id: "m2", delivery: "delivered" } } };
+  const lines = (one) => receiptLines(one, { today: TODAY, clock: UTC }).map((line) => line.text);
+  const ruling = (more) => ({ id: "C5", text: "a, the first", record: "comms:m2", actor: "builder-1", at: AT,
+                              shown: false, ...more });
+  const record = (replaced) => ({ what: "ruling", holder: "kestrel/billing-export", ruling: ruling({ id: "C3" }),
+                                  replaced_by: replaced });
+  // Nothing replaced it yet.
+  assert.equal(correctionFound(sent, record(null)), null);
+  assert.deepEqual(lines(sent).slice(2), ["With atlas, not recorded yet",
+    "moxi rounds rule kestrel/billing-export Q1 --supersedes C3 --record comms:m2"]);
+  assert.equal(readBackOf(sent), null);
+  // Found whether or not it was read back already, with who recorded it.
+  for (const shown of [false, true]) {
+    const found = correctionFound(sent, record(ruling({ shown })));
+    assert.deepEqual(found, ruling({ shown }));
+    const ruled = { ...sent, found };
+    assert.deepEqual(lines(ruled).slice(2), ["Recorded as C5: a, the first", "by builder-1"]);
+    assert.equal(receiptLines(ruled, { today: TODAY, clock: UTC })[2].offer, "read-back");
+    assert.equal(readBackOf(ruled), "C5");
+  }
+  // Ruled from another pointer: said so, with the read-back.
+  const other = { ...sent, found: correctionFound(sent, record(ruling({ record: "comms:m9" }))) };
+  assert.deepEqual(lines(other).slice(2), ["Ruled as C5 from comms:m9, not from this message"]);
+  assert.equal(receiptLines(other, { today: TODAY, clock: UTC })[2].offer, "read-back");
+  // Only a correction reads it.
+  assert.equal(correctionFound(draft("words"), record(ruling({}))), null);
+});
+
+test("a found ruling is the same only when every field is", () => {
+  const one = { id: "C5", text: "a", record: "comms:m2", actor: "builder-1", at: AT, shown: false };
+  assert.equal(sameRuling(one, { ...one }), true);
+  assert.equal(sameRuling(null, null), true);
+  assert.equal(sameRuling(null, one), false);
+  for (const change of [{ id: "C6" }, { actor: null }, { shown: true }, { record: "comms:m9" }]) {
+    assert.equal(sameRuling(one, { ...one, ...change }), false, JSON.stringify(change));
+  }
+});
+
+test("an explain request's receipt says the question stays open", () => {
+  const ask = { ...draft("explain"), receipt: { act: "x", holder: "h", item: "Q1", kind: "explain", state: "sent",
+    message: { to: "atlas", at: AT, id: "m3", delivery: "delivered" } } };
+  assert.deepEqual(receiptLines(ask, { today: TODAY, clock: UTC }).map((one) => one.text), [
+    "Asked atlas to explain at 11:40, comms m3. The question stays open; the reply comes by message."]);
+});
+
+test("each kind's words", () => {
+  assert.equal(kindWords({ kind: "pick", chose: "b" }), "Pick b");
+  assert.equal(kindWords({ kind: "correct" }), "Not what I said");
+  assert.equal(kindWords({ kind: "unpark" }), "Unpark");
+});

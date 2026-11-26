@@ -1,4 +1,4 @@
-"""`moxi-comms-opencode <identity>` end to end on a pty, as a terminal runs it: the real
+"""`moxi-comms-opencode <identity>` (and `moxi comms opencode`) end to end on a pty, as a terminal runs it: the real
 wrapper, the rig's daemon, and the stub `opencode` (`tests/fake_opencode.py`) as both
 the server and the window. No model, no network."""
 
@@ -17,13 +17,22 @@ from conftest import ADDITIONS_COMMS_ONLY_PATCH, wait_until, write_config
 import fake_opencode
 from moxi_comms.adapters import opencode as oc
 from moxi_comms.adapters import opencode_roster
+from moxi_dev.testing import PROC_WAIT_S
 from pty_kit import PtyWrapper, alive
 
 IDENTITY = "coder@proj-a"
 
 
+#: How the pty starts the wrapper: as its script runs it, or as the verb `moxi comms
+#: opencode`, which hands every argument after the verb to the same wrapper.
+RUN_SCRIPT = ("import runpy; runpy.run_module('moxi_comms.adapters.opencode', "
+              "run_name='__main__', alter_sys=True)")
+RUN_VERB = ("import sys; from moxi_comms import cli; "
+            "raise SystemExit(cli.main(['opencode', *sys.argv[1:]], prog='moxi comms'))")
+
+
 class OpenCodePty(PtyWrapper):
-    def __init__(self, argv, env):
+    def __init__(self, argv, env, *, run=RUN_SCRIPT):
         import fcntl
         import termios
         import threading
@@ -31,9 +40,7 @@ class OpenCodePty(PtyWrapper):
         master, slave = os.openpty()
         self.fd = master
         self.proc = subprocess.Popen(
-            [sys.executable, "-c", ADDITIONS_COMMS_ONLY_PATCH + "import runpy; "
-             "runpy.run_module('moxi_comms.adapters.opencode', run_name='__main__', "
-             "alter_sys=True)", *argv], env=env,
+            [sys.executable, "-c", ADDITIONS_COMMS_ONLY_PATCH + run, *argv], env=env,
             stdin=slave, stdout=slave, stderr=slave, start_new_session=True,
             preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))
         os.close(slave)
@@ -60,13 +67,14 @@ def oc_rig(rig, tmp_path):
     w = Rig()
     w.records, w.stub, w.roster, w.rig = records, stub, roster, rig
 
-    def launch(*, window="alt,exit-after=1.5", free=None, extra=()):
+    def launch(*, window="alt,exit-after=1.5", free=None, extra=(), run=RUN_SCRIPT):
         env = dict(os.environ)
         env.update({"FAKE_OPENCODE_DIR": str(records), "FAKE_OPENCODE_WINDOW": window})
         if free is not None:
             env["FAKE_OPENCODE_FREE"] = free
         proc = OpenCodePty([IDENTITY, "--opencode", str(stub),
-                            "--notice-hold-s", "0.5", "--ready-wait-s", "20", *extra], env)
+                            "--notice-hold-s", "0.5", "--ready-wait-s", "20", *extra], env,
+                           run=run)
         launched.append(proc)
         return proc
 
@@ -114,7 +122,8 @@ def test_the_launch_opens_the_window_on_its_own_server_and_a_close_takes_it_offl
 
     assert proc.wait(20.0) == 0
     assert wait_until(lambda: not bound(w.rig)), "closing the window took it offline"
-    assert wait_until(lambda: not alive(serve["pid"]), 10.0), "the server was stopped"
+    assert wait_until(lambda: not alive(serve["pid"]),
+                      PROC_WAIT_S), "the server was stopped"
     out = proc.text()
     assert f"`moxi-comms-opencode {IDENTITY}` launches it again, on a new session" in out
     assert "is not offered" not in out and "no free model" not in out
@@ -208,6 +217,34 @@ def test_dry_run_prints_the_plan_and_spawns_nothing(oc_rig):
     assert "attach <url> -s <session>" in out
     assert w.events() == []
     assert json.dumps(out)
+
+
+def test_the_comms_verb_runs_the_wrapper_under_its_own_name(oc_rig):
+    """An older comms put its OpenCode wrapper on PATH as a console script, beside the
+    Claude and Codex ones. comms' verb `moxi comms opencode` is that command: the same wrapper,
+    the same session and binding, and every line it writes names it as typed."""
+    w = oc_rig
+    proc = w.launch(run=RUN_VERB)
+    assert wait_until(lambda: w.events("window"), 20.0), proc.text()
+    assert bound(w.rig)
+    assert proc.wait(20.0) == 0
+    assert wait_until(lambda: not bound(w.rig)), "closing the window took it offline"
+    out = proc.text()
+    assert f"`moxi comms opencode {IDENTITY}` launches it again, on a new session" in out
+    assert "moxi comms opencode: logging to " in out
+    assert "moxi-comms-opencode" not in out
+
+
+def test_the_comms_help_lists_the_opencode_verb(capsys):
+    from moxi_comms import cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["--help"], prog="moxi comms")
+    assert "opencode" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["opencode", "--help"], prog="moxi comms")
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.startswith("usage: moxi comms opencode ")
 
 
 @pytest.mark.parametrize("old", ["--ready-wait", "--notice-hold"])

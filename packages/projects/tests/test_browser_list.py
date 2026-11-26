@@ -24,7 +24,7 @@ TEST_S = 120
 #: last seconds of its own time, so a slow machine is only ever slow, never a failure.
 REPORT_S = TEST_S - 10
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(TEST_S),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(TEST_S, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]

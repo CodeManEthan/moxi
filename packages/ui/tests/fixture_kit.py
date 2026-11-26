@@ -23,6 +23,12 @@ COMPONENTS["main"] = {"script": "main.js", "title": "Fixture main", "doc": "Home
                       "order": 50}
 '''
 
+#: What an install with `table` adds to the fixture's announcement: the table of rows it
+#: keeps in a file of its own (fixture/moxi_fixture/table.py).
+TABLE = '''
+CONFIG_TABLES = {"defaults": "moxi_fixture.table:TABLE"}
+'''
+
 
 #: What a copy of the fixture's schema gains with `install(..., fields=True)`: the page
 #: fields the Settings page reads, as lines under each key's table. `ratio` is edited on
@@ -46,10 +52,11 @@ FIELDS = {
 }
 
 
-def install(site: Path, version: str = "0.1.0", *, main: bool = False, fields: bool = False) -> Path:
+def install(site: Path, version: str = "0.1.0", *, main: bool = False, fields: bool = False,
+            table: bool = False) -> Path:
     """Copy the fixture's package into `site` and write its `.dist-info` beside it. With
     `main` the copy also announces a piece for Home's main spot; with `fields` its schema
-    carries `FIELDS`."""
+    carries `FIELDS`; with `table` it declares its table of rows (`TABLE`)."""
     site.mkdir(parents=True, exist_ok=True)
     target = site / "moxi_fixture"
     if not target.exists():
@@ -59,6 +66,9 @@ def install(site: Path, version: str = "0.1.0", *, main: bool = False, fields: b
                 fh.write(MAIN)
         if fields:
             add_fields(target / "settings.toml")
+        if table:
+            with (target / "module.py").open("a") as fh:
+                fh.write(TABLE)
     set_version(site, version)
     return site
 

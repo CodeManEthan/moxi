@@ -8,8 +8,8 @@ is the reader beneath it.
 from __future__ import annotations
 
 import pytest
-from conftest import (HOUR, assistant_line, claude_config, user_line, write_cache_config,
-                      write_sessions_config, write_transcript)
+from conftest import (HOUR, assistant_line, claude_config, stamp, transcript, user_line,
+                      write_cache_config, write_sessions_config, write_transcript)
 
 from moxi_cache import api, claude, clock
 from moxi_sessions.api import Request
@@ -330,6 +330,124 @@ def test_a_config_that_cannot_be_read_holds_only_the_reads_that_need_it(tmp_path
     write_transcript(SESS_B, root=tmp_path, lines=[assistant_line(100)])
     got = read(SESS_B, tmp_path)
     assert (got.kind, got.code) == ("unknown", "config-error")
+
+
+# ============================================================ response_s
+
+NOW = 1_800_000_000.0
+
+
+def at(age: float) -> dict:
+    """The line fields that stamp a line `age` seconds before `NOW`."""
+    return {"timestamp": stamp(NOW - age)}
+
+
+def response(path_root, build) -> clock.Clock:
+    t = transcript(SESS_A, root=path_root)
+    build(t)
+    t.write()
+    return read(SESS_A, path_root, now=NOW)
+
+
+def test_response_s_runs_from_the_prompt_to_a_one_line_response(tmp_path):
+    def build(t):
+        t.user("hello", **at(130))
+        t.request().text("Done.", **at(100))
+
+    got = response(tmp_path, build)
+    assert got.response_s == 30
+    assert (got.kind, got.age_s, got.ttl_s) == ("warm", 100, 3600)
+
+
+def test_response_s_runs_to_the_newest_line_of_a_many_line_response(tmp_path):
+    """One request writes a line per content block; the clock is its newest line, and the
+    input is the newest tool result before its first."""
+    def build(t):
+        t.user("hello", **at(300))
+        first = t.request()
+        call = first.tool_use("Read", **at(290))
+        t.tool_result(call, **at(280))
+        t.tool_result(call, **at(250))
+        second = t.request()
+        second.thinking(**at(240))
+        second.text(**at(220))
+        second.text("More.", **at(200))
+
+    got = response(tmp_path, build)
+    assert (got.kind, got.age_s) == ("warm", 200)
+    assert got.response_s == 50
+
+
+def test_a_tool_result_among_the_requests_own_lines_is_passed_over(tmp_path):
+    """A tool that ran while the response streamed writes its result between two lines of
+    the request; the request had started before it, so the input is older."""
+    def build(t):
+        t.user("hello", **at(400))
+        req = t.request()
+        call = req.tool_use("Read", **at(390))
+        t.tool_result(call, **at(389))
+        req.tool_use("Read", **at(380))
+
+    assert response(tmp_path, build).response_s == 20
+
+
+def test_meta_and_injected_user_lines_are_input_too(tmp_path):
+    """Anything Claude Code writes as the user before the request is written before the
+    request is sent; the newest of them is the input."""
+    def build(t):
+        t.user("hello", **at(500))
+        t.user("<local-command-stdout>ok</local-command-stdout>", isMeta=True, **at(450))
+        t.request().text(**at(440))
+
+    assert response(tmp_path, build).response_s == 10
+
+
+@pytest.mark.parametrize("case", ["no input", "input before the request before"])
+def test_no_input_before_the_request_is_none(tmp_path, case):
+    """With no prompt or tool result between the clock request and the one before it, the
+    read finds none; the clock reads as it does without it."""
+    def build(t):
+        if case == "input before the request before":
+            t.user("hello", **at(500))
+            t.request().text(**at(450))
+        t.request().text(**at(100))
+
+    got = response(tmp_path, build)
+    assert got.response_s is None
+    assert (got.kind, got.age_s, got.ttl_s) == ("warm", 100, 3600)
+
+
+def test_a_subagents_lines_are_not_the_input(tmp_path):
+    def build(t):
+        t.user("hello", **at(500))
+        t.user("from a subagent", isSidechain=True, agentId="a01", **at(450))
+        t.request().text(**at(400))
+
+    assert response(tmp_path, build).response_s == 100
+
+
+def test_a_read_that_ends_at_the_limit_before_the_request_before_finds_none(tmp_path,
+                                                                           monkeypatch):
+    pad = [{"type": "attachment", "pad": "x" * 1000} for _ in range(400)]
+
+    def build(t):
+        t.user("hello", **at(500))
+        for line in pad:
+            t.add(line)
+        t.request().text(**at(100))
+
+    assert response(tmp_path, build).response_s == 400
+    monkeypatch.setattr(clock, "CLOCK_SCAN_LIMIT", 2 * clock.CLOCK_BLOCK)
+    got = read(SESS_A, tmp_path, now=NOW)
+    assert got.response_s is None and (got.kind, got.age_s) == ("warm", 100)
+
+
+def test_an_input_stamped_after_the_request_is_none(tmp_path):
+    def build(t):
+        t.user("hello", **at(50))
+        t.request().text(**at(100))
+
+    assert response(tmp_path, build).response_s is None
 
 
 def test_tier_of_reads_counts_above_zero():

@@ -252,3 +252,93 @@ def test_the_shipped_table_carries_litellms_license_notice():
     readme = (Path(__file__).parents[1] / "README.md").read_text()
     license_section = readme[readme.index("## License"):]
     assert "data/LICENSE-litellm" in license_section
+
+
+# --- the shipped table's own rows for models newer than its LiteLLM snapshot -------------
+
+NEWER = {"claude-fable-5-2": "anthropic", "claude-mythos-5-2": "anthropic",
+         "big-pickle": "opencode", "minimax-m3.1-flash-free": "opencode",
+         "space-bunny-free": "opencode"}
+
+
+@pytest.mark.parametrize("model", ["claude-fable-5-2", "claude-mythos-5-2"])
+def test_the_fable_and_mythos_rows_carry_every_price_the_multipliers_read(model):
+    from moxi_usage import thresholds
+
+    table = models.Table(models.shipped())
+    facts = table.lookup(model)
+    assert step(facts) == (2, model)
+    assert facts.provider == "anthropic" and facts.provenance.filled == ()
+    assert (facts.input, facts.output, facts.cache_read, facts.cache_write_5m,
+            facts.cache_write_1h) == (8.0, 40.0, 0.2, 10.0, 16.0)
+    assert (facts.window, facts.max_output) == (1000000, 128000)
+    assert facts.tiers["fast"] == {"speed": "fast", "input": 16.0, "output": 80.0,
+                                   "cache_read": 0.4, "cache_write_5m": 20.0,
+                                   "cache_write_1h": 32.0}
+    assert thresholds.read_multiplier(model, table=table) == (0.025, None)
+    assert thresholds.write_multiplier(facts, 1.0) == (2.0, None)
+    assert thresholds.write_multiplier(facts, 0.0) == (1.25, None)
+
+
+#: Each fast tier's prices on Anthropic's pricing page: input, output, cache read, 5-minute
+#: and 1-hour cache write. The cache prices are the model's own caching multipliers over
+#: the fast input price (Opus 5.5 reads at 0.05x, Fable and Mythos 5.2 at 0.025x).
+FAST = {"claude-opus-5-5": (8.0, 40.0, 0.4, 10.0, 16.0),
+        "claude-opus-5": (10.0, 50.0, 1.0, 12.5, 20.0),
+        "claude-opus-4-8": (10.0, 50.0, 1.0, 12.5, 20.0),
+        "claude-fable-5-2": (16.0, 80.0, 0.4, 20.0, 32.0),
+        "claude-mythos-5-2": (16.0, 80.0, 0.4, 20.0, 32.0)}
+
+
+def test_every_fast_tier_carries_the_pricing_pages_own_cache_prices():
+    """No fast tier's cache price is filled from the provider's default multiplier: that
+    would read Opus 5.5's fast cache at 0.1x ($0.80), where Anthropic charges 0.05x."""
+    from moxi_usage import cost
+
+    table = models.Table(models.shipped())
+    fast = sorted(key for key, row in models.shipped()["models"].items()
+                  if "fast" in row.get("tiers", {}))
+    assert fast == sorted(FAST)
+    for model, want in FAST.items():
+        facts = table.lookup(model)
+        paid = cost.prices(facts, table.defaults.get(facts.provider), speed="fast")
+        assert paid.tier == "fast" and paid.from_tier_input == () and paid.from_row == ()
+        assert (paid.input, paid.output, paid.cache_read, paid.cache_write_5m,
+                paid.cache_write_1h) == want, model
+
+
+def test_an_opus_5_5_fast_cache_read_costs_40_cents_a_million():
+    from moxi_usage import cost
+
+    table = models.Table(models.shipped())
+    facts = table.lookup("claude-opus-5-5")
+    sums = cost.Sums(requests=1, input=1_000_000, cache_read=1_000_000)
+    priced = cost.price(sums, facts, table.defaults.get("anthropic"), speed="fast")
+    read = next(t for t in priced.terms if t.cls == "cache_read")
+    assert (read.price, read.price_from) == (0.4, cost.FROM_TIER)
+    assert read.cost == pytest.approx(0.40)
+
+
+@pytest.mark.parametrize("model", ["big-pickle", "minimax-m3.1-flash-free",
+                                   "space-bunny-free"])
+def test_opencodes_free_models_are_priced_at_0_and_get_no_multiplier(model):
+    from moxi_usage import thresholds
+
+    table = models.Table(models.shipped())
+    facts = table.lookup(model)
+    assert step(facts) == (2, model) and facts.priced
+    assert facts.provider == "opencode" and facts.provenance.filled == ()
+    assert (facts.input, facts.output) == (0.0, 0.0)
+    assert facts.cache_read is UNKNOWN and facts.cache_write_1h is UNKNOWN
+    assert thresholds.read_multiplier(model, table=table)[0] is None
+    w, why = thresholds.write_multiplier(facts, 1.0)
+    assert w is None and "not above 0" in why
+
+
+def test_the_newer_rows_come_from_the_supplement_with_its_source_and_date():
+    rows = models.shipped()["models"]
+    for model, provider in NEWER.items():
+        provenance = rows[model]["provenance"]
+        assert provenance["source"] == "supplement" and rows[model]["provider"] == provider
+        (cited,) = provenance["supplement"]
+        assert cited["source"] and cited["as_of"] == "2026-11-20"

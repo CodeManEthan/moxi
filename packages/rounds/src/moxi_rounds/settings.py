@@ -11,7 +11,9 @@ what a flow and a project table may hold is checked here.
 A setting is read for a round or for a build. `round_setting` reads one of `ROUND_KEYS`
 for the round's home project; `build_setting` reads one of `BUILD_KEYS` for the build's
 repo. Each takes the project's own table first, then `defaults`.
-The `sweep` keys are this machine's and belong to no project, so they are read as
+`project_setting` reads one of `PROJECT_KEYS`, which only a project's own table holds:
+its checklist, its watched paths and its verifier's brief lines.
+The `sweep` and `watched_paths_guard` keys are this machine's and belong to no project, so they are read as
 they stand (`settings["sweep.armed"]`).
 
 A project's table is `[projects.<key>]`, and its name finds the project the way the
@@ -22,9 +24,11 @@ differ only in case are refused, since both would be the one project's.
 
 from __future__ import annotations
 
+import re
+
 from moxi.config import ConfigError, Schema
 
-from . import flows
+from . import flows, paths
 from .paths import MODULE
 
 SCHEMA_RESOURCE = "settings.toml"
@@ -41,9 +45,13 @@ def schema() -> Schema:
 
 
 def load():
-    """rounds' settings as they stand. Raises `moxi.config.ConfigError`."""
+    """rounds' settings as they stand. Raises `moxi.config.ConfigError`, or
+    `UnfencedTest` under a test whose rounds config directory no Moxi variable places:
+    the core reads the file through a layout of its own, so rounds' config directory is
+    resolved first, through `paths`."""
     from moxi import config
 
+    paths.config_dir()
     return check(config.load(MODULE, schema()))
 
 
@@ -65,6 +73,7 @@ def check(settings):
     _check_disposable(settings.file, "defaults.disposable",
                       settings["defaults.disposable"])
     _check_grace(settings.file, "sweep.grace_hours", settings["sweep.grace_hours"])
+    _check_director(settings.file, "defaults.director", settings["defaults.director"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
         first = named.setdefault(name.casefold(), name)
@@ -85,8 +94,22 @@ def check(settings):
 ROUND_KEYS = ("flow", "dir", "ratify", "trace", "idle_days", "dormant_days",
               "slice_minutes", "sitting_at")
 #: The keys read for a build, from the build's repo.
-BUILD_KEYS = ("into", "check", "ci", "finish", "check_on", "shared_paths", "keep_branch",
-              "lock_ref", "brief", "disposable")
+BUILD_KEYS = ("into", "land", "check", "ci", "finish", "check_on", "shared_paths",
+              "keep_branch", "lock_ref", "brief", "disposable", "director",
+              "private_files")
+#: The keys only a project's own table holds, with no `defaults` form: what the project's
+#: code is checked against belongs to that project.
+PROJECT_KEYS = ("checklist", "watched_paths", "verifier_brief")
+#: The switch of the watched-paths guard, a key of this machine's.
+GUARD_SWITCH = "watched_paths_guard.enabled"
+
+#: How a repo's builds land (`land`): each by its own finish, or through the repo's
+#: queue, where a finish joins the queue and the lander merges.
+LAND_FINISH = "finish"
+LAND_QUEUE = "queue"
+#: What `{base}` in a check's `scoped` command line is filled in with: the merge-base of
+#: the build's tip and its target.
+BASE_FIELD = "{base}"
 
 #: What a finish action does.
 MERGE = "merge"
@@ -98,8 +121,9 @@ DEFAULT_FINISH = ({"do": MERGE},)
 #: A project's own keys, which `defaults` does not hold, each with what it reads when the
 #: project's table leaves it out. No `into` means the branch checked out at the repo's
 #: root, and no `lock_ref` rounds' own name for the lock.
-_PROJECT_ONLY = {"into": None, "check": None, "ci": None, "finish": DEFAULT_FINISH,
-                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": ()}
+_PROJECT_ONLY = {"into": None, "land": LAND_FINISH, "check": None, "ci": None, "finish": DEFAULT_FINISH,
+                 "shared_paths": (), "keep_branch": False, "lock_ref": None, "brief": (),
+                 "private_files": ()}
 
 
 def round_setting(settings, project: str, key: str):
@@ -118,6 +142,16 @@ def build_setting(settings, repo: str, key: str):
         raise KeyError(f"{key!r} is not a setting read for a build")
     value = _setting(settings, repo, key)
     return finish_actions(value) if key == "finish" else value
+
+
+def project_setting(settings, project: str, key: str) -> list:
+    """The value of `key`, one of `PROJECT_KEYS`, in the project `project`'s own table:
+    a copy, empty when the table leaves it out."""
+    import copy
+
+    if key not in PROJECT_KEYS:
+        raise KeyError(f"{key!r} is not a project's own setting")
+    return copy.deepcopy(list(project_table(settings, project).get(key, ())))
 
 
 def project_table(settings, project: str) -> dict:
@@ -157,12 +191,12 @@ def _check_project(file, name, table) -> None:
                           f"write the project's settings as a [{key}] table")
     for other, value in table.items():
         where = f"{key}.{other}"
-        if other not in ROUND_KEYS and other not in BUILD_KEYS:
+        if other not in ROUND_KEYS and other not in BUILD_KEYS and other not in PROJECT_KEYS:
             raise ConfigError(
                 file, where, "is not a key of a project table",
                 "remove it; a project table takes "
-                + ", ".join((*ROUND_KEYS, *BUILD_KEYS)))
-        if other in _PROJECT_ONLY:
+                + ", ".join((*ROUND_KEYS, *BUILD_KEYS, *PROJECT_KEYS)))
+        if other in _PROJECT_ONLY or other in PROJECT_KEYS:
             _PROJECT_CHECKS[other](file, where, value)
         elif other != "dir":
             _check_as_default(file, where, other, value)
@@ -172,8 +206,16 @@ def _check_project(file, name, table) -> None:
             "check is the way past a CI run that is red or absent",
             f'declare the full check too: check = {{ command = "...", timeout_s = N }} '
             f"in [{key}]")
+    if table.get("land") == LAND_QUEUE and "scoped" not in (table.get("check") or {}):
+        raise ConfigError(
+            file, f"{key}.land", "is \"queue\" in a project whose check names no scoped "
+            "command, and a queued build is checked by that command alone",
+            f'give the check its scoped command too: check = {{ command = "...", '
+            f'scoped = "... --base {BASE_FIELD}", timeout_s = N }} in [{key}]')
     if "sitting_at" in table:
         _check_sitting_at(file, f"{key}.sitting_at", table["sitting_at"])
+    if "director" in table:
+        _check_director(file, f"{key}.director", table["director"])
     if "disposable" in table:
         _check_disposable(file, f"{key}.disposable", table["disposable"])
     if "dir" in table:
@@ -205,6 +247,23 @@ def _check_sitting_at(file, where, value) -> None:
         raise ConfigError(file, where, f"is {value}, below 0",
                           "give the count of open questions at which a sitting is "
                           "suggested, or 0 to suggest none")
+
+
+def _check_director(file, where, value) -> None:
+    """The director's comms name: empty, or a name with a lead's name's shape."""
+    from . import leads
+
+    if value and not leads.is_name(value):
+        raise ConfigError(file, where, f"is {value!r}, which is not a comms name",
+                          "give the director's comms name: letters, digits, . _ -, and "
+                          'at most one @scope; or "" to name nobody')
+
+
+def _check_land(file, where, value) -> None:
+    if value not in (LAND_FINISH, LAND_QUEUE):
+        raise ConfigError(file, where, f"is {value!r}, which it cannot be",
+                          f'use "{LAND_FINISH}" (each build lands by its own finish) or '
+                          f'"{LAND_QUEUE}" (a finish joins the repo\'s queue)')
 
 
 def _check_grace(file, where, value) -> None:
@@ -341,39 +400,237 @@ def _check_strings(file, where, value) -> None:
                           "give each item as a string")
 
 
-def _check_check(file, where, value) -> None:
-    """The repo's check: a command line that splits into a command, and its time limit."""
-    import shlex
+def _check_private_files(file, where, value) -> None:
+    """Refuse a `private_files` value that is not a list of literal paths, each relative
+    to the project's root, written with `/`, and named once. Whether a file is there,
+    tracked or ignored is the repo's state, read by `commission` and the doctor."""
+    _check_strings(file, where, value)
+    seen = set()
+    for entry in value:
+        problem = _private_file_problem(entry)
+        if problem:
+            raise ConfigError(file, where, f"holds {entry!r}, {problem}",
+                              "give each private file as a path relative to the "
+                              "project's root, with / between its parts, such as "
+                              "AGENTS.md or notes/local.md")
+        if entry in seen:
+            raise ConfigError(file, where, f"holds {entry!r} twice",
+                              "give each private file once")
+        seen.add(entry)
 
+
+def _private_file_problem(entry: str) -> str:
+    """What makes `entry` no literal relative path to a file, or "" when nothing does."""
+    if not entry:
+        return "which is empty"
+    if any(ord(char) < 32 or ord(char) == 127 for char in entry):
+        return "which holds a control character"
+    if "\\" in entry:
+        return "which holds a \\; write / between the parts"
+    if entry.startswith(("/", "~")) or (len(entry) > 1 and entry[1] == ":"):
+        return "which is not relative to the project's root"
+    if any(char in entry for char in "*?["):
+        return "which holds *, ? or [; each entry is a literal path, not a glob"
+    if entry.startswith(":"):
+        return "which starts with :, which git reads as pathspec magic"
+    parts = entry.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "which has an empty, . or .. part"
+    if any(part.casefold() == ".git" for part in parts):
+        return "which has a .git part"
+    return ""
+
+
+def _check_check(file, where, value, *, keys=("command", "timeout_s")) -> None:
+    """The repo's check: a command line that splits into a command, and its time limit.
+    The project's own check also takes `scoped`, the command line a queue project's
+    build is checked by, `{base}` in it filled in at each run (`_check_project_check`);
+    `ci.local` takes the first two alone."""
     if not isinstance(value, dict):
         raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
                           'write it as { command = "make check", timeout_s = 600 }')
     for other in value:
-        if other not in ("command", "timeout_s"):
+        if other not in keys:
             raise ConfigError(file, f"{where}.{other}", "is not a key of a check",
-                              "remove it; a check takes `command` and `timeout_s`")
-    command = value.get("command")
+                              "remove it; a check takes "
+                              + ", ".join(f"`{key}`" for key in keys))
+    _check_command_line(file, f"{where}.command", value.get("command"))
+    if "scoped" in value:
+        _check_command_line(file, f"{where}.scoped", value["scoped"])
+    flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
+
+
+def _check_project_check(file, where, value) -> None:
+    _check_check(file, where, value, keys=("command", "scoped", "timeout_s"))
+
+
+def _check_command_line(file, where, command) -> None:
+    """A check's command line: one string that splits into a command."""
+    import shlex
+
     if not isinstance(command, str):
-        raise ConfigError(file, f"{where}.command",
+        raise ConfigError(file, where,
                           "is missing" if command is None else "is not a command line",
                           "give the check's command line as one string")
     try:
         words = shlex.split(command)
     except ValueError as exc:
-        raise ConfigError(file, f"{where}.command",
+        raise ConfigError(file, where,
                           f"does not split into a command and its arguments ({exc})",
                           "close every quote, as you would in a shell") from None
     if not words:
-        raise ConfigError(file, f"{where}.command", "splits into no command",
+        raise ConfigError(file, where, "splits into no command",
                           "name the command to run, or remove `check`")
-    flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
+
+
+#: A checklist item's id: lower-case words of letters and digits joined by `-`.
+_ITEM_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+#: The longest checklist item id.
+_ITEM_ID_CHARS = 32
+#: A skill's name as a harness lists it, optionally `<plugin>:<skill>`.
+_SKILL_PART = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+_SKILL = re.compile(rf"{_SKILL_PART}(:{_SKILL_PART})?")
+#: The keys of a checklist item, and of a watched-paths entry (`only_new` may be left out).
+_ITEM_KEYS = ("id", "text", "skills")
+_WATCH_KEYS = ("pattern", "note", "skills", "only_new")
+
+
+def _check_line(file, where, value, what: str) -> None:
+    """One line of plain text, not empty."""
+    if not isinstance(value, str) or not value.strip() or "\n" in value or "\r" in value:
+        raise ConfigError(file, where,
+                          "is missing" if value is None else "is not one line of text",
+                          f"give {what} as one line of plain language")
+
+
+def _check_skills(file, where, value) -> None:
+    """A list of at least one skill name, each named once and as a harness lists it."""
+    if not isinstance(value, list) or not value:
+        raise ConfigError(file, where,
+                          "is missing" if value is None else "is not a list of skill names",
+                          'name at least one skill to load: skills = ["layout-review"]')
+    seen = set()
+    for name in value:
+        if not isinstance(name, str) or not _SKILL.fullmatch(name):
+            raise ConfigError(file, where, f"holds {name!r}, which is not a skill's name",
+                              "name the skill as the harness lists it, as layout-review")
+        if name in seen:
+            raise ConfigError(file, where, f"names {name!r} twice",
+                              "name each skill once")
+        seen.add(name)
+
+
+def _check_table_keys(file, where, entry, keys, what: str) -> None:
+    if not isinstance(entry, dict):
+        raise ConfigError(file, where, f"is {flows.kind_of(entry)}, not a table",
+                          f"write each {what} as a table of " + ", ".join(keys))
+    for other in entry:
+        if other not in keys:
+            raise ConfigError(file, f"{where}.{other}", f"is not a key of a {what}",
+                              f"remove it; a {what} takes " + ", ".join(keys))
+
+
+def _check_checklist(file, where, value) -> None:
+    """The project's checklist: a list of items, each `id`, `text` and `skills`, every id
+    used once."""
+    if not isinstance(value, list):
+        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a list",
+                          'write it as a list of items: [ { id = "public-surface", text = '
+                          '"...", skills = ["layout-review"] } ]')
+    seen = set()
+    for index, item in enumerate(value):
+        here = f"{where}[{index}]"
+        _check_table_keys(file, here, item, _ITEM_KEYS, "checklist item")
+        item_id = item.get("id")
+        if (not isinstance(item_id, str) or len(item_id) > _ITEM_ID_CHARS
+                or not _ITEM_ID.fullmatch(item_id)):
+            raise ConfigError(file, f"{here}.id",
+                              "is missing" if item_id is None
+                              else f"is {item_id!r}, which is not an item id",
+                              f"give lower-case words of letters and digits joined by -, "
+                              f"at most {_ITEM_ID_CHARS} characters, as public-surface")
+        if item_id in seen:
+            raise ConfigError(file, f"{here}.id", f"is {item_id!r}, an id used before",
+                              "give each item an id of its own")
+        seen.add(item_id)
+        _check_line(file, f"{here}.text", item.get("text"), "the item")
+        _check_skills(file, f"{here}.skills", item.get("skills"))
+
+
+def _check_watched_paths(file, where, value) -> None:
+    """The project's watched paths: a list of entries, each `pattern`, `note`, `skills`
+    and optionally `only_new`."""
+    if not isinstance(value, list):
+        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a list",
+                          'write it as a list of entries: [ { pattern = "packages/*/", '
+                          'note = "...", skills = ["layout-review"] } ]')
+    for index, entry in enumerate(value):
+        here = f"{where}[{index}]"
+        _check_table_keys(file, here, entry, _WATCH_KEYS, "watched-paths entry")
+        pattern = entry.get("pattern")
+        problem = _pattern_problem(pattern)
+        if problem:
+            raise ConfigError(file, f"{here}.pattern",
+                              "is missing" if pattern is None else f"is {pattern!r}, {problem}",
+                              "write / between parts; it matches a path written with \\ too"
+                              if isinstance(pattern, str) and "\\" in pattern else
+                              "give a path relative to the project's root, with / between "
+                              "its parts and a / at the end for a folder, as packages/*/")
+        _check_line(file, f"{here}.note", entry.get("note"), "the note")
+        _check_skills(file, f"{here}.skills", entry.get("skills"))
+        if "only_new" in entry:
+            _check_bool(file, f"{here}.only_new", entry["only_new"])
+
+
+def _pattern_problem(pattern) -> str:
+    """What makes `pattern` no watched-paths pattern, or "" when nothing does. One `/` at
+    its end is the folder mark, taken off before its parts are read; every other `/`
+    stands between two parts that are not empty."""
+    if not isinstance(pattern, str) or not pattern:
+        return "which is empty"
+    if any(ord(char) < 32 or ord(char) == 127 for char in pattern):
+        return "which holds a control character"
+    if "\\" in pattern:
+        return "which holds a \\"
+    if pattern.startswith("/"):
+        return "which is not relative to the project's root"
+    body = pattern[:-1] if pattern.endswith("/") else pattern
+    parts = body.split("/")
+    if re.match(r"[A-Za-z]:", parts[0]):
+        return "which names a drive"
+    if any(part == "" for part in parts):
+        return "which has an empty part"
+    if any(part in (".", "..") for part in parts):
+        return "which has a . or .. part"
+    for part in parts:
+        if "**" in part and part != "**":
+            return "which holds ** inside a part; ** stands alone, as a whole part"
+        if _unclosed(part):
+            return "which holds a [ with no closing ]"
+    return ""
+
+
+def _unclosed(part: str) -> bool:
+    """Whether `part` holds a `[` with no `]` closing it, read as `fnmatch` reads one."""
+    at = part.find("[")
+    while at != -1:
+        end = at + 1
+        if end < len(part) and part[end] == "!":
+            end += 1
+        if end < len(part) and part[end] == "]":
+            end += 1
+        end = part.find("]", end)
+        if end == -1:
+            return True
+        at = part.find("[", end + 1)
+    return False
 
 
 #: The keys of `ci`.
 _CI_KEYS = ("workflows", "local", "remote", "ref", "full_ref", "status", "ids", "jobs",
             "status_timeout_s")
 #: The keys of a `ci.workflows` entry written as a table.
-_WORKFLOW_KEYS = ("path", "jobs")
+_WORKFLOW_KEYS = ("path", "jobs", "matrix", "pick", "reads_candidates", "stands_for")
 
 
 def _check_ci(file, where, value) -> None:
@@ -396,6 +653,11 @@ def _check_ci(file, where, value) -> None:
                           'workflows = [".github/workflows/ci.yml"]')
     for entry in workflows:
         _check_workflow(file, f"{where}.workflows", entry)
+    if all(isinstance(entry, dict) and entry.get("reads_candidates") is True
+           for entry in workflows):
+        raise ConfigError(file, f"{where}.workflows",
+                          "marks every workflow reads_candidates, so none reads a full run",
+                          "name the full run's workflow too, with no reads_candidates key")
     local = value.get("local")
     if local is None:
         raise ConfigError(file, f"{where}.local", "is missing",
@@ -425,9 +687,22 @@ def _check_ci(file, where, value) -> None:
     flows.check_timeout(file, f"{where}.status_timeout_s", value.get("status_timeout_s"))
 
 
+def _names_problem(value) -> str | None:
+    """Why `value` is not a list of names, each once; None when it is."""
+    if (not isinstance(value, list) or not value
+            or not all(isinstance(one, str) and one.strip() for one in value)):
+        return "is not a list of job names"
+    if len(set(value)) != len(value):
+        return "names a job twice"
+    return None
+
+
 def _check_workflow(file, where, entry) -> None:
-    """One `ci.workflows` entry: a path inside the repo, or a table of the `path` and
-    the `jobs` read of its run."""
+    """One `ci.workflows` entry: a path inside the repo, or a table of the `path`, the
+    `jobs` read of its run by name, the `matrix` patterns of the jobs read by pattern
+    (one of the two at least), the `pick` job among `jobs`, `reads_candidates`, true
+    for the workflow a queue's candidate is read by, and `stands_for`, a table of job
+    names: each job of its run to the job of the target's full run it stands for."""
     from pathlib import PurePosixPath
 
     path = entry
@@ -438,16 +713,41 @@ def _check_workflow(file, where, entry) -> None:
                                   "is not a key of a workflow entry",
                                   "remove it; an entry takes " + ", ".join(_WORKFLOW_KEYS))
         path = entry.get("path")
-        jobs = entry.get("jobs")
-        if (not isinstance(jobs, list) or not jobs
-                or not all(isinstance(one, str) and one.strip() for one in jobs)):
-            raise ConfigError(file, f"{where}.jobs",
-                              "is missing" if jobs is None else "is not a list of job names",
-                              'name each job read as its run names it: jobs = ["linux"], '
-                              "or give the entry as its path alone to read the whole run")
-        if len(set(jobs)) != len(jobs):
-            raise ConfigError(file, f"{where}.jobs", "names a job twice",
-                              "name each job once")
+        jobs, matrix = entry.get("jobs"), entry.get("matrix")
+        if jobs is not None or matrix is None:
+            why = "is missing" if jobs is None else _names_problem(jobs)
+            if why is not None:
+                raise ConfigError(file, f"{where}.jobs", why,
+                                  'name each job read once, as its run names it: '
+                                  'jobs = ["linux"], or give the entry as its path '
+                                  "alone to read the whole run")
+        if matrix is not None:
+            why = _names_problem(matrix)
+            if why is not None:
+                raise ConfigError(file, f"{where}.matrix", why.replace("job names",
+                                                                       "name patterns"),
+                                  "give each pattern once, * for any text in a name: "
+                                  'matrix = ["browser (*)"]')
+        pick = entry.get("pick")
+        if pick is not None and (not isinstance(pick, str) or pick not in (jobs or ())):
+            raise ConfigError(file, f"{where}.pick", f"is {pick!r}, which jobs does not name",
+                              'name the job that picks the others, and list it in jobs: '
+                              'pick = "pick", jobs = ["pick", ...]')
+        reads = entry.get("reads_candidates")
+        if reads is not None and not isinstance(reads, bool):
+            raise ConfigError(file, f"{where}.reads_candidates",
+                              f"is {reads!r}, not true or false",
+                              "write reads_candidates = true on the workflow a queue's "
+                              "candidate is read by")
+        stands_for = entry.get("stands_for")
+        if stands_for is not None and (
+                not isinstance(stands_for, dict)
+                or not all(isinstance(one, str) and one.strip()
+                           for pair in stands_for.items() for one in pair)):
+            raise ConfigError(file, f"{where}.stands_for",
+                              f"is {stands_for!r}, not a table of job names",
+                              "map each job of this run to the job of the target's full "
+                              'run it stands for: stands_for = { scoped = "linux" }')
     parts = PurePosixPath(path).parts if isinstance(path, str) else ()
     if (not isinstance(path, str) or not path.strip() or path.startswith(("/", "\\"))
             or ".." in parts or ":" in path.split("/")[0]):
@@ -537,15 +837,17 @@ _ACTION_KEYS = {MERGE: ("do", "id"), PUSH: ("do", "id", "remote"),
 
 _PROJECT_CHECKS = {
     "into": lambda file, where, value: _check_string(file, where, value, "a branch's name"),
-    "check": _check_check, "ci": _check_ci, "finish": _check_finish,
+    "land": _check_land, "check": _check_project_check, "ci": _check_ci, "finish": _check_finish,
     "shared_paths": _check_strings, "keep_branch": _check_bool,
     "lock_ref": lambda file, where, value: _check_string(file, where, value, "a git ref"),
-    "brief": _check_strings}
+    "brief": _check_strings, "private_files": _check_private_files,
+    "checklist": _check_checklist, "watched_paths": _check_watched_paths,
+    "verifier_brief": _check_strings}
 
 _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 
 
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
-           "ROUND_KEYS", "BUILD_KEYS", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
-           "round_setting", "build_setting", "project_table", "finish_actions",
-           "has_notes_dir"]
+           "ROUND_KEYS", "BUILD_KEYS", "PROJECT_KEYS", "GUARD_SWITCH", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
+           "round_setting", "build_setting", "project_setting", "project_table",
+           "finish_actions", "has_notes_dir"]

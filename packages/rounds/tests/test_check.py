@@ -6,13 +6,15 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from moxi_rounds import checking, commissioning, log, opening, places, steps
+from moxi_rounds import (check_line, checking, commissioning, log, opening, places,
+                         steps)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
@@ -162,6 +164,310 @@ def test_the_check_s_own_time_limit_applies_without_the_flag(build, declare):
     checking.check(ROUND, "B1", by="coder")
 
     assert ran(path)[0]["exit_code"] is None
+
+
+POSIX = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals and /proc")
+
+
+@POSIX
+def test_with_no_limit_set_a_run_stops_at_the_default_on_sigint(
+        build, declare, monkeypatch):
+    # Core's check ended a run at 3600 s by default, SIGINT first and SIGKILL 30 s on.
+    assert (checking.DEFAULT_TIMEOUT_S, checking.GRACE_S) == (3600.0, 30.0)
+    monkeypatch.setattr(checking, "DEFAULT_TIMEOUT_S", 1.0)
+    path, _tree, made = build
+    declare(f"""
+        import signal, sys, time
+        def stop(signum, frame):
+            open({str(made.scratch / "caught")!r}, "w").write(signal.Signals(signum).name)
+            sys.exit(3)
+        signal.signal(signal.SIGINT, stop)
+        time.sleep(60)
+        """)
+
+    checking.check(ROUND, "B1", by="coder")
+
+    [event] = ran(path)
+    assert event["exit_code"] is None and event["duration_s"] < 20
+    assert (made.scratch / "caught").read_text() == "SIGINT"
+
+
+@POSIX
+def test_the_check_lock_is_held_while_the_command_runs_and_not_inherited(
+        build, declare):
+    # Core's check held the machine's check lock around the run; the command did not
+    # inherit its descriptor.
+    path, _tree, _made = build
+    lock = checking.lock_file()
+    declare(f"""
+        import fcntl, os, sys
+        lock = {str(lock)!r}
+        mine = [one for one in os.listdir("/proc/self/fd")
+                if os.path.realpath(f"/proc/self/fd/{{one}}") == lock]
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            sys.exit(5)
+        except BlockingIOError:
+            sys.exit(6 if mine else 0)
+        """)
+
+    assert checking.check(ROUND, "B1", by="coder").exit_code == 0
+
+
+def test_with_no_wait_a_held_check_lock_refuses_with_nothing_run(
+        build, declare, holder):
+    # Core's --no-wait refused at once, naming the holder.
+    path, _tree, made = build
+    declare(PASS)
+    held = holder(checking.lock_file())
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", by="coder", wait=False)
+    held.stdin.close()
+
+    [unmet] = caught.value.unmet
+    assert unmet.reason == (f"another check holds or waits for the machine's check lock "
+                            f"{checking.lock_file()}: held by pid {held.pid}; 0 waiting")
+    assert ran(path) == [] and not list(made.scratch.glob("check-*.log"))
+
+
+def test_a_run_waits_for_the_check_lock_and_says_who_holds_it(build, declare, holder):
+    # Core's check waited for the lock by default and said once who held it.
+    import threading
+
+    path, _tree, _made = build
+    declare(PASS)
+    held = holder(checking.lock_file())
+    said: list[str] = []
+    threading.Timer(2.0, held.stdin.close).start()
+
+    done = checking.check(ROUND, "B1", by="coder", say=said.append)
+
+    assert done.passed and len(ran(path)) == 1
+    assert said[0] == (f"waiting for the machine's check lock, held by pid {held.pid}; "
+                       "0 ahead of you")
+    assert said[1].startswith("got the check lock after ")
+    assert done.duration_s < 2.0
+    assert check_line.tickets(checking.lock_file()) == []
+    assert not check_line.holder_file(checking.lock_file()).exists()
+
+
+# -- the check lock's line ---------------------------------------------------------------
+
+_WAITER = textwrap.dedent("""
+    import sys, time
+    from moxi_rounds import checking
+    order, name = sys.argv[1], sys.argv[2]
+    held = checking._Held(name=name, step="check")
+    with checking._check_lock(held, checking._Look(unmet=[])):
+        with open(order, "a", encoding="utf-8") as fh:
+            fh.write(name + "\\n")
+        time.sleep(0.2)
+    """)
+
+
+@pytest.fixture
+def waiters(fenced, tmp_path):
+    """`waiters.start(name)`: a real process that waits in the check lock's line as the
+    round `name`, writes `name` to `waiters.order` once it holds the lock, and lets it
+    go; it returns once the process's ticket is in the line, or it has taken the lock.
+    Every process left is killed when the test ends."""
+    from moxi_dev.testing import PROC_WAIT_S, wait_for
+
+    class Waiters:
+        order = tmp_path / "order.txt"
+        procs: list = []
+
+        def start(self, name: str):
+            before = len(check_line.tickets(checking.lock_file()))
+            proc = subprocess.Popen([PY, "-c", _WAITER, str(self.order), name])
+            self.procs.append(proc)
+            wait_for(lambda: len(check_line.tickets(checking.lock_file())) > before
+                     or name in self.taken(), PROC_WAIT_S, what=f"the ticket of {name}")
+            return proc
+
+        def taken(self) -> list[str]:
+            if not self.order.exists():
+                return []
+            return self.order.read_text(encoding="utf-8").split()
+
+    found = Waiters()
+    yield found
+    for proc in found.procs:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=PROC_WAIT_S)
+
+
+def _ticket(fields: dict, *, touched_s: float | None = None) -> Path:
+    path = check_line.take(checking.lock_file(), fields)
+    if touched_s is not None:
+        os.utime(path, (touched_s, touched_s))
+    return path
+
+
+def test_check_lock_waiters_take_the_lock_in_the_order_they_asked(holder, waiters):
+    from moxi_dev.testing import PROC_WAIT_S
+
+    held = holder(checking.lock_file())
+    started = [waiters.start(name) for name in ("first", "second", "third")]
+
+    held.stdin.close()
+    for proc in started:
+        assert proc.wait(timeout=PROC_WAIT_S) == 0
+
+    assert waiters.taken() == ["first", "second", "third"]
+    assert check_line.tickets(checking.lock_file()) == []
+
+
+def test_a_live_ticket_ahead_holds_a_waiter_back_from_a_free_lock(waiters):
+    import time
+
+    from moxi_dev.testing import PROC_WAIT_S
+
+    ahead = _ticket({**check_line.me(), "round": "proj-a/ahead"})
+    behind = waiters.start("behind")
+    time.sleep(6 * check_line.LINE_POLL_S)
+
+    assert behind.poll() is None and waiters.taken() == []
+    check_line.remove(ahead)
+    assert behind.wait(timeout=PROC_WAIT_S) == 0
+    assert waiters.taken() == ["behind"]
+    assert check_line.tickets(checking.lock_file()) == []
+
+
+def test_a_dead_waiters_ticket_is_removed_and_the_next_goes(holder, waiters):
+    from moxi_dev.testing import PROC_WAIT_S
+
+    held = holder(checking.lock_file())
+    killed = waiters.start("killed")
+    after = waiters.start("after")
+    killed.kill()
+    killed.wait(timeout=PROC_WAIT_S)
+
+    held.stdin.close()
+
+    assert after.wait(timeout=PROC_WAIT_S) == 0
+    assert waiters.taken() == ["after"]
+    assert check_line.tickets(checking.lock_file()) == []
+
+
+def test_a_ticket_with_a_reused_pid_is_dead():
+    mine = check_line.me()
+    path = _ticket({**mine, "created": mine["created"] - 3600, "round": "proj-a/x"})
+
+    assert check_line.remove_dead(checking.lock_file()) == []
+    assert not path.exists()
+
+
+def test_a_stale_ticket_is_passed_over_and_keeps_its_place():
+    import time
+
+    lock = checking.lock_file()
+    stale = _ticket({**check_line.me(), "round": "proj-a/stale"},
+                    touched_s=time.time() - check_line.TICKET_STALE_S - 5)
+    own = _ticket({**check_line.me(), "round": "proj-a/own"})
+
+    assert check_line.remove_dead(lock, own=own) == []
+    assert stale.exists()
+
+    os.utime(stale)
+    assert [one.path for one in check_line.remove_dead(lock, own=own)] == [stale]
+
+
+def test_no_wait_is_refused_while_a_ticket_waits(build, declare):
+    path, _tree, made = build
+    declare(PASS)
+    _ticket({**check_line.me(), "round": "proj-a/other"})
+
+    with pytest.raises(Refused) as caught:
+        checking.check(ROUND, "B1", by="coder", wait=False)
+
+    [unmet] = caught.value.unmet
+    assert unmet.reason == (f"another check holds or waits for the machine's check lock "
+                            f"{checking.lock_file()}: held by no one; 1 waiting")
+    assert ran(path) == [] and not list(made.scratch.glob("check-*.log"))
+
+
+def test_an_interrupted_waiter_removes_its_ticket(holder):
+    holder(checking.lock_file())
+
+    def interrupt(_line):
+        raise KeyboardInterrupt
+
+    held = checking._Held(say=interrupt, name="proj-a/x", step="check")
+    with pytest.raises(KeyboardInterrupt), checking._check_lock(
+            held, checking._Look(unmet=[])):
+        pytest.fail("the lock was taken")
+
+    assert check_line.tickets(checking.lock_file()) == []
+
+
+@pytest.fixture
+def refused_removal(monkeypatch):
+    """`refused_removal(times=None)`: removing a ticket or the holder record raises
+    `PermissionError`, as Windows does while another process has the file open, `times`
+    times, or every time with None. Returns the list each refused path is added to."""
+    real = Path.unlink
+
+    def start(times: int | None = None) -> list[Path]:
+        lock = checking.lock_file()
+        refused: list[Path] = []
+
+        def unlink(self, *args, **kwargs):
+            if ((self.parent == check_line.line_dir(lock)
+                 or self == check_line.holder_file(lock))
+                    and (times is None or len(refused) < times)):
+                refused.append(self)
+                raise PermissionError(13, "the file is open in another process", str(self))
+            return real(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", unlink)
+        return refused
+
+    return start
+
+
+def test_a_removal_refused_for_a_moment_is_tried_again(refused_removal):
+    path = _ticket({**check_line.me(), "round": "proj-a/x"})
+    refused = refused_removal(times=2)
+
+    assert check_line.remove(path)
+    assert refused == [path, path] and not path.exists()
+
+
+def test_a_removal_refused_past_its_retry_never_ends_the_check(
+        build, declare, refused_removal, monkeypatch):
+    path, _tree, _made = build
+    declare(PASS)
+    monkeypatch.setattr(check_line, "REMOVE_RETRY_S", 0.1)
+    refused = refused_removal()
+    lock = checking.lock_file()
+
+    done = checking.check(ROUND, "B1", by="coder")
+
+    assert done.passed and len(ran(path)) == 1
+    assert {one.parent for one in refused} == {check_line.line_dir(lock), lock.parent}
+    assert check_line.holder_file(lock).exists()
+    assert [one.path for one in check_line.tickets(lock)] == [refused[0]]
+
+
+def test_the_holder_record_names_the_run_and_its_output(build, declare):
+    path, _tree, made = build
+    declare(f"""
+        import json, pathlib
+        record = pathlib.Path({str(check_line.holder_file(checking.lock_file()))!r})
+        print(record.read_text(encoding="utf-8"))
+        """)
+
+    done = checking.check(ROUND, "B1", by="coder")
+
+    record = json.loads(done.output.read_text(encoding="utf-8"))
+    assert record["pid"] == os.getpid() and record["round"] == ROUND
+    assert (record["stage"], record["step"], record["repo"]) == ("B1", "check", "proj-a")
+    assert record["output"] == str(done.output) and record["created"]
+    assert not check_line.holder_file(checking.lock_file()).exists()
 
 
 def test_with_no_round_the_check_finds_the_build_from_its_worktree(

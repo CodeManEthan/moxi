@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="loadout's drift block is checked in a browser on "
                                         "Linux; the Windows and macOS runs are owed")]
@@ -118,9 +118,14 @@ def test_the_page_keeps_the_contract_and_draws_no_heading_of_its_own(loadout_dir
 
 def test_the_count_is_the_items_not_ok_and_goes_once_the_user_installs(loadout_dir, ui_shell,
                                                                          ui_page):
+    from moxi_loadout import harness
+
     skill(loadout_dir, "fresh-skill")
     (loadout_dir / "loadout.toml").write_text(
         '[user]\nskills = ["tidy-notes", "review-diff", "fresh-skill"]\n', encoding="utf-8")
+    # Every harness is on this machine, so the block counts each of them.
+    for name in harness.HARNESSES:
+        harness.home(name, ui_shell.env).mkdir(parents=True, exist_ok=True)
     rows = not_ok(ui_shell)
     assert rows and {row["state"] for row in rows} == {"missing"}, rows
     # Three skills, each missing for every harness: the block counts each item once.
@@ -170,12 +175,6 @@ def test_a_manifest_that_cant_be_read_shows_its_line_and_no_count(loadout_dir, u
 def test_the_blocks_link_on_the_modules_view_opens_the_page(loadout_dir, ui_page):
     ui_page.goto("/m/ui/modules")
     home = ui_page.locator("#moxi-panel > moxi-ui-page #home")
-    # The page servers list comes over the push stream, which reopens with its topic only
-    # once the blocks have stopped asking for theirs, so it is often drawn after the link
-    # shows, and it grows the row above the link. A click whose press and release
-    # straddle that move releases off the link and opens nothing, so the click waits for
-    # the list.
-    expect(home.locator('[data-block="ui.servers"] li[data-module="loadout"]')).to_be_visible()
     link = home.locator("moxi-loadout-drift h2 a")
     expect(link).to_have_text("Loadout")
     expect(link).not_to_have_attribute("aria-current", "page")

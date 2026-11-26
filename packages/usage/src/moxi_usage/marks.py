@@ -8,8 +8,8 @@ there; on disk it keeps only each session's fired purposes. This module reads th
   purpose's state (`armed`, `fired` with when, or `off`), as a `MarkState`; the fired
   notices of its agents in `agents`. The marks in force are read from the live session's
   own environment through turns when turns is installed and the session is live, else
-  from what the session's file recorded at its last firing, else from config
-  (`marks.default` for the notice; the crossing is off). `marks_from` says which.
+  from what the session's file recorded at its last firing, else both are off (nothing
+  to read them from: no config default stands in). `marks_from` says which.
 * `fired()`: every session's file of fired purposes (`Fired`).
 * `sweep(*, now)`: delete fired-mark files older than `marks.max_age_days` and the
   ceiling's agent markers older than `ceiling.max_age_days`, for the doctor's `marks` row.
@@ -30,7 +30,7 @@ from .thresholds import MAIN
 #: Where the marks in force were read from.
 FROM_SESSION = "session"
 FROM_RECORD = "record"
-FROM_CONFIG = "config"
+FROM_NOTHING = "nothing"
 #: A purpose's states.
 ARMED, FIRED, OFF = "armed", "fired", "off"
 #: The ceiling's markers, under usage's state directory.
@@ -190,7 +190,7 @@ def _in_force(session_id: str, doc: dict | None,
         notice, crossing = marks.get(listener.NOTICE), marks.get(listener.CROSSING)
         return (notice if notice in listener.MARKS else OFF,
                 crossing if crossing in listener.MARKS else OFF, FROM_RECORD)
-    return listener.config_default() or OFF, OFF, FROM_CONFIG
+    return OFF, OFF, FROM_NOTHING
 
 
 def mark(session_id: str, *, harness: str | None = None,
@@ -318,4 +318,4 @@ def _utc(epoch: float) -> str:
 
 
 __all__ = ["MarkState", "PurposeState", "Fired", "Swept", "mark", "fired", "sweep",
-           "FROM_SESSION", "FROM_RECORD", "FROM_CONFIG", "ARMED", "FIRED", "OFF"]
+           "FROM_SESSION", "FROM_RECORD", "FROM_NOTHING", "ARMED", "FIRED", "OFF"]

@@ -8,7 +8,7 @@ import json
 import pytest
 
 from moxi_rounds import (api, asking, closing, dropping, freezing, holds, log, numbers,
-                         opening, rendering, ruling, state, verdicts)
+                         opening, rendering, ruling, settling, state, verdicts)
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
 
@@ -359,13 +359,16 @@ def test_a_finished_build_with_no_report_declaring_its_decisions_holds_the_close
         assert waits(round_dir) == ()
 
 
-def test_an_unruled_major_decision_holds_the_close_and_its_ruling_closes_the_round(
+def test_an_unruled_major_and_an_unsettled_minor_hold_the_close_until_each_is_done(
         opened):
     round_dir = opened("fix")
     built(round_dir, decisions=[("M1", "major"), ("M2", "minor")])
-    assert waits(round_dir) == ("decision B1.M1, major and not yet ruled",)
+    assert waits(round_dir) == ("decision B1.M1, major and not yet ruled",
+                                "decision B1.M2, minor, not yet settled by the lead")
 
     rule("B1.M1=accept")
+    assert waits(round_dir) == ("decision B1.M2, minor, not yet settled by the lead",)
+    settling.settle(ROUND, "B1.M2", "accept", record=PTR, by="planner")
 
     assert status(round_dir) == "closed"
 
@@ -390,6 +393,167 @@ def test_a_round_with_a_retro_step_waits_for_it_after_its_build(opened):
     fold(round_dir)
     built(round_dir)
     assert waits(round_dir) == ("step retro, ready",)
+
+
+# -- which decisions are the operator's to rule, and what a close leaves open -----------
+
+TWO = [("M1", "major"), ("M2", "minor")]
+
+
+def ratify(write_config, setting):
+    write_config(FLOWS + f'\n[defaults]\nratify = "{setting}"\n')
+
+
+def facts(capsys) -> dict[str, str]:
+    """Each open decision of the round, by id, with the line under it that says whether
+    it is the operator's to rule, as show writes it; and the same from show's data."""
+    shown = run(capsys, "show", ROUND).splitlines()
+    data = {one["id"]: one for one in json.loads(run(capsys, "show", ROUND,
+                                                     "--json"))["decisions"]
+            if one["state"] == "open"}
+    said = {}
+    for at, line in enumerate(shown):
+        for key in data:
+            if line.startswith(f"  decision {key}:"):
+                said[key] = shown[at + 2].strip()
+    assert {key: one.get("open_as") for key, one in data.items()} == said
+    return said
+
+
+def rule_of(key):
+    return f"moxi rounds rule {ROUND} {key}=accept|reject --record PTR"
+
+
+def settle_of(key):
+    return (f"moxi rounds mark {ROUND} {key} --accept, --reject or --major --record "
+            "PTR")
+
+
+def label(key, why, weight):
+    """The line under an open decision of a finished build, by the one rule."""
+    if why is None:
+        return f"the operator's to rule: {rule_of(key)}"
+    if weight == "minor":
+        return f"the lead's to settle: {settle_of(key)}"
+    return (f"not put to the operator ({why}); recorded only if the operator rules it: "
+            f"{rule_of(key)}")
+
+
+@pytest.mark.parametrize("setting, m1, m2", [
+    ("majors", None, "ratify is majors"),
+    ("majors+minors", None, None),
+    ("off", "ratify is off", "ratify is off")])
+def test_a_decision_is_the_operator_s_to_rule_only_where_the_ratify_setting_puts_it(
+        opened, write_config, capsys, setting, m1, m2):
+    round_dir = opened("fix")
+    ratify(write_config, setting)
+    built(round_dir, decisions=TWO)
+
+    said = facts(capsys)
+
+    assert said["B1.M1"] == label("B1.M1", m1, "major")
+    assert said["B1.M2"] == label("B1.M2", m2, "minor")
+
+
+def test_a_decision_of_a_build_not_finished_is_not_yet_put_to_the_operator(
+        opened, capsys):
+    round_dir = opened("fix")
+    built(round_dir, finished=False, decisions=[("M1", "major")])
+
+    assert facts(capsys)["B1.M1"] == (
+        f"not yet put to the operator (stage B1 is not finished): {rule_of('B1.M1')}")
+    listed = run(capsys, "list", "--waiting")
+    assert (f"    not yet put to the operator (stage B1 is not finished): "
+            f"{rule_of('B1.M1')}\n") in listed
+
+
+def test_a_decision_only_a_dropped_build_declared_is_not_the_operator_s_to_rule(
+        opened, capsys):
+    round_dir = opened("fix")
+    built(round_dir, finished=False, decisions=[("M1", "major")])
+    path = log.round_log(round_dir)
+    log.append(path, "build.dropped", {"stage": "B1", "by": "lead", "record": PTR},
+               by="planner")
+    log.append(path, "build.commissioned",
+               {"stage": "B1", "repo": "proj-a", "branch": "work", "base": BASE,
+                "target": "main", "builder": "coder", "build": "fedcba9876543210"},
+               by="planner")
+    log.append(path, "verdict.recorded",
+               {"kind": "build", "verdict": "publishable", "pass": "full",
+                "stage": "B1", "head": TIP, "by": "critic", "decisions": []},
+               by="critic")
+    log.append(path, "finish.done", {"stage": "B1", "tip": TIP}, by="coder")
+
+    assert facts(capsys)["B1.M1"] == label(
+        "B1.M1", "the build that finished B1 did not declare it", "major")
+    # It never reached the target, so nothing waits for it.
+    assert waits(round_dir) == ()
+
+
+@pytest.mark.parametrize("setting", ["majors", "off"])
+def test_the_project_list_says_the_operator_s_to_rule_only_where_it_is_put(
+        opened, write_config, capsys, setting):
+    round_dir = opened("fix")
+    ratify(write_config, setting)
+    built(round_dir, decisions=[("M1", "major")])
+
+    listed = run(capsys, "list", "--waiting")
+    [row] = json.loads(run(capsys, "list", "--waiting", "--json"))["decisions"]
+
+    if setting == "majors":
+        assert f"    {label('B1.M1', None, 'major')}\n" in listed
+        assert "not_put" not in row
+    else:
+        assert f"    {label('B1.M1', 'ratify is off', 'major')}\n" in listed
+        assert row["not_put"] == "ratify is off"
+
+
+def test_the_close_lists_each_decision_it_leaves_open_and_show_keeps_the_list(
+        opened, write_config, capsys):
+    round_dir = opened("fix")
+    ratify(write_config, "off")
+    built(round_dir, decisions=TWO)
+
+    # The lead's settlement of the minor one is the write that closes the round.
+    printed = run(capsys, "mark", ROUND, "B1.M2", "--accept", "--record", PTR)
+
+    left = "left open, not put to the operator: decision B1.M1, major: a choice"
+    assert printed.splitlines()[-2:] == [CLOSED_LINE, f"  {left}"]
+    shown = run(capsys, "show", ROUND)
+    assert f"\n  {left}\n" in shown.split("ended: ", 1)[1].split("numbers:", 1)[0]
+    ended = json.loads(run(capsys, "show", ROUND, "--json"))["ended"]
+    assert ended["left_open"] == [{"id": "B1.M1", "weight": "major",
+                                   "forecloses": False, "text": "a choice",
+                                   "put": False}]
+    # An ended round takes no ruling: no command is offered under it.
+    assert facts(capsys)["B1.M1"] == "left open, not put to the operator (ratify is off)"
+
+
+def test_a_close_past_a_skipped_ratify_lists_a_major_as_not_put_to_the_operator(
+        opened, capsys):
+    round_dir = opened("fix")
+    built(round_dir, decisions=[("M1", "major")])
+
+    printed = run(capsys, "rule", ROUND, "skip:ratify", "--record", PTR)
+
+    assert printed.splitlines()[-1] == (
+        "  left open, not put to the operator: decision B1.M1, major: a choice")
+    assert facts(capsys)["B1.M1"] == (
+        "left open, not put to the operator (ratify is skipped)")
+
+
+def test_a_close_under_ratify_off_says_a_major_was_not_put_to_the_operator(
+        opened, write_config, capsys):
+    round_dir = opened("fix")
+    ratify(write_config, "off")
+    built(round_dir, decisions=[("M1", "major")])
+
+    printed = run(capsys, "rule", ROUND, "--text", "a placeholder ruling", "--record",
+                  PTR)
+
+    assert printed.splitlines()[-2:] == [
+        CLOSED_LINE,
+        "  left open, not put to the operator: decision B1.M1, major: a choice"]
 
 
 # -- the verb whose write closes a round says so -----------------------------------------
@@ -619,7 +783,8 @@ def test_a_closed_round_is_shown_as_closed_with_when(closed, capsys):
     assert found["step"] is None
     assert found["ended"] == {"how": "closed", "by": None, "record": None,
                               "actor": "planner", "at": at, "questions": {},
-                              "numbers": events(closed)[-1]["numbers"]}
+                              "numbers": events(closed)[-1]["numbers"],
+                              "left_open": []}
     assert "\nnumbers:\n  design: passes 0, folds 1 (records only 0)" in shown
     assert shown.splitlines()[-1].endswith("  planner  round.closed")
 
@@ -645,7 +810,7 @@ def test_a_closed_round_s_note_and_its_export_say_so(closed, capsys):
 
     note = (closed / "round-note.md").read_text(encoding="utf-8")
     assert "status: closed\n" in note.split("---")[1]
-    assert f"- status: closed\n- ended: closed at {at}\n" in note
+    assert f"- status: closed\n- lead: none\n- ended: closed at {at}\n" in note
     assert "close waits for" not in note
     export = run(capsys, "list", ROUND, "--questions")
     assert (f"This round has ended: closed at {at}. Nothing of it is put to the "
@@ -759,6 +924,6 @@ def test_a_closed_round_s_numbers_are_written_beside_its_note(closed):
 
     assert "\nstatus: closed\n" in text
     assert f"\n- ended: closed at {closing_event['at']}\n" in text
-    assert "\n- skips 1, step-ups 0, repairs 0, corrections 0, dropped builds 0, " \
-           "cleared locks 0\n" in text
+    assert "\n- skips 1, step-ups 0, checklist step-ups 0, repairs 0, " \
+           "corrections 0, dropped builds 0, cleared locks 0\n" in text
     assert text == rendering.retro("proj-a", "a-round", events(closed))

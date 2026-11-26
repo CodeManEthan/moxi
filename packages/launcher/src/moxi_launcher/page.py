@@ -164,11 +164,20 @@ FORM_MODE = _table(target=_text(), mode=_text(nullable=True))
 #: One value an earlier launch's own request gave, spelled as a preset's value is.
 HANDED = _table(name=_text(), value=_text(nullable=True, mark="redact"),
                 items=Out("list", items=Out("string", mark="redact"), nullable=True))
+#: The comms identity a form drawn for `harness` fills with: the name the newest launch of
+#: that harness bound, made `at`, retired or not; else the default, with a null `at`.
+#: `refused` is comms' refusal of a launch under that name (a retired name's among them),
+#: null when it lets one through. `note` says a live session holds the same name in a
+#: project scope, null when none does.
+LAST_IDENTITY = _table(harness=_text(), identity=_text(), at=_text(nullable=True),
+                       refused=Out("table", items=REFUSAL.items, nullable=True),
+                       note=_text(nullable=True))
 #: The newest launch of the key asked for: when it was made, its harness, and each value
-#: its own request gave for a row that may be filled from an earlier launch. `at` and
+#: its own request gave for a row that may be filled from an earlier launch but the comms
+#: identity and scope, which `identities` gives for each harness that has one. `at` and
 #: `harness` are null, and `values` empty, when the key has no such launch.
 LAST = {**STANDING, "at": _text(nullable=True), "harness": _text(nullable=True),
-        "values": Out("list", items=HANDED)}
+        "values": Out("list", items=HANDED), "identities": Out("list", items=LAST_IDENTITY)}
 
 #: An earlier launch that can be run again: `head` is the start of its brief, else its
 #: model and effort, else its harness; `target` and `slot` say where it ran.
@@ -222,7 +231,8 @@ LAUNCHES = {**STANDING, "launches": Out("list", items=LAUNCH),
             "why": _text(nullable=True, mark="redact")}
 
 #: One entry of the past-sessions list. `live` is null when it could not be read;
-#: `project_key` is null for a launch in a folder alone.
+#: `project_key` is null for a launch in a folder alone; `parked` is the slot an open
+#: park entry keeps for the session, null when none does.
 PAST = _table(
     request_id=_text(), created_at=_text(), harness=_text(), target=_text(),
     slot=_text(nullable=True), cwd=_text(mark="path"), project_key=_text(nullable=True),
@@ -231,6 +241,7 @@ PAST = _table(
     resumable=Out("bool"), why=_text(nullable=True), hint=_text(nullable=True),
     unread=_text(nullable=True), held_by=_text(nullable=True),
     resume_of=_text(nullable=True), relaunch_of=_text(nullable=True),
+    parked=Out("int", nullable=True),
 )
 SESSIONS = {**STANDING, "sessions": Out("list", items=PAST)}
 
@@ -247,10 +258,8 @@ SESSION_STATE = _table(
     relaunch=_table(state=_text(nullable=True), run=_RUN_LINE_OR_NONE,
                     made_by=_text(nullable=True), notices_refused=_texts(),
                     note_not_taken=Out("bool"), nullable=True),
-    recycle=_table(on_expiry=_text(), at_limit=_text(), limit_at=_text(nullable=True),
-                   last=_RUN_LINE_OR_NONE, pending_compact=_text(nullable=True),
-                   told_at=_text(nullable=True), pending_dropped_at=_text(nullable=True),
-                   nullable=True),
+    recycle=_table(on_expiry=_text(), at_limit=_text(), last=_RUN_LINE_OR_NONE,
+                   told_at=_text(nullable=True), mark=_text(nullable=True), nullable=True),
     keep_warm=_table(on=Out("bool"), holds=_texts(), nudges=Out("int"),
                      last=_RUN_LINE_OR_NONE, window=_text(nullable=True), nullable=True),
     red=Out("bool"), since=_text(nullable=True), why=_text(nullable=True),
@@ -284,8 +293,9 @@ WHERE = _table(target=_text(), slot=_text(nullable=True), project_key=_text(null
 #: cold, and `estimated` whether that time rests on a lifetime no request named.
 CACHE = _table(nullable=True, state=_text(), until=_text(nullable=True),
                estimated=Out("bool"))
-#: What a running launch waits on while its own turn is closed: `kind` is `agents` or
-#: `subagents`, `count` how many of them work.
+#: What a running launch waits on while its own turn is closed: `kind` is `subagents`,
+#: else `agents` (agents it directs), else `holds` (its chain's open holds), and `count`
+#: how many of them work or are open.
 WAITS = _table(nullable=True, kind=_text(), count=Out("int"))
 #: The latest message in a running launch's session: when, who said it (`you`, `agent`
 #: or null) and its first line, which the gateway cuts.
@@ -295,11 +305,13 @@ ACTIVITY = _table(nullable=True, at=_text(), by=_text(nullable=True),
 #: covered: `cap`, the most nudges in a row it would send for the case it would nudge for.
 #: Null where it would not.
 COVERABLE = _table(nullable=True, cap=Out("int"))
-#: One launch running now. `started_at` is when its row was written. `cache`, `waits`,
+#: One launch running now. `started_at` is when its row was written; `model` and `effort`
+#: are the values it was launched with, null where it set none. `cache`, `waits`,
 #: `coverable` and `activity` are null and `covered` false while nothing was read of them.
 RUNNING_LAUNCH = _table(
     request_id=_text(), harness=_text(), session_id=_text(nullable=True), name=_text(),
-    identity=_text(nullable=True), where=WHERE, started_at=_text(), cache=CACHE,
+    identity=_text(nullable=True), where=WHERE, started_at=_text(),
+    model=_text(nullable=True), effort=_text(nullable=True), cache=CACHE,
     waits=WAITS, covered=Out("bool"), coverable=COVERABLE, activity=ACTIVITY,
 )
 #: The launches running now, newest first: `count` of them, every one in `sessions`.
@@ -314,15 +326,21 @@ PLACE = _table(project_key=_text(nullable=True), cwd=_text(mark="path"), at=_tex
 PLACES = {**STANDING, "projects": Out("bool"), "actor": _text(), "home": _text(mark="path"),
           "places": Out("list", items=PLACE)}
 
-#: One slot a launch may name. `holder` and `until` (seconds since the epoch) are a live
-#: hold's; `taken_by` is the launch that occupies the slot when the launch log knows it.
+#: One slot a launch may name. `choosable` is whether a launch may name it now (a missing
+#: one is made again at launch); `crashed` that the next launch's crash discovery reserves
+#: it. `holder` and `until` (seconds since the epoch, null for a hold kept until released)
+#: are a live hold's; `taken_by` is the launch that occupies the slot when the launch log
+#: knows it; `parked` the session a park reservation keeps the slot for.
 SLOT = _table(number=Out("int"), state=_text(), launchable=Out("bool"),
+              choosable=Out("bool"), crashed=Out("bool"),
               holder=_text(nullable=True), until=Out("float", nullable=True),
-              taken_by=_table(request_id=_text(), label=_text(), nullable=True))
+              taken_by=_table(request_id=_text(), label=_text(), nullable=True),
+              parked=_table(session_id=_text(), label=_text(), nullable=True))
 #: Where a launch may run. `slots` is empty and `new_slot` false where slots can't be
 #: used or read; `unread` is true only where slots is installed and can run and its
 #: slots could not be read. `default` is the choice a launch starts with: `target` is
-#: `slot` or `terminal`, and `slot` the lowest slot free now, or null to take a new one.
+#: `slot` or `terminal`, and `slot` the one a launch naming none takes now, or null to
+#: take a new one.
 TARGETS = {**STANDING, "slots": Out("list", items=SLOT), "new_slot": Out("bool"),
            "unread": Out("bool"),
            "default": _table(target=_text(), slot=Out("int", nullable=True))}
@@ -461,7 +479,10 @@ PAGE = lb.Page(
                  body={**REQUEST, "ticket": Field("string", max=1024)}, returns=LAUNCHED),
         lb.Route("/api/resume", "act", _target("resume"),
                  body={"session": Field("string", max=QUERY_MAX),
-                       "slot": Field("string", required=False, max=QUERY_MAX)},
+                       "slot": Field("string", required=False, max=QUERY_MAX),
+                       "brief": Field("string", required=False),
+                       "brief_file": Field("string", required=False, max=PATH_MAX),
+                       "plain": Field("bool", required=False)},
                  returns={**ACTED, "command": _text(nullable=True)}),
         lb.Route("/api/keep-warm", "act", _target("keep_warm"),
                  body={"request_id": Field("string", max=QUERY_MAX)}, returns=ACTED),

@@ -9,20 +9,16 @@ the endpoint is ending.
 its own context and its own marks. A reader carries up to two purposes, each with a mark
 (`1x`, `1.5x`, `2x`, a multiple of the restart point, `moxi_usage.thresholds`):
 
-* the **notice**, one line to the model. Its mark is the launch's `MOXI_USAGE_WARN_AT`;
-  with nothing stamped, config `marks.default` (default `off`). A stamp of `off`, or one
-  that names no mark, is off.
+* the **notice**, one line to the model. Its mark is the launch's `MOXI_USAGE_WARN_AT`.
+  With nothing stamped, a stamp of `off`, or one that names no mark, it is off: a session
+  its launch warned at no mark, and one no launcher started, get no notice.
 * the **crossing**, for the main session only: handlers other modules register on the
   group `moxi.usage.crossings` are called with a `Crossing`. Its mark is
   `MOXI_USAGE_CROSSING_AT`, which the launcher stamps when its recycle at limit is on;
   there is no config default.
 
-With both stamped off the listener returns at once, having imported nothing beyond this
-module. A launch with no `MOXI_USAGE_WARN_AT` stamp reads `marks.default` instead, which
-imports usage's settings module and the core's config reader once per endpoint (beside
-turns' endpoint, which holds the core already, that is `moxi_usage.settings` and the
-standard library's TOML and resource readers, a few milliseconds); the file is then read
-again only when it changes.
+With both off the listener returns at once, having imported nothing beyond this module
+and read no config.
 
 **The measure.** The reader's newest request, by sessions' `last_request`: its input
 tokens are the whole prompt. turns hands the file the harness writes (`record_path`);
@@ -37,12 +33,16 @@ and worked out again when the measure, the model table or usage's config changes
 **Firing.** A purpose fires the first time its reader's context is at or above its
 threshold while it is armed, and is then fired. It is armed again by a later reading of
 the same reader below the threshold (after a compaction, or a clear that keeps the
-session id). So a mark fires once per rise past its threshold, not once per session.
+session id). So a mark fires once per rise past its threshold, not once per session: a
+session that compacts and climbs past the mark again is warned again.
 
-**Delivery.** The answer is the notice when one fired, then the lines crossing handlers
-returned. A notice for an agent is the agent's own line, and leaves one line for its
-parent, `subagent agent-<id> <line>`; the main session's next call adds its agents'
-waiting lines after its own. Waiting lines live in memory only.
+**Delivery.** The notice is one line, `context 412k: past the 1x mark for <model>` (the
+context in thousands, halves up). The lines crossing handlers return on the same call are
+appended to it, each after `. `, so the model sees one line; a crossing on a call with no
+notice gives its handlers' lines on their own. A notice for an agent is the agent's own
+line, and leaves one line for its parent, `subagent agent-<id> <line>`; the main
+session's next call adds its agents' waiting lines after its own. Waiting lines live in
+memory only.
 
 **State.** In memory per session, in the endpoint's process. Only the fired purposes are
 kept on disk, in `STATE/usage/marks/<harness>-<session_id>.json` (written with
@@ -57,8 +57,7 @@ that re-arms it is seen); otherwise the smallest threshold among the main sessio
 purposes for the models it has used, or over every model the measure has a row for when
 it has used none yet. With no threshold known it is 0; with both purposes off it is
 `NEVER`, since the listener has nothing to do. turns reads the floor again at each
-`ready` and after each call, so a change to `marks.default` reaches a main loop held off
-by `NEVER` at its next start, resume, clear or compaction, or after an agent's call.
+`ready` and after each call.
 
 **Fail open.** Every error is logged once per kind and the listener answers None. A
 crossing handler's error, or one that runs past `marks.handler_wait_ms`, costs only its
@@ -99,14 +98,8 @@ LOGGER = "moxi.usage"
 
 # --- selection --------------------------------------------------------------------------
 
-_UNSTAMPED = object()
-
-
-def _stamped(value) -> object:
-    """A stamp's mark, None for off (or a value that names no mark), `_UNSTAMPED` for no
-    stamp."""
-    if value is None or value == "":
-        return _UNSTAMPED
+def _stamped(value) -> str | None:
+    """A stamp's mark; None for off, for no stamp, and for a value that names no mark."""
     return value if value in MARKS else None
 
 
@@ -117,44 +110,8 @@ def _env(event) -> dict:
 
 def selected(env) -> tuple[str | None, str | None]:
     """The notice's mark and the crossing's, each None for off, from a session's
-    environment and, for a notice nothing stamped, config `marks.default`."""
-    notice = _stamped(env.get(WARN_AT_ENV))
-    if notice is _UNSTAMPED:
-        notice = config_default()
-    crossing = _stamped(env.get(CROSSING_AT_ENV))
-    if crossing is _UNSTAMPED:
-        crossing = None
-    return notice, crossing
-
-
-_default_cache: list = [None, None]
-
-
-def config_default() -> str | None:
-    """Config `marks.default` as a mark, None for off; read again only when usage's
-    config file changes. A config that cannot be read is off, logged once."""
-    from moxi.paths import Layout
-
-    path = Layout("usage").config_file()
-    key = (str(path), _stat(path))
-    if _default_cache[0] != key:
-        try:
-            from .settings import current
-
-            value = current()["marks.default"]
-        except Exception:  # noqa: BLE001 - fail open: a config usage can't read is off
-            _fail("config", "usage's config could not be read; marks.default is off")
-            value = OFF
-        _default_cache[:] = [key, value if value in MARKS else None]
-    return _default_cache[1]
-
-
-def _stat(path) -> tuple | None:
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return (st.st_size, st.st_mtime_ns, st.st_ino)
+    environment alone: an unstamped purpose is off."""
+    return _stamped(env.get(WARN_AT_ENV)), _stamped(env.get(CROSSING_AT_ENV))
 
 
 # --- the crossing -----------------------------------------------------------------------
@@ -271,7 +228,6 @@ def reset() -> None:
     _thresholds_stamp[:] = [None]
     _said.clear()
     _handlers_cache[:] = [None]
-    _default_cache[:] = [None, None]
 
 
 # --- the file of fired purposes ---------------------------------------------------------
@@ -509,14 +465,18 @@ def _number(value) -> bool:
 
 # --- the listener -----------------------------------------------------------------------
 
-def notice_line(tokens: int, mark: str, threshold: int, model: str | None) -> str:
-    """`context 412,330 passed the 1x restart point (398,112) for claude-opus-5-5`."""
-    return (f"context {tokens:,} passed the {mark} restart point ({threshold:,}) for "
-            f"{model or 'an unnamed model'}")
+def thousands(tokens: int) -> int:
+    """The nearest thousand, halves up: 412,330 is 412 and 412,500 is 413."""
+    return (int(tokens) + 500) // 1000
+
+
+def notice_line(tokens: int, mark: str, model: str | None) -> str:
+    """`context 412k: past the 1x mark for claude-opus-5-5`."""
+    return f"context {thousands(tokens)}k: past the {mark} mark for {model or 'an unnamed model'}"
 
 
 def agent_label(agent_id: str) -> str:
-    short = agent_id[:AGENT_SHOWN] + "..." if len(agent_id) > AGENT_SHOWN + 1 else agent_id
+    short = agent_id[:AGENT_SHOWN] + "…" if len(agent_id) > AGENT_SHOWN + 1 else agent_id
     return f"agent-{short}"
 
 
@@ -587,7 +547,7 @@ def observe(event, *, notice: str | None, crossing: str | None,
                         held.model = shown
                         changed = True
                         if name == NOTICE:
-                            own = notice_line(tokens, mark, limit, shown)
+                            own = notice_line(tokens, mark, shown)
                         else:
                             crossed = Crossing(harness, session_id, mark, tokens, limit,
                                                shown, when)
@@ -603,9 +563,11 @@ def observe(event, *, notice: str | None, crossing: str | None,
         except Exception:  # noqa: BLE001 - the mark still counts in memory
             _fail("persist", "the fired marks could not be written; a restarted endpoint "
                              "may say a mark again")
-    lines = [own] if own else []
-    if crossed is not None:
-        lines.extend(run_handlers(crossed))
+    handed = run_handlers(crossed) if crossed is not None else []
+    if own is not None and agent_id is None and handed:
+        own = ". ".join([own, *handed])          # one line: the notice, then each handler's
+        handed = []
+    lines = ([own] if own else []) + handed
     if agent_id is None:
         with session.lock:
             lines.extend(session.pending)
@@ -776,6 +738,6 @@ def _warn(message: str) -> None:
 
 __all__ = ["WARN_AT_ENV", "CROSSING_AT_ENV", "MARKS", "OFF", "NOTICE", "CROSSING", "PURPOSES",
            "GROUP", "STATE_DIR", "SCHEMA", "NEVER", "MAIN_READER", "Crossing", "selected",
-           "config_default", "on_tool", "observe", "floor", "gone", "handlers",
-           "handler_wait", "run_handlers", "notice_line", "agent_label", "safe_id",
+           "on_tool", "observe", "floor", "gone", "handlers",
+           "handler_wait", "run_handlers", "notice_line", "thousands", "agent_label", "safe_id",
            "state_dir", "state_file", "read_record", "reset"]

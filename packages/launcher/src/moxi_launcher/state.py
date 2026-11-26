@@ -1,22 +1,28 @@
 """A launched session's state: its relaunch, recycle and keep-warm, and whether it needs a
 look.
 
-    state(session_id) -> SessionState     # any launched session, from the launch log
+    state(session_id) -> SessionState     # any launched session, found as an act finds it
     show(session_id=None) -> Result       # moxi launcher show [SESSION_ID] [--json]
 
-Read from the launch log. **Its one live read is the job test of an open run**, so an open
-run whose job is gone shows `stale`; and for a launch that keeps warm, cache's read of
-the session's lifetime, so a lifetime with no keep-warm window says so.
+Read from the launch log. **Its live reads are three.** An id no launch holds is asked of
+turns, and its live session's `claude` process names the launch (`target.resolve`), so a
+session's current id resolves before its launch has learned it. The job test of an open
+run shows an open run whose job is gone as `stale`. For a launch that keeps warm, cache's
+read of the session's lifetime says when a lifetime has no keep-warm window.
 
 - `relaunch`: the open relaunch run's state (`armed`, `waiting: <word>`, `acting`,
   `stale`), or the last relaunch's outcome (the one that made this launch, when the
   launch has none of its own), with any notice that was refused and a note that was not
   taken.
-- `recycle`: the options in force, the last expiry or limit run, a pending compact, and
-  when the session was last told to recycle itself at its limit.
-- `keep_warm`: on or off (launched with it on, or under cover), the open holds of the
-  launch chain by name (with the launch value on), the last run of nudges, and the last
-  verdict.
+- `recycle`: the options in force, the last expiry or limit run, and when the session
+  was last told to recycle itself at its limit. A `relaunch` launch told at its mark
+  shows it, its `warn_at` (`relaunch (2x)`); one whose session can recycle itself but
+  warns at no mark shows `relaunch (armed, no warning)`: its self relaunch is accepted
+  and it is never told.
+- `keep_warm`: on or off (`keepwarm.on`: launched with it on, or under cover; off
+  wherever keep-warm can't act on this install, `keepwarm.can_act`), the open holds of
+  the launch chain by name (wherever it is on, cover included), the last run of nudges,
+  and the last verdict.
 
 **`red` is true exactly when the latest ended run on the launch ended `blocked`, or in an
 outcome that needs a look, and no later run on it ended well.** The outcomes that need a
@@ -40,7 +46,7 @@ from typing import Any
 
 from moxi import exit as codes
 
-from . import keepwarm, relaunch, slots, store, target
+from . import keepwarm, relaunch, selfrecycle, slots, store, target
 from .recycle import LOOK, cache_read
 
 #: The outcomes, beside `blocked`, after which a launch needs a look.
@@ -48,8 +54,12 @@ FAILED = ("failed", "not-exited", "exit-pending", "at-dialog", "relaunch-failed"
           "first-turn-not-sent", "gone", "error", "unconfirmed")
 #: A run whose note to its session was not taken reads as this.
 NOTE_NOT_TAKEN = "note-not-taken"
-#: The run modes of recycle's runs.
+#: The run modes of recycle's runs: `limit` is a compact at the context limit, which the
+#: launcher no longer makes; its runs show until `records.keep_days` prunes them.
 RECYCLE_MODES = ("expiry", "limit")
+#: How `at limit` reads for a launch recorded with `recycle_at_limit = compact`, a value
+#: that no longer acts.
+RETIRED_AT_LIMIT = "compact (no longer acts)"
 
 
 @dataclass(frozen=True)
@@ -93,23 +103,24 @@ class RelaunchState:
 
 @dataclass(frozen=True)
 class RecycleState:
-    """The options in force; the last expiry or limit run; when a pending compact was
-    left; and when the session was last told to recycle itself at its limit."""
+    """The options in force (`at_limit` as `RETIRED_AT_LIMIT` for a recorded `compact`);
+    the last expiry or limit run; when the session was last told to recycle itself at its
+    limit; and `mark`, the launch's `warn_at` where a `relaunch` launch is told at it
+    (`selfrecycle.missing_of_row` with `told`), else None."""
 
     on_expiry: str
     at_limit: str
-    limit_at: str | None
     last: RunLine | None = None
-    pending_compact: str | None = None
     told_at: str | None = None
-    pending_dropped_at: str | None = None
+    mark: str | None = None
 
 
 @dataclass(frozen=True)
 class KeepWarmState:
-    """`on` (launched with keep-warm on, or under cover); the open holds of the launch
-    chain by name, listed only with the launch value on; `nudges`, the length of the last
-    run of nudges; the last keep-warm run; and `window`, set to `no window: lifetime <n> s`
+    """`on` (`keepwarm.on`: launched with keep-warm on, or under cover, where keep-warm
+    can act on this install, `keepwarm.can_act`); the open holds of the launch chain by
+    name, listed wherever it is on, cover included; `nudges`, the length of the last run
+    of nudges; the last keep-warm run; and `window`, set to `no window: lifetime <n> s`
     when the session's cache lifetime leaves keep-warm no window."""
 
     on: bool
@@ -160,13 +171,11 @@ class SessionState:
             line += f"; notice refused by {', '.join(relaunched.notices_refused)}"
         recycled = self.recycle
         rec = f"recycle: on expiry {recycled.on_expiry}, at limit {recycled.at_limit}"
-        if recycled.at_limit != "off" and recycled.limit_at:
-            rec += f" ({recycled.limit_at})"
+        if recycled.mark:
+            rec += f" ({recycled.mark})"
         last = recycled.last
         if last is not None:
             rec += f"; last: {last.kind} {last.said} at {last.updated_at}"
-        if recycled.pending_compact:
-            rec += f"; a compact pending since {recycled.pending_compact}"
         if recycled.told_at:
             rec += f"; told to recycle itself at {recycled.told_at}"
         warm = self.keep_warm
@@ -185,12 +194,15 @@ class SessionState:
 
 def state(session_id: str, *, conn: sqlite3.Connection | None = None,
           slots_api: Any = LOOK, cache: Any = LOOK,
-          caller_env: Mapping[str, str] | None = None) -> SessionState:
-    """The state of the launched session `session_id`. Raises `target.NotLaunched` when
-    no launch holds it."""
+          caller_env: Mapping[str, str] | None = None,
+          turns: Any | None = None) -> SessionState:
+    """The state of the launched session `session_id`, its launch found as an act finds
+    it (`target.resolve`): by the launch log, else by the `claude` process serving the
+    live session of that id. Raises `target.NotLaunched` when neither finds a launch.
+    `turns` stands in for turns' API."""
     env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
-        row = store.resolve(c, session_id)
+        row = target.resolve(c, session_id, turns=turns)
         if row is None:
             raise target.NotLaunched()
         return of_launch(c, row, slots_api=slots_api, cache=cache, caller_env=env)
@@ -199,7 +211,7 @@ def state(session_id: str, *, conn: sqlite3.Connection | None = None,
 def of_launch(conn: sqlite3.Connection, row: store.LaunchRow, *, slots_api: Any = LOOK,
               cache: Any = LOOK, caller_env: Mapping[str, str] | None = None) -> SessionState:
     """The state of the launch `row` (`newest_session_id` set when it came from
-    `store.resolve`)."""
+    `target.resolve` or a `target.Target`)."""
     from . import job
 
     env = dict(os.environ if caller_env is None else caller_env)
@@ -285,23 +297,40 @@ def _recycle(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store
              lines: Mapping[str, RunLine]) -> RecycleState:
     values = row.values
     last = next((lines[r.run_id] for r in own if r.mode in RECYCLE_MODES), None)
-    pending = store.pending_compact(conn, row.request_id)
-    events = store.events(conn, row.request_id)
-    told = [e.at for e in events if e.kind == "recycle-told"]
-    dropped = [e.at for e in events if e.kind == "pending-compact-dropped"]
+    told = [e.at for e in store.events(conn, row.request_id) if e.kind == "recycle-told"]
     at_limit = str(values.get("recycle_at_limit") or "off")
+    mark = None
+    if at_limit == selfrecycle.RELAUNCH and _armed_untold(row):
+        at_limit = ARMED_UNTOLD
+    elif at_limit == selfrecycle.RELAUNCH and selfrecycle.missing_of_row(row, told=True) is None:
+        mark = str(values.get(selfrecycle.WARN_AT))
+    elif at_limit == "compact":
+        at_limit = RETIRED_AT_LIMIT
     return RecycleState(
         on_expiry=str(values.get("recycle_on_expiry") or "off"), at_limit=at_limit,
-        limit_at=str(values["limit_at"]) if values.get("limit_at") else None, last=last,
-        pending_compact=pending[1] if pending else None, told_at=told[-1] if told else None,
-        pending_dropped_at=dropped[-1] if dropped else None)
+        last=last, told_at=told[-1] if told else None, mark=mark)
+
+
+#: The `at limit` of a `relaunch` launch whose session can recycle itself but warns at no
+#: mark: its self relaunch is accepted, and nothing tells it when.
+ARMED_UNTOLD = "relaunch (armed, no warning)"
+
+
+def _armed_untold(row: store.LaunchRow) -> bool:
+    """Whether the launch `row` is armed to relaunch itself and never told
+    (`selfrecycle.missing_of_row` holds, but not with `told`)."""
+    if selfrecycle.missing_of_row(row) is not None:
+        return False
+    told = selfrecycle.missing_of_row(row, told=True)
+    return told is not None and told.item == selfrecycle.NO_MARK
 
 
 def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[store.Run],
                lines: Mapping[str, RunLine], sid: str, cache: Any,
                env: Mapping[str, str]) -> KeepWarmState:
-    launched_on = row.values.get("keep_warm") == "on"
-    if not keepwarm.on(conn, row, sid):
+    # On only where keep-warm can act: a launch on an install without turns or cache is
+    # nudged by nothing, whatever its row says.
+    if not (keepwarm.can_act(row) and keepwarm.on(conn, row, sid)):
         return KeepWarmState(on=False)
     warm = [r for r in own if r.kind == keepwarm.KIND]
     nudged = next((r for r in warm if r.outcome == "nudged"), None)
@@ -313,8 +342,8 @@ def _keep_warm(conn: sqlite3.Connection, row: store.LaunchRow, own: Sequence[sto
         ttl = getattr(clock, "ttl_s", None) if clock is not None else None
         if keepwarm.no_window(ttl):
             window = f"no window: lifetime {ttl:g} s"
-    # Holds count only with the launch value on; under cover alone none is listed.
-    holds = tuple(store.open_holds(conn, row.request_id)) if launched_on else ()
+    # Holds count wherever keep-warm is on, under cover included.
+    holds = tuple(store.open_holds(conn, row.request_id))
     return KeepWarmState(on=True, holds=holds, nudges=nudges,
                          last=lines[warm[0].run_id] if warm else None, window=window)
 
@@ -326,20 +355,23 @@ def show(session_id: str | None = None, *, pid: int | None = None, turns: Any | 
          slots_api: Any = LOOK, cache: Any = LOOK, conn: sqlite3.Connection | None = None,
          caller_env: Mapping[str, str] | None = None) -> relaunch.Result:
     """`moxi launcher show [SESSION_ID]`: the state of the session named, or with none,
-    of the session this process runs in (found through turns). Exits 0 with the state;
-    raises a refusal for a session no launch holds."""
+    of the session this process runs in (found through turns). Either is found as an act
+    finds it, so a live session's current id resolves before its launch has learned it.
+    Exits 0 with the state; raises a refusal for a session no launch holds."""
     env = dict(os.environ if caller_env is None else caller_env)
     with relaunch._store(conn) as c:
         if session_id is None:
             found = target.caller(pid=pid, conn=c, turns=turns,
                                   slots_api=None if slots_api is LOOK else slots_api)
             found.close()
-            session_id = found.session_id or found.row.session_id or ""
-        got = state(session_id, conn=c, slots_api=slots_api, cache=cache, caller_env=env)
+            got = of_launch(c, found.row, slots_api=slots_api, cache=cache, caller_env=env)
+        else:
+            got = state(session_id, conn=c, slots_api=slots_api, cache=cache,
+                        caller_env=env, turns=turns)
     return relaunch.Result(codes.OK, got.lines(),
                            data={**got.as_json(), "outcome": got.word or "ok"})
 
 
-__all__ = ["FAILED", "NOTE_NOT_TAKEN", "RECYCLE_MODES", "KeepWarmState", "RelaunchState",
+__all__ = ["ARMED_UNTOLD", "FAILED", "NOTE_NOT_TAKEN", "RECYCLE_MODES", "RETIRED_AT_LIMIT", "KeepWarmState", "RelaunchState",
            "RecycleState", "RunLine", "SessionState", "line", "note_not_taken",
            "of_launch", "show", "state"]

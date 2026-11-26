@@ -53,6 +53,7 @@ from moxi_comms.daemon import Daemon
 from moxi_comms.paths import daemon_socket
 from moxi_comms.provision import NAMES
 from moxi_comms.sender import SenderIdentity
+from moxi_dev.testing import PROC_WAIT_S
 
 # Fixtures shared with test_cold_sends.py. Imported, so pytest finds them here too.
 from test_cold_sends import bind, reboot  # noqa: F401
@@ -1217,7 +1218,7 @@ def test_the_idle_tick_sets_no_turned_before_any_prompt(rig):
     s = shim(rig, SESS_B)                                   # never prompted, no file
     msg = post(rig, [REVIEWER_Q], "first task")
     wait_for_queue(s, 1)
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + PROC_WAIT_S
     while not s.injected and time.monotonic() < deadline:
         shim_drive.idle(s)
         time.sleep(0.05)

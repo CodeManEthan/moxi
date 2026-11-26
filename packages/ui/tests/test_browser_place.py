@@ -17,7 +17,7 @@ from playwright.sync_api import expect
 
 import fixture_kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 PANEL = "#moxi-panel > moxi-fixture-page"
 MESSAGE = "#moxi-panel .moxi-message"
@@ -110,8 +110,8 @@ def test_a_home_block_whose_script_names_a_failure_shows_its_state_with_no_retry
     # The import and the check that named the failure; no second import.
     page.evaluate("1")
     assert fetches == ["import", "check"]
-    # The servers block beside it is placed as usual.
-    expect(page.locator("#home section[data-block='ui.servers'] moxi-ui-servers")).to_be_attached()
+    # The servers block, under the Installed list, is placed as usual.
+    expect(page.locator("#last section[data-block='ui.servers'] moxi-ui-servers")).to_be_attached()
 
 
 def test_a_panel_whose_script_names_a_failure_shows_it_with_no_retry(failing_shell,

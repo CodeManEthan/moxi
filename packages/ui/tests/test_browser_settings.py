@@ -18,24 +18,32 @@ with catalog rows."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import tomllib
 from pathlib import Path
 
 import pytest
 from moxi import modules
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_ui.testing.browser import copied, ready_copying
 from playwright.sync_api import expect
 
 import fixture_kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 LOCKED = "Locked for this run of the shell."
 TOKENS = Path(__file__).resolve().parents[1] / "web" / "tokens.json"
 # A clock time as the Save line words it, in the browser's own form.
 CLOCK = r"\d{1,2}:\d{2}(?:\s?[AP]M)?"
+
+
+def _kept_in(*parts):
+    """The foot's line for a file under the home, ending in `parts`, spelled with this
+    platform's separator as the page spells it."""
+    sep = re.escape(os.sep)
+    return re.compile(rf"^Kept in ~{sep}.+{sep}" + sep.join(map(re.escape, parts)) + "$")
 
 
 def _view(page):
@@ -121,7 +129,7 @@ def test_each_type_is_drawn_with_its_own_control(ui_page):
     expect(view.locator("[data-part=more]")).to_have_count(0)
     expect(view.locator("[data-line=default]")).to_have_count(0)
     foot = view.locator("[data-part=foot]")
-    expect(foot.locator("[data-line=file]")).to_have_text(re.compile(r"^Kept in ~/.+/fixture/config\.toml$"))
+    expect(foot.locator("[data-line=file]")).to_have_text(_kept_in("fixture", "config.toml"))
     expect(foot.get_by_role("link", name="Fixture")).to_have_attribute("href", "/m/fixture/")
 
 
@@ -159,7 +167,7 @@ def test_the_list_holds_the_core_ui_and_the_rest_and_settings_opens_the_core(ui_
     expect(ui_page).to_have_url(ui_shell.url + "/m/ui/settings")
     expect(_row(view, "skills.form")).to_have_count(0)
     expect(pane.locator("[data-part=foot] [data-line=file]")).to_have_text(
-        re.compile(r"^Kept in ~/.+/moxi/config\.toml$"))
+        _kept_in("moxi", "config.toml"))
     expect(pane.locator("[data-part=foot] a")).to_have_count(0)
     # ui's foot names its Modules page.
     names.and_(ui_page.locator("[data-list=ui]")).click()
@@ -255,7 +263,7 @@ def test_a_section_whose_file_wont_parse_says_why_in_the_pane(ui_shell, ui_page)
         expect(said.locator("[data-line=fix]")).to_contain_text("Fix: correct the file's TOML syntax")
         expect(said.get_by_role("button", name="Copy")).to_be_visible()
         expect(view.locator("[data-part=list] [data-line=unreadable]")).to_have_text("can't be read")
-        expect(view.locator("[data-part=foot] [data-line=file]")).to_contain_text("fixture/config.toml")
+        expect(view.locator("[data-part=foot] [data-line=file]")).to_contain_text(os.path.join("fixture", "config.toml"))
         # No rows: nothing in it takes input.
         expect(view.locator(".set")).to_have_count(0)
     finally:
@@ -908,7 +916,7 @@ def test_a_change_held_when_the_shell_sends_the_modules_again_stays_and_the_page
         status, value = shell.session().get("/m/ui/api/modules")
         return any(row["name"] == "fixture" and row.get("version") == "0.2.0" for row in value["modules"])
 
-    wait_for(seen_new, 10, interval=0.2, what="the snapshot to see version 0.2.0")
+    wait_for(seen_new, PROC_WAIT_S, interval=0.2, what="the snapshot to see version 0.2.0")
     expect(html).to_have_attribute("data-fixture-version", "0.2.0")
     expect(page.locator("#moxi-panel > moxi-ui-page[data-placed=first]")).to_be_attached()
     expect(box).to_have_value("12")
@@ -1402,7 +1410,115 @@ def test_the_form_in_submit_mode_takes_catalog_rows(ui_page, ui_width_check):
     expect(_field(form, "permission_mode")).to_contain_text("permission posture")
     ui_width_check(ui_page)
     form.get_by_role("button", name="Launch").click()
-    ui_page.wait_for_function("window.__submitted !== undefined")
+    ui_page.wait_for_function("() => window.__submitted !== undefined")
     assert ui_page.evaluate("window.__submitted") == {
         "model": "opus", "add_dir": ["/srv/b"], "remote_control": "here", "prompt_file": None,
         "permission_mode": "default"}
+
+
+# --- a table the module keeps in a file of its own ---------------------------------------------
+
+
+class Table:
+    """The words of the fixture's table (fixture/moxi_fixture/table.py)."""
+
+    TITLE = "Fixture defaults"
+    LINE = "Every read starts from these."
+    APPLIES = "Applies to reads made after this."
+    OFF_LIST = "This mode is not offered; reads take slow."
+    NO_ROW = "is not a fixture row; clear it."
+
+
+@pytest.fixture(scope="module")
+def tabled_site(tmp_path_factory):
+    """A site holding the fixture with page fields and its table of rows."""
+    return fixture_kit.install(tmp_path_factory.mktemp("tabled-site"), fields=True, table=True)
+
+
+def _rows_file(shell) -> Path:
+    return shell.config_file("fixture").parent / "defaults.json"
+
+
+def _hold_rows(shell, rows) -> None:
+    path = _rows_file(shell)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(rows if isinstance(rows, str) else json.dumps(rows))
+
+
+def test_a_modules_table_is_one_open_block_after_more_and_saves_its_rows(
+        ui_shells, ui_contexts, tabled_site):
+    shell = ui_shells(site=[tabled_site])
+    _hold_rows(shell, {"mode": "wild", "stray": 3})
+    page = ui_contexts(shell).pages[0]
+    view = _settings(page)
+    # After More, closed, and never behind it.
+    block = view.locator("[data-part=more] ~ [data-part=table]")
+    expect(block).to_have_count(1)
+    expect(view.locator("[data-part=more]")).not_to_have_attribute("data-open", "")
+    expect(block.locator("[data-line=table-title]")).to_have_text(Table.TITLE)
+    expect(block.locator("[data-line=table-line]")).to_have_text(Table.LINE)
+    expect(block.locator(".subh")).to_have_text(["needs a fix", "reads"])
+    # The key that can only be cleared: its value as a word, its words, Reset alone.
+    stray = _row(view, "defaults.stray")
+    expect(stray.locator("[data-line=word]")).to_have_text("3")
+    expect(stray.locator("[data-line=refused]")).to_have_text(f"stray {Table.NO_ROW}")
+    expect(stray.locator("input, select, [role=switch], [role=radio]")).to_have_count(0)
+    expect(stray.get_by_role("button", name="Reset")).to_be_visible()
+    # A value the list doesn't offer is the chosen one, with the module's words after the mark.
+    mode = _row(view, "defaults.mode")
+    radios = mode.locator("[role=radio]")
+    expect(radios).to_have_text(["fast", "slow", "wild"])
+    expect(radios.and_(view.locator("[aria-checked=true]"))).to_have_text("wild")
+    expect(mode.locator("[data-line=line]")).to_have_text(["How a read runs.", Table.APPLIES])
+    expect(mode.locator("[data-line=warning]")).to_have_text(Table.OFF_LIST)
+    foot = view.locator("[data-part=foot]")
+    sep = re.escape(os.sep)
+    expect(foot.locator("[data-line=table-file]")).to_have_text(
+        re.compile(rf"^{Table.TITLE} are kept in ~{sep}.+{sep}fixture{sep}defaults\.json$"))
+    # Choosing it again is no change; a pick and a Reset save as any key's do.
+    radios.and_(page.locator("[data-value=wild]")).click()
+    expect(_held(view, "defaults.mode")).to_have_count(0)
+    radios.and_(page.locator("[data-value=fast]")).click()
+    stray.get_by_role("button", name="Reset").click()
+    _save(view, "^Saved")
+    assert json.loads(_rows_file(shell).read_text()) == {"mode": "fast"}
+    expect(_row(view, "defaults.stray")).to_have_count(0)
+    expect(mode.locator("[data-line=warning]")).to_have_count(0)
+
+
+def test_one_file_that_cant_be_read_never_locks_the_other_files_keys(
+        ui_shells, ui_contexts, tabled_site):
+    shell = ui_shells(site=[tabled_site])
+    _hold_rows(shell, "broken")
+    page = ui_contexts(shell).pages[0]
+    view = _settings(page)
+    # The table's block says why and draws no row; the module's own keys still save.
+    block = view.locator("[data-part=table]")
+    expect(block.locator("[data-line=table-title]")).to_have_text(Table.TITLE)
+    expect(block.locator("[data-line=table-error]")).to_have_text("is not valid JSON")
+    expect(block.locator("[data-line=table-fix]")).to_contain_text("correct the file")
+    expect(block.locator(".set")).to_have_count(0)
+    view.locator("input[data-control=limit]").fill("12")
+    _save(view, "^Saved")
+    assert _file(shell)["limit"] == 12
+    # The module's own file broken: its keys go, the table's rows stay editable and save.
+    _hold_rows(shell, {})
+    shell.config_file("fixture").write_text("limit = = 3\n")
+    page.reload()
+    view = _view(page)
+    expect(view.locator("[data-part=unreadable] [data-line=unreadable]")).to_contain_text(
+        "fixture's settings can't be read: ")
+    expect(view.locator("input[data-control=limit]")).to_have_count(0)
+    count = view.locator("input[data-control='defaults.count']")
+    expect(count).to_be_editable()
+    count.fill("4")
+    _save(view, "^Saved")
+    assert json.loads(_rows_file(shell).read_text()) == {"count": 4}
+
+
+def test_a_locked_table_locks_every_row(ui_shells, ui_contexts, tabled_site):
+    shell = ui_shells(site=[tabled_site], env={"MOXI_UI_LOCKED_SETTINGS": "fixture.defaults"})
+    view = _settings(ui_contexts(shell).pages[0])
+    expect(view.locator("input[data-control='defaults.count']")).to_be_disabled()
+    expect(_row(view, "defaults.mode").locator("[role=radio]").first).to_be_disabled()
+    expect(view.locator("input[data-control=limit]")).to_be_editable()

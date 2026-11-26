@@ -76,7 +76,12 @@ and `moxi loadout status` says what has drifted.
 11. `status`, `add`, `remove`, `enable`, `disable` and `list` show or change the manifest,
     each with `--json`, and `moxi doctor` shows loadout's rows: the manifest, entries
     not ok, the global file, hook programs, the projects link, the git hook pieces and
-    Codex's switches.
+    Codex's switches. `add --harness H` (it may repeat) lists the item for those harnesses
+    only, in that section alone: the section's `disabled` switches it off for each other
+    harness, so `enable` and `disable` change it later, and `remove` takes those switches
+    out with the item. A plain `add` is for every harness. The line `add` prints names the
+    harnesses the item is on for. A harness the core's table has no row for is refused,
+    and so is one an item's own `harnesses` leaves out.
 
 ## Install
 
@@ -156,7 +161,9 @@ same.
 With the `ui` extra (`moxi-ui`, the browser UI shell), loadout has a page in the shell,
 at `/m/loadout/`, and a block on the shell's home that counts the items that
 aren't ok and links to the page. An item counts once, however many of its harnesses
-aren't ok. The page draws no colour of warning: what needs you rises to the top and is
+aren't ok. The page draws a column for each harness on this machine (its home folder is
+there), and for one that isn't while something of loadout's, or in its way, still
+stands there; a harness it doesn't draw isn't counted, on the page or in the block. The page draws no colour of warning: what needs you rises to the top and is
 set heavier.
 
 - **Placed** says what needs you, one line per problem: the item and one word for its
@@ -180,12 +187,29 @@ set heavier.
   else the run changes, and what the diff leaves out. Every Replace keeps what it
   replaces (see "What a write keeps").
 - **Not listed**: the skills and agents in your folder that no section lists, each with
-  Add, which lists it in a section and places it at once. Add something by its name
+  Add, which lists it in a section, for every harness or one harness on this machine
+  (`For`), and places it at once. Add something by its name
   instead, always there, takes a kind, a name and a section: a hook, a permission rule,
   an MCP server, or an item another section lists already.
 - With projects installed, `/m/loadout/project/<key>` shows only what that project's
-  sessions load: its own section and your items, with a menu of every project and a link
+  sessions load: its own sections and your items, with a menu of every project and a link
   to the project's page.
+
+With projects' page in the shell too, a project opened there has a `Loadout` row naming
+the items its own section lists, in the manifest's order and with each kind in this
+page's words (`skill release-checklist · permission rule git-push`; past eight, the first
+seven and how many more), and a `Loadout` link to
+`/m/loadout/project/<key>`. A project's sections are the one named by its key and each
+one whose path is its folder or a folder under it, as projects places that path. Loadout
+places a section under the folder into that subfolder, which only sessions there load, so
+the row names the items of each, the key section's first, and an item two list once; that
+address shows the same sections, the one at the folder under the project's key and one
+under it by its path, which says where its items load. An item switched
+off for every harness there reads `off` after its name, as its cells do on this page. A
+project loadout lists nothing for has no row. The row comes from loadout's `project-facts`
+component, which reads only `/api/list`, from the manifest alone: when the Projects page
+places it, every minute while that page is shown, and once when it is shown again. While
+the manifest can't be read, the row is left out.
 
 Each change runs the same `moxi loadout` command you would run in a terminal, in a
 process of its own, and a line under the act then says the command and how it ended,

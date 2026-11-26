@@ -24,6 +24,7 @@ import h11
 import psutil
 import pytest
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui.loopback.api import RuntimeInfo, proof
 
 from moxi_ui import listen
@@ -95,7 +96,7 @@ class Browser:
     def leave(self) -> None:
         self._left.set()
 
-    async def next(self, timeout: float = 5.0):
+    async def next(self, timeout: float = PROC_WAIT_S):
         return await asyncio.wait_for(self.messages.get(), timeout)
 
     def collected(self) -> Answer:
@@ -115,7 +116,7 @@ class Browser:
         return self.collected()
 
 
-async def until(predicate, timeout: float = 5.0, what: str = "the condition"):
+async def until(predicate, timeout: float = PROC_WAIT_S, what: str = "the condition"):
     deadline = time.monotonic() + timeout
     while not predicate():
         if time.monotonic() >= deadline:
@@ -862,7 +863,7 @@ def _kill_and_wait(pid: int) -> None:
     """SIGKILL `pid` and block, without yielding to the loop, until it is dead, so the
     shell has not yet seen the exit when the next request runs."""
     os.kill(pid, signal.SIGKILL)
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while not _reaped_or_zombie(pid):
         assert time.monotonic() < deadline, "the child did not die"
         time.sleep(0.005)
@@ -925,7 +926,7 @@ class Squat:
     byte it gets and answers each request with a wrong proof."""
 
     def __init__(self, port: int):
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + PROC_WAIT_S
         while True:
             try:
                 self.sock = socket.create_server(("127.0.0.1", port))
@@ -1085,7 +1086,7 @@ def test_the_shell_proxies_on_its_real_listener_and_stops_its_children_at_its_st
     thread = threading.Thread(target=lambda: asyncio.run(running.run()), daemon=True)
     thread.start()
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + PROC_WAIT_S
         while running._should_exit is None and time.monotonic() < deadline:
             time.sleep(0.01)
         session_id, key = running.sessions.store.mint()

@@ -38,13 +38,17 @@ failed first start does.
 **Delivery.** Plain mail goes one digest at a time, at turn boundaries only: while no
 turn runs, by `deliver(text, ref=<digest>)`, which starts a turn. Mail that arrives
 while a turn runs waits in the queue for that turn's end, and goes as one digest then.
+Every digest, by `deliver` or `steer`, carries `by="comms"` and the names of its
+messages' senders (`claude_shim.digest_senders`), which the session's `prompt` listeners
+read as the prompt's `delivery_by` and `delivery_senders`. The brief of a headless launch
+is not mail and carries neither.
 
 **Interrupt mail.** A queued message whose sender asked to interrupt, while a turn runs
 on a session that offers `steer`, goes at once: one digest of the interrupt mail alone,
 its frame lines marked `[interrupt]`, by `steer(text, ref=<digest>)`. A steer refused
 `idle` (the turn ended between the check and the call) or `loading` falls back to
-`deliver` with the same text and ref, once; turns runs the text once whichever way the
-race went.
+`deliver` with the same text, ref and senders, once; turns runs the text once whichever
+way the race went.
 
 **comms' tools.** A launch the daemon serves comms' tools for carries the session's token
 (`MOXI_COMMS_MCP_TOKEN`), and this adapter registers its hash after every bind
@@ -108,7 +112,7 @@ from ..client import DaemonClient
 from . import headless as headless_mod
 from ..context import BARE_COMMS, MOXI_COMMS_PATH_LINE, layer_one_form  # noqa: F401
 from . import codex_roster
-from .claude_shim import render_digest
+from .claude_shim import DELIVERY_BY, digest_senders, render_digest
 from .harness import (SOURCE_COMPACT, SOURCE_RESUME, SOURCE_STARTUP, HarnessAdapter,
                       launch_stamp)
 
@@ -230,15 +234,17 @@ class _Unsent:
 
 class Hand:
     """One digest handed to turns: its `ref` (the digest's id as a string), the
-    `digest`, its message `ids`, the `text`, whether it went by `steer`, and the
-    library's `delivery` (None while the hand-in call runs). A digest that went by
-    `deliver` is the boundary digest; a steered one is not, nor is its fallback."""
+    `digest`, its message `ids`, the `text`, the `senders` of its messages, whether it
+    went by `steer`, and the library's `delivery` (None while the hand-in call runs). A
+    digest that went by `deliver` is the boundary digest; a steered one is not, nor is
+    its fallback. The headless brief's hand has no senders."""
 
-    def __init__(self, ref: str, digest, ids, text: str, *, steer: bool):
+    def __init__(self, ref: str, digest, ids, text: str, *, steer: bool, senders=()):
         self.ref = ref
         self.digest = digest
         self.ids = tuple(ids)
         self.text = text
+        self.senders = tuple(senders)
         self.steer = steer
         self.delivery = None
         self.fell_back = False
@@ -414,7 +420,12 @@ class CodexAdapter(HarnessAdapter):
             self.claims.on_end = lambda: self.end_headless(headless_mod.EXIT_SESSION)
 
     def _directors(self) -> tuple:
-        return tuple(getattr(self.agent, "directors", None) or ())
+        """The agent's launch-declared directors, the ones layer one's director sentence
+        keys on: its policy directors left out."""
+        from ..directors import launch_declared
+
+        return launch_declared(getattr(self.agent, "directors", None) or (),
+                               getattr(self.agent, "policy_directors", None) or ())
 
     def find_session(self):
         """turns' session of the host, once it is ready. Looks in steps of `find_step`
@@ -987,9 +998,10 @@ class CodexAdapter(HarnessAdapter):
         high = max(int(mid) for mid in ids)
         try:
             text = render_digest(batch, None, self.agent.directors, clock=self.clock,
-                                 steered=True)
+                                 steered=True, policy=self._policy_directors())
             self.marks[str(high)] = self.claims.hold_mark()
-            receipt = self._hand_in(text, high, ids, steer=True)
+            receipt = self._hand_in(text, high, ids, steer=True,
+                                    senders=digest_senders(batch))
         except BaseException:
             self.release_held(ids)
             raise
@@ -999,7 +1011,8 @@ class CodexAdapter(HarnessAdapter):
             directors = tuple(getattr(self.agent, "directors", None) or ())
             session_id = self.mirror_session()
             for p in batch:
-                self.reply_ledger.open(p, directors, session_id, now)
+                self.reply_ledger.open(p, directors, session_id, now,
+                                       policy=self._policy_directors())
         self.on_delivered(text, high, identity, len(batch), receipt)
         return text
 
@@ -1008,23 +1021,25 @@ class CodexAdapter(HarnessAdapter):
         receipt is the ref; the digest settles from its turn's end, or from its own
         outcome when no turn will name it. Never `REQUEUE`: a hand-in whose answer did
         not come may be in a turn already, so it is waited on, never handed again."""
-        return self._hand_in(text, high, self.digest_ids(high), steer=False)
+        return self._hand_in(text, high, self.digest_ids(high), steer=False,
+                             senders=digest_senders(self.digest_batch(high)))
 
-    def _hand_in(self, text: str, high: int, ids, *, steer: bool) -> str:
-        """One digest to the session, by `steer` or `deliver`, and a thread that waits
-        for its outcome. The hand is recorded before the call, so a turn that names it
-        before the call returns still finds it."""
+    def _hand_in(self, text: str, high: int, ids, *, steer: bool, senders=()) -> str:
+        """One digest to the session, by `steer` or `deliver`, with `by="comms"` and its
+        messages' `senders`, and a thread that waits for its outcome. The hand is
+        recorded before the call, so a turn that names it before the call returns still
+        finds it."""
         with self._lock:
             digest = self.digest_of.get(str(high))
             ref = str(digest) if digest is not None else f"message-{high}"
-            hand = Hand(ref, digest, ids, text, steer=steer)
+            hand = Hand(ref, digest, ids, text, steer=steer, senders=senders)
             self.hands[ref] = hand
             session = self.session
         try:
             if steer:
-                delivery = session.steer(text, ref=ref)
+                delivery = session.steer(text, ref=ref, by=DELIVERY_BY, senders=senders)
             else:
-                delivery = session.deliver(text, ref=ref)
+                delivery = session.deliver(text, ref=ref, by=DELIVERY_BY, senders=senders)
         except Exception as exc:                              # noqa: BLE001
             self.log.warning("the hand-in of digest %s failed: %s", ref, exc)
             delivery = _Unsent(HandInFailed(f"the hand-in failed: {type(exc).__name__}: "
@@ -1065,7 +1080,8 @@ class CodexAdapter(HarnessAdapter):
 
     def _fall_back(self, hand: Hand, reason: str) -> bool:
         """A steer refused `idle` or `loading`: `deliver` the same text with the same
-        ref, once. False when the hand settled or the session ended meanwhile."""
+        ref, `by` and senders, once. False when the hand settled or the session ended
+        meanwhile."""
         with self._lock:
             if not self._live(hand) or self.gone.is_set():
                 return False
@@ -1074,7 +1090,8 @@ class CodexAdapter(HarnessAdapter):
         self.log.info("the steer of digest %s was refused %s; delivering it instead",
                       hand.ref, reason)
         try:
-            hand.delivery = session.deliver(hand.text, ref=hand.ref)
+            hand.delivery = session.deliver(hand.text, ref=hand.ref, by=DELIVERY_BY,
+                                            senders=hand.senders)
         except Exception as exc:                              # noqa: BLE001
             hand.delivery = _Unsent(HandInFailed(f"the hand-in failed: "
                                                  f"{type(exc).__name__}: {exc}"), hand.ref)

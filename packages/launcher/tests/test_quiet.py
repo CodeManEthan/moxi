@@ -51,6 +51,8 @@ class Agent:
     kind: str
     state: str
     final: bool | None
+    description: str | None = None
+    last_write_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -216,11 +218,59 @@ def test_an_incomplete_agent_list_holds():
     assert "could not be read whole" in reading.first.detail
 
 
-def test_the_subagent_words_count_the_live_ones():
-    agents = Agents((Agent("a", "subagent", "running", final=False),
+def test_the_subagent_words_count_and_name_the_live_ones():
+    agents = Agents((Agent("a", "subagent", "running", final=False, description="build"),
                      Agent("b", "teammate", "waiting", None),
-                     Agent("c", "shell", "running", final=False)))
-    assert judge(agents=agents).first.detail == "2 still working (subagent, teammate)"
+                     Agent("c", "shell", "running", final=False, description="loop")))
+    assert judge(agents=agents).first.detail == (
+        '2 still working: "build" (subagent, running); "b" (teammate, waiting). '
+        "Messaging the session or ending its shells would wake it")
+
+
+def test_a_judged_entry_is_named_with_its_last_write_and_its_stale_time():
+    wrote = NOW - 1500
+    agents = Agents((Agent("a", "subagent", "waiting", final=False,
+                           description="probe sleeper", last_write_at=wrote),))
+    detail = judge(agents=agents, stale_after_s=3600.0).first.detail
+    stale_at = quiet._utc(wrote + 3600.0)
+    assert detail.startswith('1 still working: "probe sleeper" (subagent, waiting, last '
+                             f'wrote 25 min ago, reads stale at {stale_at})')
+    assert stale_at == "2027-01-15 08:35:00Z"
+
+
+def test_a_stale_time_not_known_is_left_out():
+    agents = Agents((Agent("a", "subagent", "waiting", final=False, description="x",
+                           last_write_at=NOW - 30),))
+    detail = judge(agents=agents, stale_after_s=None).first.detail
+    assert '"x" (subagent, waiting, last wrote 30 s ago)' in detail
+    assert "stale at" not in detail
+
+
+def test_the_stale_time_is_turns_own(monkeypatch):
+    turns = pytest.importorskip("moxi_turns")
+    claude_stale = pytest.importorskip("moxi_turns.claude_stale")
+
+    assert turns.STALE_AFTER_S == claude_stale.STALE_AFTER_S
+    monkeypatch.setattr(quiet, "turns_stale_after_s", lambda: 60.0)
+    agents = Agents((Agent("a", "subagent", "waiting", final=False, last_write_at=NOW),))
+    assert f"reads stale at {quiet._utc(NOW + 60)}" in judge(agents=agents).first.detail
+
+
+@pytest.mark.parametrize("keep_warm, words", [
+    (True, "would wake it, and keep-warm should have kept it warm"),
+    (False, "would wake it; keep-warm is off for this session, so nothing kept it warm"),
+    (None, "would wake it"),
+])
+def test_the_subagent_words_say_what_keep_warm_is(keep_warm, words):
+    agents = Agents((Agent("a", "subagent", "running", final=False),))
+    detail = judge(agents=agents, keep_warm=keep_warm).first.detail
+    assert detail.endswith(words)
+
+
+@pytest.mark.parametrize("seconds, words", [(0, "0 s"), (119, "119 s"), (120, "2 min"),
+                                            (7199, "119 min"), (7260, "2 h 1 min")])
+def test_an_age_in_words(seconds, words):
+    assert quiet._span(seconds) == words
 
 
 # -- a person -----------------------------------------------------------------------------
@@ -229,7 +279,6 @@ def test_the_subagent_words_count_the_live_ones():
 @pytest.mark.parametrize("use, words", [
     (PaneUse(pane_in_mode=True), "the pane is in copy mode"),
     (PaneUse(attached=1, client_activity=NOW - 40), "a client was active 40 s ago"),
-    (PaneUse(pane_activity=NOW - 5), "the pane was active 5 s ago"),
 ])
 def test_a_person_at_the_pane_holds(use, words):
     reading = judge(pane=use)
@@ -238,24 +287,43 @@ def test_a_person_at_the_pane_holds(use, words):
 
 
 def test_activity_older_than_the_window_holds_nothing():
-    use = PaneUse(attached=1, client_activity=NOW - 200, pane_activity=NOW - 121)
+    use = PaneUse(attached=1, client_activity=NOW - 200)
     assert judge(pane=use).quiet
     assert judge(pane=use, person_s=300).words == ("person",)
 
 
-def test_pane_output_from_the_harness_own_time_holds_nothing():
-    own = NOW - 10
-    assert judge(pane=PaneUse(pane_activity=own), own_output_from=own).quiet
-    assert judge(pane=PaneUse(pane_activity=NOW - 1), own_output_from=own).quiet
-    held = judge(pane=PaneUse(pane_activity=own - 1), own_output_from=own)
-    assert str(held.first) == "person: the pane was active 11 s ago"
+def test_pane_output_never_holds():
+    """Claude Code redraws its spinner and status line all the time, so the pane's
+    activity reads now at every read; with no other sign of a person, nothing holds."""
+    for output_at in (NOW, NOW - 1, NOW - 5):
+        use = PaneUse(attached=1, client_activity=NOW - 600, pane_activity=output_at)
+        assert judge(pane=use).quiet
+        held = judge(pane=use, person_s=3600)
+        assert str(held.first) == "person: a client was active 600 s ago"
 
 
-@pytest.mark.parametrize("use", [PaneUse(pane_in_mode=True, pane_activity=NOW - 1),
-                                 PaneUse(attached=1, client_activity=NOW - 1,
-                                         pane_activity=NOW - 1)])
-def test_copy_mode_and_a_client_hold_whatever_the_harness_own_time(use):
-    assert judge(pane=use, own_output_from=NOW - 10).words == ("person",)
+@pytest.mark.parametrize("facts, use, words", [
+    (None, PaneUse(), ()),
+    (None, PaneUse(pane_in_mode=True), ("person",)),
+    (None, PaneUse(attached=1, client_activity=NOW - 1), ("person",)),
+    (Facts(draft=True), PaneUse(), ("draft",)),
+    (Facts(turn_open=True, turn=person(NOW - 30)), PaneUse(), ("turn", "person")),
+], ids=["output-alone", "copy-mode", "client", "draft", "person-turn"])
+def test_with_pane_output_now_only_a_person_sign_holds(facts, use, words):
+    use = PaneUse(use.slot, use.pane_id, use.pane_in_mode, use.attached,
+                  use.client_activity, pane_activity=NOW)
+    reading = judge(facts, pane=use)
+    assert reading.words == words
+    assert "the pane was active" not in " ".join(h.detail for h in reading.holds)
+
+
+def test_the_whole_read_and_the_re_read_take_no_pane_output():
+    slots = FakeSlots(use=PaneUse(pane_activity=NOW))
+    last = quiet.read(FakeSession(), slot=3, slots_api=slots, clock=lambda: NOW)
+    assert last.quiet
+    slots.use = PaneUse(pane_activity=NOW + 2)
+    again = quiet.reread_person(last, slot=3, slots_api=slots, clock=lambda: NOW + 2)
+    assert again.quiet and slots.asked == [3, 3]
 
 
 def test_a_pane_that_is_gone_holds_nothing():
@@ -450,7 +518,7 @@ def test_the_fields_the_read_uses_are_turns_and_slots_own():
                          results.TurnStarted, results.TurnEnded, results.Gone)}
     assert {"turn_number", "turn_open", "turn", "draft", "stale"} <= names[results.Facts]
     assert {"opening", "command", "started_at"} <= names[results.OpenTurn]
-    assert {"kind", "state", "final"} <= names[results.Agent]
+    assert {"kind", "state", "final", "description", "last_write_at"} <= names[results.Agent]
     assert {"entries", "complete"} <= names[results.Agents]
     assert {"turn_number", "deliveries", "command"} <= names[results.TurnStarted]
     assert {"turn_number"} <= names[results.TurnEnded]

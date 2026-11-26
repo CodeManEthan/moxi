@@ -38,6 +38,12 @@ question does not have and retires each key it leaves out; a block that gives it
 changes none. A key that was retired is never used again: the block's entry for it is
 left out, the freezing says which key that was, and the rest of the block is read.
 
+A prepared answer is no declaration either. A question's `[question.prepared]` is
+recorded on the question as `ask --prepared` records one, and checked the same way
+against the options the question offers once the block's own are applied; a question
+that offers none takes them from the answer. One that is the newest on record and
+current adds nothing.
+
 The copy is the verb's act outside the log, done before the append. A verb stopped
 between the two is run again: the file it left is kept when it has the bytes of the
 design, and written again when the design changed meanwhile, since no event had made
@@ -47,7 +53,8 @@ it a version.
 record of the change: no pass is asked for over it, and the design stands at what the
 version before it gave (`versions.standing`). It is one only when what the gates read
 is as the version before declared it; `brake.differences` says what is not, and each
-difference refuses the freezing. Options are no such difference.
+difference refuses the freezing. Options and a prepared answer are no such
+difference.
 
 A sentence in the block that differs from the one on record for the same id changes
 nothing: a question on record keeps its sentence, and the freezing says which ids
@@ -77,7 +84,8 @@ from pathlib import Path
 from moxi import files
 
 from . import (brake, corrections, design_block, ending, folders, options, pointers,
-               questions, stages, stepping, tracing, versions, write)
+               preparing, questions, stages, stepping, tracing, versions, write)
+from . import checklist
 from . import settings as own
 from . import state as states
 from .errors import BadArgument, BadBlock, NoLog, NoRound, Problem, RoundsError, Unmet
@@ -109,8 +117,9 @@ class Plan:
     - `declared`: the block as the event holds it.
     - `added`: what is new to the record, as the event holds it: `questions` and
       `stages` (ids), `after` (stage id -> the stages it now also waits for), `blocks`
-      (question id -> what it now holds up) and `options` (question id -> `options`
-      added and keys `retired`); a key is there only when it has something.
+      (question id -> what it now holds up), `options` (question id -> `options`
+      added and keys `retired`) and `prepared` (question id -> the answer the block
+      prepares, as an event stores it); a key is there only when it has something.
     - `pending`: what the block took away.
     - `problems`: why the block can't be frozen onto this record; with any, nothing
       is frozen.
@@ -204,7 +213,28 @@ def _declared(block: design_block.DesignBlock) -> dict:
     committed = [{"id": one.id, "text": one.text, "where": one.where}
                  for one in block.commitments]
     return {"question": asked, "stage": planned, "trace": traced,
-            "commitment": committed}
+            "commitment": committed, checklist.KEY: list(block.checklist or ())}
+
+
+def mark_problems(block: design_block.DesignBlock, home: str, settings) -> list[Problem]:
+    """What is wrong with the checklist marks of `block`, for a round whose home is
+    `home`, against the checklists of the home project and of each repo its stages name:
+    a mark of no item, of another project, or given twice, and a block that says nothing
+    while one of those checklists is not empty."""
+    projects = checklist.weighed(home, (stage.repo for stage in block.stages))
+    if block.checklist is None:
+        if any(checklist.items(settings, project) for project in projects):
+            return [Problem(block.line, "the block has no `checklist` key, and the "
+                            "checklist of " + " or ".join(
+                                project for project in projects
+                                if checklist.items(settings, project))
+                            + " is not empty, so the design says which items apply",
+                            "mark the items that apply: checklist = [...], or "
+                            "checklist = [] when none apply")]
+        return []
+    return [Problem(block.checklist_line, f"`checklist` {problem}", fix)
+            for problem, fix in checklist.problems(block.checklist, home, settings,
+                                                   projects=projects)]
 
 
 def _same(one, other) -> bool:
@@ -313,17 +343,12 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
                 if stage_id not in declared_now and stage_id not in done]
 
     for asked in block.questions:
-        if asked.prepared is not None:
-            problems.append(Problem(
-                asked.line_of("prepared"),
-                f"{asked.id} carries a prepared answer, and an answer prepared in a "
-                "design's block is not recorded yet",
-                "take [question.prepared] and its options out of the block"))
         if not isinstance(asked.blocks, str):
             unknown(asked, "blocks", asked.blocks, f"the question {asked.id}")
         have = questions.find(state, asked.id)
         if have is None:
             add("questions", None, asked.id)
+            _prepared(asked, None, add, problems)
             continue
         if have.state not in _ASKED:
             by = f", by {have.ruling}" if have.ruling else ""
@@ -366,6 +391,7 @@ def plan(state: states.State, block: design_block.DesignBlock) -> Plan:
                                     (*recorded, *(stage.id for stage in block.stages)))))
         if asked.options is not None:
             _options(asked, have, add, problems, refused)
+        _prepared(asked, have, add, problems)
     carried = {one.get("id") for version in state.versions
                for one in version.declared.get(states.QUESTION) or ()}
     asked_now = {asked.id for asked in block.questions}
@@ -415,6 +441,51 @@ def _options(asked: design_block.Question, have: states.Question, add,
         add("options", asked.id, change)
 
 
+#: How a design's block writes the options of a prepared answer.
+_PREPARED_OPTION = "[[question.prepared.option]]"
+
+
+def _prepared(asked: design_block.Question, have: states.Question | None, add,
+              problems: list[Problem]) -> None:
+    """What the answer the block prepares for `asked` adds to the question `have` (None
+    for a question the block adds): the answer, unless it is the one on record and
+    current, and for a question left with no options the options it gives. What
+    stands in the way is checked as `ask --prepared` checks it."""
+    prepared = asked.prepared
+    if prepared is None:
+        return
+    retired = () if have is None else have.retired
+    if asked.options is not None:
+        # The block gives the options the question offers after this freezing.
+        offered = tuple((key, text) for key, text in asked.options if key not in retired)
+    else:
+        offered = () if have is None else have.options
+    body = preparing.stored(prepared)
+    newest = have.prepared[-1] if have is not None and have.prepared else None
+    if (newest is not None and offered
+            and _without_offered(newest.body(), offered) == _without_offered(body, offered)
+            and {one.key for one in newest.options} == {key for key, _text in offered}):
+        return
+    wrong = preparing.problems(prepared, asked.id, offered=offered, retired=retired,
+                               header=_PREPARED_OPTION)
+    if wrong:
+        problems += wrong
+        return
+    if not offered:
+        add("options", asked.id, {"options": preparing.given_options(prepared)})
+    add("prepared", asked.id, body)
+
+
+def _without_offered(body: dict, offered: tuple[tuple[str, str], ...]) -> dict:
+    """The stored answer `body` less each option's `text` where it is the line the
+    question offers under that key, so an answer that gives the line and one that
+    leaves it out read the same."""
+    lines = dict(offered)
+    return {**body, "option": [{key: value for key, value in one.items()
+                                if not (key == "text" and value == lines.get(one["key"]))}
+                               for one in body["option"]]}
+
+
 def _pending(one: states.Pending) -> dict:
     entry: dict[str, object] = {"what": one.what, "id": one.id}
     if one.gone:
@@ -455,10 +526,11 @@ def freeze(name: str, *, by: str, records_only: bool = False,
     flow has no design step or its folder holds no design, and `BadBlock` when the
     design's block can't be read or can't be frozen onto the record: a question's id
     that the round already used for one since ruled or withdrawn, a stage named that
-    is none, options that break a question's rules, a prepared answer, a recorded
-    stage given another repo, branch or child round, a stage that left the plan, a
-    wait added for a stage that left it or that closes a circle of waits, or a
-    second stage in one repo where the flow does not verify the design. A version
+    is none, options that break a question's rules, a prepared answer that does not
+    speak of exactly the options its question offers, a recorded stage given
+    another repo, branch or child round, a stage that left the plan, a wait added for
+    a stage that left it or that closes a circle of waits, or a second stage in one
+    repo where the flow does not verify the design. A version
     frozen as a change of records only is also `Refused` when its pointer is missing
     or has no known shape, and when its block's questions, its stages, what a
     question holds up or what a stage waits for are not as the version before
@@ -532,8 +604,9 @@ def freeze(name: str, *, by: str, records_only: bool = False,
             raise view.facts.error
         block = view.facts.block
         found = planned(view)
-        if found.problems:
-            raise BadBlock(block.file, design_block.WHAT, found.problems)
+        wrong = [*found.problems, *mark_problems(block, home.project, settings)]
+        if wrong:
+            raise BadBlock(block.file, design_block.WHAT, wrong)
         number = len(view.state.versions) + 1
         target = versions.file(round_dir, number)
         try:
@@ -592,4 +665,5 @@ def freeze(name: str, *, by: str, records_only: bool = False,
                   slice_minutes=limit)
 
 
-__all__ = ["DESIGN", "CHECKS", "KeptOff", "Plan", "Frozen", "oversized", "plan", "freeze"]
+__all__ = ["DESIGN", "CHECKS", "KeptOff", "Plan", "Frozen", "oversized", "plan",
+           "mark_problems", "freeze"]

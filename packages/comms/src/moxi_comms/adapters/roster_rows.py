@@ -125,6 +125,34 @@ def parse_directors(where: str, section: dict) -> list:
         raise ConfigError(f"{where}: {exc}") from exc
 
 
+def parse_takes_policy(where: str, section: dict) -> bool:
+    """The row's `takes_policy_directors`: whether the agent takes the box's policy
+    directors (`[policy] directors`). A bool; absent is true."""
+    takes = section.get("takes_policy_directors", True)
+    if not isinstance(takes, bool):
+        raise ConfigError(f"{where}: takes_policy_directors must be true or false, not "
+                          f"{takes!r}")
+    return takes
+
+
+def take_policy(roster, cfg, *, env=None, path=None):
+    """Merge the box's policy directors into each row of `roster` (`directors.effective`),
+    after the row's own, unless the row opted out; returns `roster`.
+
+    `cfg` is the config the roster was read from. When a launch named another file
+    (`path`, `--config`), the policy still comes from the box's own comms config: the
+    setting is the machine's, not the roster file's. This runs at a launch's load, never
+    in `from_table`, which a check of config text runs too."""
+    from .. import config as config_mod
+
+    box = config_mod.load(env=env) if path is not None else cfg
+    for agent in roster.agents.values():
+        agent.directors, agent.policy_directors = directors_mod.effective(
+            agent.directors, box, own=agent.qualified,
+            use_policy=agent.takes_policy_directors)
+    return roster
+
+
 def stamped_env(agent, base=None) -> dict:
     """A row's identity stamped into its wrapper's spawn environment, scrubbed first
     (`session.stamped_env`)."""
@@ -133,8 +161,9 @@ def stamped_env(agent, base=None) -> dict:
     return stamp(base, name=agent.name, scope=agent.scope,
                  global_=agent.scope == GLOBAL,
                  project=None if agent.scope == GLOBAL else agent.scope,
-                 directors=agent.directors)
+                 directors=agent.directors,
+                 policy_directors=getattr(agent, "policy_directors", ()))
 
 
 __all__ = ["Roster", "RowHead", "check_defaults", "parse_directors", "parse_head",
-           "read_config", "stamped_env"]
+           "parse_takes_policy", "read_config", "stamped_env", "take_policy"]

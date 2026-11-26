@@ -5,7 +5,9 @@ with `~`) is the folder. A relative one is placed in the project's notes folder:
 its projects record names, else the one the notes module gives the project by default,
 when notes is installed. That one call is all rounds asks of notes. A project the
 projects list does not hold is `UnknownProject`; a relative `dir` with no notes folder to
-place it in is `NoFolder`, which names the setting that fixes it.
+place it in is `NoFolder`, which names the setting that fixes it. A project's record
+also names its lead agent, or none, which `Home.lead` carries for a round that has no
+lead of its own.
 
 A rounds folder belongs to one project. Every log in it is written under its project's
 lock, so two projects that reached one folder would write one log under two locks. A
@@ -17,6 +19,9 @@ The rounds of a project are the folders of its rounds folder that hold a `round.
 Nothing else lists them: a folder copied in, or one that arrived by git, is a round as
 soon as it is there. A round's name is `<project>/<slug>`, the slug its folder's name.
 
+Under a test, no place is taken from a projects registry that no Moxi variable places,
+which is the real one: the read raises `UnfencedTest` first (`_projects`).
+
 Nothing here makes a folder or writes a file.
 """
 
@@ -24,12 +29,14 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import log
-from .errors import BadName, NoFolder, RoundsError, SharedFolder, UnknownProject
+from .errors import (BadName, NoFolder, RoundsError, SharedFolder, UnfencedTest,
+                     UnknownProject)
 
 #: What a slug is: lower-case letters, digits and `-`.
 SLUG = re.compile(r"[a-z0-9-]+")
@@ -38,10 +45,12 @@ SLUG = re.compile(r"[a-z0-9-]+")
 @dataclass(frozen=True)
 class Home:
     """A project as rounds' home for rounds: `project` is its key as the projects list
-    stores it, and `rounds_dir` its rounds folder, which need not exist yet."""
+    stores it, `rounds_dir` its rounds folder, which need not exist yet, and `lead`
+    the lead agent its record names, None when it names none."""
 
     project: str
     rounds_dir: Path
+    lead: str | None = None
 
     def round_dir(self, slug: str) -> Path:
         """The folder of the round `<project>/<slug>`."""
@@ -70,7 +79,7 @@ def home(project: str, settings=None) -> Home:
     api = _projects()
     record = _record(api.get, project)
     settings = _settings(settings)
-    found = Home(record.key, _rounds_dir(record, settings))
+    found = Home(record.key, _rounds_dir(record, settings), record.lead)
     mine = os.path.realpath(found.rounds_dir)
     for other in _records(api):
         if other.key == record.key:
@@ -95,7 +104,7 @@ def homes(settings=None) -> tuple[list[Home], list[RoundsError]]:
     reach: dict[str, list[str]] = {}
     for record in records:
         try:
-            one = Home(record.key, _rounds_dir(record, settings))
+            one = Home(record.key, _rounds_dir(record, settings), record.lead)
         except NoFolder as exc:
             placed.append(exc)
             continue
@@ -122,6 +131,12 @@ def notes_dir(project: str) -> Path:
     return _notes_dir(_record(_projects().get, project))
 
 
+def lead(project: str) -> str | None:
+    """The lead agent the record of the project `project` (its key, in any case) names,
+    or None when it names none. Raises `UnknownProject`."""
+    return _record(_projects().get, project).lead
+
+
 def root(project: str) -> tuple[str, Path]:
     """The key of the project `project` (its key, in any case) as the projects list
     stores it, and the folder its record names as its root: for a build's repo, where
@@ -146,6 +161,18 @@ def project_at(path: str | os.PathLike) -> str | None:
     except api.ProjectsError as exc:
         raise RoundsError(f"the projects list can't be read: {exc}") from None
     return None if found is None else found.key
+
+
+def project_root_at(path: str | os.PathLike) -> tuple[str, Path] | None:
+    """The key of the project the file or folder `path` is in, with the folder its
+    record names as its root, or None when it is in none; read as `project_at` reads
+    it."""
+    api = _projects()
+    try:
+        found = api.for_path(os.fspath(path))
+    except api.ProjectsError as exc:
+        raise RoundsError(f"the projects list can't be read: {exc}") from None
+    return None if found is None else (found.key, Path(os.path.expanduser(found.root)))
 
 
 def slugs(rounds_dir: Path) -> list[str]:
@@ -176,9 +203,32 @@ def _settings(settings):
 
 
 def _projects():
-    """The projects module's read API."""
+    """The projects module's read API: the one way rounds reads the projects registry.
+
+    Under a test whose projects registry no Moxi variable places (the projects module's
+    data root, by `MOXI_PROJECTS_DATA_HOME`, `MOXI_PROJECTS_HOME` or `MOXI_HOME`), it
+    raises `UnfencedTest` before the registry is read: a real registry means a real
+    project, and every place taken from its records (a project's notes folder and rounds
+    folder, its root) would be the real one. Only the process that shows a test is
+    running is refused, and the processes it starts; another process writing the same
+    notes folder never is."""
     from moxi import modules
 
+    from . import paths
+
+    env = os.environ
+    signal = paths.running_under_pytest(env, sys.modules)
+    if paths.refused_root(paths.PROJECTS_LAYOUT, "data", env, signal) is not None:
+        try:
+            registry = f" in {paths.PROJECTS_LAYOUT.data_dir(env)}"
+        except (LookupError, OSError):
+            registry = ""
+        raise UnfencedTest(
+            "rounds refused to take a project's notes folder from the projects registry"
+            f"{registry}: a test is running ({signal}) and no Moxi variable places the "
+            "registry, so it is the real one and so are its projects' notes folders. Run "
+            "the test inside moxi-dev's fence (rounds' tests folder, run from "
+            "packages/rounds), or set MOXI_PROJECTS_HOME to a folder of the test's own.")
     found = modules.load("projects", interface=1)
     if not found.ok or found.api is None:
         raise RoundsError(f"the projects module can't be used: {found.reason}",
@@ -231,6 +281,8 @@ def _notes_dir(record) -> Path:
                                    f"({notes.reason})", known=False)
     try:
         found = notes.api.notes_root_for(record.root, record.kind, record.key)
+    except UnfencedTest:
+        raise
     except Exception as exc:  # noqa: BLE001 - whatever notes raises, the answer is none
         raise NoFolder(record.key, f"{relative} and notes could not give it one "
                                    f"({exc})", known=False) from None
@@ -239,5 +291,5 @@ def _notes_dir(record) -> Path:
     return Path(found)
 
 
-__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "root",
-           "slugs", "names"]
+__all__ = ["SLUG", "Home", "is_slug", "split", "home", "homes", "notes_dir", "lead",
+           "root", "project_root_at", "slugs", "names"]

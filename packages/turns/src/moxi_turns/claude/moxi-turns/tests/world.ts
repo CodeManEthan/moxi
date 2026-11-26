@@ -72,6 +72,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     order: [] as string[],
     wake: () => {},
     childDone: false,
+    /** What `$.session.messages({as: 'api'})` answers; a throw when null. */
+    messages: [] as unknown[] | null,
+    /** How many times the runner read `$.session.messages`. */
+    messageReads: 0,
     /** What `$.session.usage()` answers; a throw when null. */
     usage: { startedAt: 500, context: { tokens: 1200, window: 200_000, percent: 1 }, rateLimits: [] } as Record<string, unknown> | null,
     /** When set, a prompt's `next(e)` calls it beneath, as the engine runs the prompt's
@@ -88,6 +92,17 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     logs: [] as string[],
     /** When set, classic.SessionStart's `next` waits on it: the hooks beneath still run. */
     beneathSessionStart: null as Promise<void> | null,
+    /** Every `$.agent.spawn` the runner made, its input as the engine got it (the Agent
+     *  tool's spelling). */
+    spawns: [] as Record<string, unknown>[],
+    /** How `agent.spawn` answers: a result, or a throw when `throw`. The kit keeps no
+     *  `agentId` from a hook's answer (the engine's core sets it), so no spawn here names
+     *  an agent. */
+    spawnAnswer: { model: 'm', agentId: 'f1' } as Record<string, unknown> | 'throw',
+    /** Every `$.session.send` the runner made: whom to and the text. */
+    sends: [] as { to: unknown; text: string }[],
+    /** How `session.send` answers: a result, or a throw when `throw`; a default delivered. */
+    sendAnswer: { isDelivered: true } as Record<string, unknown> | 'throw',
   }
   const endpointJson = options.endpointJson === undefined ? JSON.stringify({ argv: ROOT_ARGV }) : options.endpointJson
 
@@ -134,7 +149,13 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     if (w.usage === null) throw new Error('no usage')
     return { value: w.usage as never }
   })
+  on('session.messages', async () => {
+    w.messageReads += 1
+    if (w.messages === null) throw new Error('no messages')
+    return { value: w.messages as never }
+  })
   on('session.measure', async ($, e) => ({ changed: e.changed }))
+  on('session.end', async ($, e) => ({ sessionId: e.sessionId }))
   on('ui.log', async ($, e) => {
     w.logs.push(e.text)
     return { value: undefined } as never
@@ -152,6 +173,16 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     return { text: `ran ${e.command}` }
   })
   on('session.append', async ($, e, next) => next(e))
+  on('agent.spawn', async ($, e) => {
+    w.spawns.push({ ...(e as Record<string, unknown>) })
+    if (w.spawnAnswer === 'throw') throw new Error('no spawn here')
+    return w.spawnAnswer as never
+  })
+  on('session.send', async ($, e) => {
+    w.sends.push({ to: e.to, text: e.text })
+    if (w.sendAnswer === 'throw') throw new Error('no send here')
+    return w.sendAnswer as never
+  })
   on('classic.SubagentStop', async () => ({}))
   on('tool.check', async ($, e) => {
     const id = String((e.input as Record<string, unknown>)?.task_id)
@@ -206,7 +237,7 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
       await clock.settle()
     },
     async hello(extra: Record<string, unknown> = {}) {
-      await this.line({ op: 'hello', leg: 4, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
+      await this.line({ op: 'hello', leg: 5, mod_sock: SOCK, stop_wait_ms: 2000, listen_wait_ms: 2000, endpoint_version: '0.1.0', pid: 42, ...extra })
     },
     async end() {
       w.childDone = true

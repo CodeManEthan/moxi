@@ -105,7 +105,7 @@ def test_a_fold_copies_the_design_to_its_first_version_and_records_its_digest(ro
             "question": [{"id": "Q1", "text": ASKED, "blocks": "all"}],
             "stage": [{"id": "B1", "after": [], "repo": "proj-a",
                        "branch": "branch-b1", "slices": []}],
-            "trace": [], "commitment": []},
+            "trace": [], "commitment": [], "checklist": []},
         "added": {"stages": ["B1"], "questions": ["Q1"]}, "pending": []}
     found = folded(round_dir)
     assert versions.current(found).n == 1
@@ -915,37 +915,173 @@ def test_the_id_of_a_question_moved_to_the_projects_list_is_refused(round_dir):
     assert log.round_log(round_dir).read_bytes() == before
 
 
-def test_a_prepared_answer_in_a_block_is_refused_as_not_recorded_yet(round_dir):
-    design(round_dir, question("Q1", options='{ a = "one", b = "two" }') + """
+def prepared(*keys, recommend="a", texts=None, sure="medium") -> str:
+    """A `[question.prepared]` with an option under each of `keys`, each with its line
+    from `texts` where given."""
+    lines = ["", "  [question.prepared]", f'  recommend = "{recommend}"', '  by = "helper"',
+             '  model = "a-model"', f'  sure = "{sure}"', '  why = "It reads so."',
+             '  flips = "A reading the other way."', '  read = ["comms:1234567"]']
+    for key in keys:
+        lines += ["", "  [[question.prepared.option]]", f'  key = "{key}"']
+        if texts:
+            lines.append(f'  text = "{texts[key]}"')
+        lines += [f'  costs = "Costs of {key}."', '  forecloses = "nothing"']
+    return "\n".join(lines)
 
-  [question.prepared]
-  recommend = "a"
-  by = "helper"
-  model = "a-model"
-  sure = "medium"
-  why = "It reads so."
-  flips = "A reading the other way."
-  read = ["comms:1234567"]
 
-  [[question.prepared.option]]
-  key = "a"
-  costs = "Little."
-  forecloses = "nothing"
+TWO = '{ a = "one", b = "two" }'
 
-  [[question.prepared.option]]
-  key = "b"
-  costs = "More."
-  forecloses = "nothing"
-""")
+
+def test_a_prepared_answer_in_a_block_is_recorded_on_its_question(round_dir, capsys):
+    design(round_dir, question("Q1", options=TWO) + prepared("a", "b"))
+
+    assert main(["fold", ROUND, "--as", "scout"]) == 0
+
+    body = {"by": "helper", "model": "a-model", "recommend": "a", "sure": "medium",
+            "why": "It reads so.", "flips": "A reading the other way.",
+            "read": ["comms:1234567"],
+            "option": [{"key": "a", "costs": "Costs of a.", "forecloses": "nothing"},
+                       {"key": "b", "costs": "Costs of b.", "forecloses": "nothing"}]}
+    assert last(round_dir)["added"] == {"questions": ["Q1"], "prepared": {"Q1": body}}
+    found = folded(round_dir).questions[0]
+    [one] = found.prepared
+    assert one.body() == body and one.actor == "scout"
+    assert questions.prepared_now(found).current
+    assert "prepared: Q1 by helper, recommends a" in capsys.readouterr().out
+
+
+def test_a_question_on_record_takes_the_answer_a_later_block_prepares(round_dir):
+    design(round_dir, question("Q1", options=TWO))
+    fold()
+    design(round_dir, question("Q1", options=TWO) + prepared("b", "a", recommend="b"),
+           prose="Prepared.")
+
+    frozen = fold()
+
+    assert set(frozen.plan.added) == {"prepared"}
+    assert questions.prepared_now(folded(round_dir).questions[0]).prepared.recommend == "b"
+
+
+def test_a_second_fold_with_the_same_answer_adds_nothing(round_dir):
+    design(round_dir, question("Q1", options=TWO) + prepared("a", "b"))
+    fold()
+    design(round_dir, question("Q1", options=TWO) + prepared("a", "b"),
+           prose="Reworded.")
+
+    assert fold().plan.added == {}
+    assert len(folded(round_dir).questions[0].prepared) == 1
+
+
+def test_the_answer_on_record_less_the_lines_the_question_offers_adds_nothing(
+        round_dir, tmp_path):
+    design(round_dir, question("Q1"))
+    fold()
+    file = tmp_path / "answer.md"
+    file.write_text("""```toml rounds
+kind = "answer"
+question = "Q1"
+recommend = "a"
+by = "helper"
+model = "a-model"
+sure = "medium"
+why = "It reads so."
+flips = "A reading the other way."
+read = ["comms:1234567"]
+
+[[option]]
+key = "a"
+text = "one"
+costs = "Costs of a."
+forecloses = "nothing"
+
+[[option]]
+key = "b"
+text = "two"
+costs = "Costs of b."
+forecloses = "nothing"
+```
+""", encoding="utf-8")
+    assert main(["ask", ROUND, "Q1", "--prepared", str(file), "--as", "helper"]) == 0
+    design(round_dir, question("Q1") + prepared("a", "b"), prose="Prepared again.")
+
+    assert fold().plan.added == {}
+    found = folded(round_dir).questions[0]
+    assert len(found.prepared) == 1 and questions.prepared_now(found).current
+
+
+def test_a_changed_answer_or_a_stale_one_is_recorded_again(round_dir):
+    design(round_dir, question("Q1", options=TWO) + prepared("a", "b"))
+    fold()
+    design(round_dir, question("Q1", options=TWO) + prepared("a", "b", sure="high"),
+           prose="Surer.")
+
+    assert set(fold().plan.added) == {"prepared"}
+    three = '{ a = "one", b = "two", c = "three" }'
+    design(round_dir, question("Q1", options=three) + prepared("a", "b", "c",
+                                                               sure="high"),
+           prose="A third option.")
+    assert set(fold().plan.added) == {"options", "prepared"}
+    found = folded(round_dir).questions[0]
+    assert len(found.prepared) == 3 and questions.prepared_now(found).current
+
+
+def test_a_question_with_no_options_takes_them_from_its_answer(round_dir):
+    design(round_dir, question("Q1") + prepared("a", "b", texts={"a": "one", "b": "two"}))
+
+    frozen = fold()
+
+    assert frozen.plan.added["options"] == {"Q1": {"options": {"a": "one", "b": "two"}}}
+    found = folded(round_dir).questions[0]
+    assert found.options == (("a", "one"), ("b", "two"))
+    assert questions.prepared_now(found).current
+
+
+def test_a_records_only_fold_that_only_adds_an_answer_is_accepted(round_dir):
+    design(round_dir, question("Q1", options=TWO))
+    fold()
+    design(round_dir, question("Q1", options=TWO) + prepared("a", "b"),
+           prose="Prepared.")
+
+    frozen = fold(records_only=True, record="comms:77")
+
+    assert set(frozen.plan.added) == {"prepared"}
+    found = folded(round_dir)
+    assert versions.current(found).records_only is True
+    assert found.questions[0].prepared[0].recommend == "a"
+
+
+@pytest.mark.parametrize("entry, needle, says", [
+    (question("Q1", options='{ a = "one", b = "two", c = "three" }') + prepared("a", "b"),
+     "[question.prepared]",
+     "Q1 offers c, and the answer has no [[question.prepared.option]] for it"),
+    (question("Q1", options=TWO) + prepared("a", "b", "c"), 'key = "c"',
+     "Q1 offers no option c; its options are a, b"),
+    (question("Q1") + prepared("a", "b"), 'key = "a"',
+     "Q1 has no options yet, so the answer gives them, and the option a has no text"),
+])
+def test_an_answer_that_does_not_fit_its_question_is_refused_with_its_line(
+        round_dir, entry, needle, says):
+    design(round_dir, entry)
     before = log.round_log(round_dir).read_bytes()
 
     with pytest.raises(BadBlock) as refused:
         fold()
 
-    [problem] = refused.value.problems
-    assert "an answer prepared in a design's block is not recorded yet" in problem.what
-    assert problem.line == line_with(round_dir, "[question.prepared]")
+    found = [one for one in refused.value.problems if says in one.what]
+    assert found and found[0].line == line_with(round_dir, needle)
     assert untouched(round_dir, before)
+
+
+def test_an_answer_for_a_retired_key_is_refused(round_dir):
+    three = '{ a = "one", b = "two", c = "three" }'
+    design(round_dir, question("Q1", options=three))
+    fold()
+    main(["ask", ROUND, "Q1", "--retire", "c", "--as", "planner"])
+    design(round_dir, question("Q1", options=TWO) + prepared("a", "b", "c"),
+           prose="Again.")
+
+    with pytest.raises(BadBlock, match="the key c was retired from Q1"):
+        fold()
 
 
 @pytest.mark.parametrize("entries, needle, says", [

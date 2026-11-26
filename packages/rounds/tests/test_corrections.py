@@ -40,7 +40,7 @@ def printed(ruling_id, said, holder="proj-a/a-round", *, question=None):
     answers, and how whoever recorded it says the operator was shown it."""
     answers = "" if question is None else f"in answer to {question[0]}: {question[1]}\n"
     return (f"Recorded as {ruling_id}: {said}\n{answers}"
-            'show him this under "Recorded as" in your next message, then:\n'
+            'show the operator this under "Recorded as" in your next message, then:\n'
             f"  moxi rounds mark {holder} {ruling_id} --shown --record "
             "<pointer to that message>\n")
 
@@ -199,14 +199,29 @@ def test_a_plain_ruling_is_replaced_by_another_that_names_it(rounds):
     assert [one.id for one in corrections.live(held(rounds).rulings)] == ["C2", "C3"]
 
 
+def test_the_newest_ruling_that_replaces_one_follows_each_replacement_in_turn(rounds):
+    rule(text=SAID)
+    rule(text="Another thing.")
+    assert corrections.newest_replacing(held(rounds), "C1") is None
+
+    rule(text="Usage is shown in the status line.", supersedes="C1")
+    rule(text="Usage is shown nowhere.", supersedes="C3")
+    revoke("C4", text="The operator took it back.")
+
+    assert corrections.newest_replacing(held(rounds), "C1").id == "C4"
+    assert corrections.newest_replacing(held(rounds), "C3").id == "C4"
+    assert corrections.newest_replacing(held(rounds), "C4") is None
+    assert corrections.newest_replacing(held(rounds), "C9") is None
+
+
 def test_a_plain_ruling_is_taken_back(rounds):
     rule(text=SAID)
 
-    revoke("C1", text="He took it back.")
+    revoke("C1", text="The operator took it back.")
 
     assert last(rounds) == {
         "actor": "planner", "type": "ruling.recorded", "id": "C2",
-        "text": "He took it back.", "revokes": "C1", "record": "comms:13",
+        "text": "The operator took it back.", "revokes": "C1", "record": "comms:13",
         "kind": "process", "rules": "revoke:C1"}
     assert marks(rounds) == [("C1", None, "C2"), ("C2", None, None)]
     assert [one.id for one in corrections.live(held(rounds).rulings)] == ["C2"]
@@ -427,7 +442,7 @@ def test_a_second_withdrawal_names_the_first_and_replaces_it(rounds, capsys):
             "--supersedes C1") in err
     assert logs(rounds) == before
 
-    rule("withdraw:Q1", text="It was never his question.", supersedes="C1")
+    rule("withdraw:Q1", text="It was never the operator's question.", supersedes="C1")
 
     assert marks(rounds) == [("C1", "C2", None), ("C2", None, None)]
     assert (question(rounds).state, question(rounds).ruling) == ("withdrawn", "C2")
@@ -630,7 +645,7 @@ def test_a_ruling_of_a_kind_nothing_here_knows_is_neither_taken_back_nor_replace
     assert logs(rounds) == before
 
 
-def test_a_correction_needs_his_pointer(rounds, capsys):
+def test_a_correction_needs_the_operators_pointer(rounds, capsys):
     rule(text=SAID)
     before = logs(rounds)
 

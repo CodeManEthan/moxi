@@ -20,6 +20,7 @@ import pytest
 from statusline_kit import config_file, write_config
 
 from moxi import config, modules, paths
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_statusline import compile as segments
 from moxi_statusline import page, pagehandlers
 
@@ -315,7 +316,7 @@ def test_a_held_lock_is_a_409_and_writes_nothing(monkeypatch):
         status, body = post("/api/save", draft({"color": False}))
     finally:
         holder.stdin.close()
-        holder.wait(10)
+        holder.wait(PROC_WAIT_S)
     assert status == 409, body
     assert "something else" in body["conflict"]
     assert snapshot() == before

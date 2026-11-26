@@ -25,7 +25,7 @@ your home directory, and the CLI and the adapters reach the daemon over Unix soc
 The daemon also serves comms' tools to sessions over MCP on `127.0.0.1:8450`, a loopback
 TCP port on by default; every request needs the token minted for one session, and
 `[mcp] enabled = false` in the config file and a daemon restart turn it off. Any account
-on the machine can connect to that port, so read [docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/security.md)
+on the machine can connect to that port, so read [docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/security.md)
 before using comms on a machine other people log in to.
 
 ```
@@ -37,14 +37,18 @@ Claude Code, Codex and OpenCode sessions take part through adapters. A Claude Co
 session `moxi comms claude` launches gets an adapter process of its own, which binds the
 session's name and delivers mail into the session through Moxi turns, the one way into a
 harness session: `moxi comms claude` loads turns' Claude plugins into the session it
-starts. Codex and OpenCode work through experimental adapters.
+starts. Codex and OpenCode work through experimental adapters. Each digest comms hands
+turns names comms as the module that asked and the senders of its messages, so a
+session's `prompt` listeners can tell a comms delivery from a prompt the user typed.
 
 Two words come up throughout. The **operator** is the human running this system: you,
 sending from your own terminal as the `operator` identity; the operator's messages are
-always shown to an agent as directives. A **director** is an identity a session was told
-at launch to take direction from (`moxi comms claude --director <name>`); its verified
-messages are shown to that session as directives, and every other message as information
-from a peer.
+always shown to an agent as directives. A **director** is an identity a session takes
+direction from: one its launch names (`moxi comms claude --director <name>`), or one the
+box's own comms config names for every session, `[policy] directors` (by default
+`fleet-lead`, which directs only once it is provisioned as a standing identity; a launch
+opts out with `--no-policy-directors`). Its verified messages are shown to that session
+as directives, and every other message as information from a peer.
 
 ## Install
 
@@ -170,11 +174,11 @@ meets.
 | `moxi comms send --as <name> <to> "text"` | send under a send-only name a program registered, from outside every session, with no reply |
 | `moxi comms send-only add\|renew\|remove <name>` | register a send-only name for a program (any program or service, not only a module), replace its token, or free it; inside a session, only a plain `add` of an unused name |
 | `moxi comms exit-session <name> [--scope S \| --global]` | end a headless session by its name, and wait for the name to be released |
-| `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain |
+| `moxi comms reserved renew <name>` | mint a fresh token for a send-only name a module reserved, into this process's credential chain; with `--word`, `<name>` is a word a module declares for scoped senders |
 | `moxi comms migrate [--dry-run]` | move an older comms' files into `comms.db` now (the daemon's start does it too) |
 | `moxi comms claude` | launch a named Claude Code session (also `"$(uv tool dir)/moxi/bin/moxi-comms-claude"`) |
 | `moxi comms codex` | launch a named Codex session through Moxi turns' Codex host (experimental) |
-| `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"` | launch an OpenCode session for a roster identity (experimental) |
+| `moxi comms opencode` | launch an OpenCode session for a roster identity (also `"$(uv tool dir)/moxi/bin/moxi-comms-opencode"`; experimental) |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"` | the daemon, in the foreground |
 | `"$(uv tool dir)/moxi/bin/moxi-comms-provision"` | provision standing identities |
 
@@ -187,6 +191,16 @@ its path: `"$(uv tool dir)/moxi/bin/<script>"`.
 callers `[policy] cache_callers` names) and `moxi comms owner <session-id>` (which
 identity owns a session, for a program that nudges idle sessions; left out of the help
 list) are read-only: they ask the daemon or read local files and post nothing.
+
+A module may send a session something of its own under that session's **scoped
+sender**, a send-only name comms forms from the session's name and a word the module
+declares (`builder-digest@acme` for `builder@acme`). It reaches that session alone,
+nobody mails it, no session binds it and no roster lists it; its messages read
+`(send-only)` and `[no reply]`. A module declares the word by an entry point in
+`moxi.comms.scoped_senders` and sends with `moxi_comms.api.send_scoped` (comms' API,
+interface 3);
+[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/adapters.md#scoped-senders)
+says how, with the refusals and the read-back.
 
 Every new `moxi comms send` says what it wants back with `--posture`: `none` (no reply; a
 reply to it is refused), `optional` (a reply only if the recipient has something to add;
@@ -222,7 +236,7 @@ too.
 
 ## Other agents (experimental)
 
-[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/adapters.md) says what each adapter supports, what makes a CLI
+[docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/adapters.md) says what each adapter supports, what makes a CLI
 a harness comms can reach, and how to add one.
 
 comms reads a Codex agent's cache from its thread's rollout and an OpenCode agent's
@@ -230,7 +244,7 @@ from `opencode.db`, for the lifetime its harness, provider and model have in the
 comms ships. Under the cold-cache rule above, a message to one is delivered while its
 cache counts warm and held once it is cold, as for a Claude session; an OpenCode agent
 on one of Zen's free models is reached at any age, and so is one on a model the table
-has no row for, which comms has no clock for. [docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/adapters.md) has
+has no row for, which comms has no clock for. [docs/adapters.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/adapters.md) has
 the detail.
 
 - **Codex**: `moxi comms codex --name <name>` launches one identity's thread through Moxi
@@ -244,7 +258,7 @@ the detail.
   (`--model`, `--sandbox`, `--option KEY=VALUE`); an identity listed in the config file's
   `[codex]` table launches with `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <name>`.
   `--headless` runs one with no window and nobody in it (below).
-- **OpenCode**: `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>` runs an OpenCode server for one identity and
+- **OpenCode**: `moxi comms opencode <name>` (also `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <name>`) runs an OpenCode server for one identity and
   opens its session in your terminal; mail goes to the server as its own prompts, never
   through your input box. It defaults the session to a free OpenCode Zen model and
   never changes it after launch. Each launch opens a new OpenCode session, as a new
@@ -321,26 +335,32 @@ bottom:
 - **`Other names · <names> · Show`**: the standing names with no session, mail or ask;
   a scoped address with neither mail nor a session, by its full address; and the
   send-only names, `sent by <module>` for a module's and `sent by a program` for one a
-  program registered. Each but a send-only name has
-  `Message`.
+  program registered. Each but a send-only name has `Message`. Shown, with projects
+  installed, a standing name that leads a project says so on line two (`leads
+  harbor-infra`; `leads atlas-api and orbit-cli` for two), on its bare address, or on its
+  first address when it has no bare one.
 - **The foot**: `Comms is answering · read <time>` and `Comms settings`. Under it, one
   dim line each while it holds: a read that failed and why, and an address the page
   doesn't have.
 
-**An agent row.** Line one is the name, where it runs (with launcher), and at the right
-the row's fact. Line two says what kind of waiting it is:
+**An agent row.** Line one is the name, where it works, and at the right the row's fact.
+Where it works is, in this order: comms' words for the connector's binding, with the
+connector module installed (`Claude's apps, through the connector`); launcher's where
+for a session launcher runs (`slot 3 · atlas-api`); with sessions, the session's folder,
+when it started and its harness as sessions has them (`atlas-api · started today 12:45 ·
+claude`); else nothing. Line two says what kind of waiting it is:
 
 | case | fact | line two | acts |
 |---|---|---|---|
 | it asked you for one reply | `waiting for your reply` | `wrote to you <time>, wants one reply` | `Reply`, `Message` |
 | mail no session takes | `3 messages waiting` | `not running · since <time>, from <names>` | `Message` |
-| with launcher: warm, waiting on other agents, nothing keeping it warm | `goes cold at <time>` | `waiting on <n> agents` | `Keep warm`, `Message` |
+| with launcher: warm, waiting on other agents (or subagents, or open holds), nothing keeping it warm | `goes cold at <time>` | `waiting on <n> agents` (`subagents`, `open holds`) | `Keep warm`, `Message` |
 | running, mail held for its next turn | the cache fact | `2 messages held until its next turn · from <names> <time>` | `Message` |
 | running, waiting on another's reply | the cache fact | `waiting on <name>'s reply since <time> · <name> hasn't read it yet` | `Message` |
 | running, nothing waiting | the cache fact | `no mail waiting · last message <time>` | `Message` |
 
 The cache fact is `warm until <time>` or `cold`, and with launcher launcher's own words
-(`kept warm while 2 agents work`). When a name meets two cases, the higher gives the fact
+(`kept warm while 2 agents work`, `kept warm while 1 hold is open`). When a name meets two cases, the higher gives the fact
 and line two, and the second leads line three. Line three also has one piece for each
 other address of the name that holds mail or a session (`builder-2@kestrel-web · 2
 messages since 14:02, from planner`), so every count Home's row names is on the page. When
@@ -351,15 +371,17 @@ narrow.
 **An agent opened** (pressing the row, `Message` or `Reply`) speaks for one address: the
 row's lead, or the address line you pressed. In order, each line only when its fact is
 there: `Address` (each of the name's addresses, to press); `Session`, launcher's name for
-the session and its harness, with `Sessions`; `Cache`, the cache fact in full, with
-`Cache`; the mail in the books for that address, `Held` (running) or `Waiting` (not
-running) and `Unread` (in its session but not yet read), each message with its time,
-author and text cut at four lines with `Show all`, and `Take back` on yours while the
-books can still take it back; `Waits on`, each name it waits on for one reply, with
-`Thread`; `Directs` and `Directed by`; the send box; `All mail with <name>`, every message
-by or to that address, which takes the place of the lines and the box; and `Details`,
-folded: the address in full, adapter, tier, when it was bound, the session id with `Copy
-id`, and `A name is held by one session at a time.`
+the session and its harness, or, where launcher gives none, the name typed for it in the
+harness (else its folder), when it started and its harness as sessions has them, with
+`Sessions` (sessions is asked again each time the row is opened, so a name typed since
+shows); `Cache`, the cache fact in full, with `Cache`; the mail in the books for that
+address, `Held` (running) or `Waiting` (not running) and `Unread` (in its session but not
+yet read), each message with its time, author and text cut at four lines with `Show all`,
+and `Take back` on yours while the books can still take it back; `Waits on`, each name it
+waits on for one reply, with `Thread`; `Directs` and `Directed by`; the send box; `All mail
+with <name>`, every message by or to that address, which takes the place of the lines and
+the box; and `Details`, folded: the address in full, adapter, tier, when it was bound, the
+session id with `Copy id`, and `A name is held by one session at a time.`
 
 **The send box** writes to one address as you. Its controls are on one line: `From
 operator`; `Reply wanted`, one of four (`no reply`, `only if it has something to add`,
@@ -369,7 +391,9 @@ message would go when it opens and when you change `Reply wanted` or `Deliver`, 
 so on one line, `If sent now` and then the words: `Delivered. planner reads it at its
 next turn boundary.`, `Held until planner's next turn. Its cache went cold at 18:35, …`,
 `planner isn't running. It waits until a session takes the name.`, or why it would be
-refused, with `Check again`. Send stays an outline until there is text and the last check
+refused, with `Check again`. With turns installed, a delivered line names a recipient whose
+turn is open, `Delivered. planner is working; it reads this when its turn ends.`, read from
+turns at each check. Send stays an outline until there is text and the last check
 said it would go; then it is the one control on the page in the accent colour. It is
 pressed once, and its answer is final: `Sent <time>`, how it was delivered, how many
 messages now wait, and that you can take it back until it has been read; a refusal keeps
@@ -431,15 +455,21 @@ reply.`
 **What each other module adds.** The page needs only comms and the shell; each module it
 reads adds to it when installed:
 
-- **launcher**: where each session runs, the `Session` line, launcher's cache words, the
-  row for a warm session waiting on other agents with nothing keeping it warm, and `Keep
-  warm` on it when launcher can keep it warm. A press is disabled until launcher answers and its next reading comes, or
-  for 20 s; a refusal leads line three with `Not kept warm: <why>` until then. Without
-  launcher: none of these, the cache fact from comms alone, and the empty state gives the
-  command instead of `Launch one from Home`.
+- **launcher**: where each session it runs works, its `Session` line, launcher's cache
+  words, the row for a warm session waiting on other agents with nothing keeping it warm,
+  and `Keep warm` on it when launcher can keep it warm. A press is disabled until launcher
+  answers and its next reading comes, or for 20 s; a refusal leads line three with `Not
+  kept warm: <why>` until then. Without launcher: none of these, the cache fact from comms
+  alone, and the empty state gives the command instead of `Launch one from Home`.
+- **connector**: the words `Claude's apps, through the connector` as the where of the
+  name the connector's binding holds. Without it, that row has no where.
 - **cache**: the cache fact, `Deliver`, the `held until its next turn` words and the
   `Cache` link. Without it, unread mail reads `not read yet`.
-- **sessions**: the `Sessions` link on the `Session` line.
+- **sessions**: where a session works and its `Session` line when launcher gives none (on
+  an install without launcher, every session), and the `Sessions` link on the `Session`
+  line. Without sessions, a row launcher doesn't run shows no where and no `Session` line.
+- **projects**: which project each standing name in `Other names` leads, read from
+  projects' list of projects while one is there. Without projects, nothing of it shows.
 
 Not on the page yet: launching an agent from a name with mail (`Launch`), and whether a
 session's turn is open.
@@ -469,7 +499,7 @@ so the row shows on the phone too, and nothing else of the page does.
 A name is a claim made by a process running as your user. comms keeps agents from
 confusing each other and shows who said what, but any process running as you can speak
 as any name, read the token store, or write comms' store. It is not access control. Read
-[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/security.md) before running agents you don't trust, and before
+[docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/security.md) before running agents you don't trust, and before
 using comms on a machine other people log in to: it also covers the tools' loopback port
 and the OpenCode adapter's server.
 
@@ -523,7 +553,7 @@ token. A sandbox that denies an agent the token store but lets it read comms'
 
 Nothing needs configuring for the default path. Everything that can be set, every
 environment variable and every key of the one config file, is in
-[docs/configuration.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/configuration.md); `moxi config comms` shows each key with
+[docs/configuration.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/configuration.md); `moxi config comms` shows each key with
 its value. By default:
 
 - data: `~/.local/share/moxi/comms/`
@@ -532,24 +562,28 @@ its value. By default:
 - sockets: `$XDG_RUNTIME_DIR/moxi/comms/`
 
 How messages are routed, delivered and attributed is in
-[docs/protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/protocol.md).
+[docs/protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/protocol.md).
 
 ## Troubleshooting
 
 - **A session got nothing.** `moxi comms explain <name>` says whether the name is bound, what
   was delivered, and whether the turn that read it completed.
+- **A session says `comms: mail has stopped`.** Its comms adapter died while the session
+  ran, and the new adapter comms started could not bind it; the line says
+  why. The next prompt tries again; relaunch the session if the cause stays. `moxi comms
+  doctor` lists every session whose adapter is gone on an `adapter` line.
 - **`moxi comms doctor` says the daemon isn't answering.** `moxi doctor` shows its unit's
   state and, when it failed, the line that reads its log. Restart it with `moxi services
   restart comms/daemon`, or with the supervisor (`systemctl --user restart` on its unit).
   Or run the daemon in a terminal: `"$(uv tool dir)/moxi/bin/moxi-comms-daemon"`.
 - **The daemon refuses to start because a token is missing.** The token store lost
-  credentials the store expects; see [docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/docs/security.md).
+  credentials the store expects; see [docs/security.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/docs/security.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/CONTRIBUTING.md). Changes are listed in
-[CHANGELOG.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/CHANGELOG.md).
+See [CONTRIBUTING.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/CONTRIBUTING.md). Changes are listed in
+[CHANGELOG.md](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/CHANGELOG.md).
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.0/packages/comms/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-comms-v0.3.1/packages/comms/LICENSE).

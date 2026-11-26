@@ -10,7 +10,7 @@ import pytest
 
 from moxi import modules
 from moxi.store import transaction
-from moxi_comms import reserved, secrets
+from moxi_comms import reserved, scoped, secrets
 from moxi_comms.paths import comms_db
 from moxi_comms.store import open_write
 from moxi_comms.tokens import TokenStore
@@ -19,8 +19,8 @@ LAUNCHER = {"launcher": ["console"]}
 
 
 @pytest.fixture
-def store(tmp_path):
-    return TokenStore(tmp_path / "tokens")
+def store(profile):
+    return TokenStore(profile / "tokens")
 
 
 @pytest.fixture
@@ -319,8 +319,10 @@ def test_a_real_install_reserves_every_installed_modules_names(whole_workspace, 
     finally:
         conn.close()
     assert active == wanted
+    words = [f"{module}: the scoped sender word {word} declared"
+             for module, declared in scoped.load().words.items() for word in declared]
     assert sorted(capsys.readouterr().out.splitlines()) == sorted(
-        f"{module}: {name} reserved" for name, module in wanted)
+        [f"{module}: {name} reserved" for name, module in wanted] + words)
 
 
 def test_reserved_renew_on_the_cli_mints_into_this_process_chain(capsys):

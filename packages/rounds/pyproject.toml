@@ -1,6 +1,6 @@
 [project]
 name = "moxi-rounds"
-version = "0.1.0"
+version = "0.1.5"
 description = "Moxi's rounds: a piece of work tracked from design to landing, with its questions, rulings, builds and gates."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,15 +19,21 @@ classifiers = [
 ]
 # projects names a round's home and the repo each build is in; psutil reads which
 # processes use a leftover folder before the sweep removes it, on every platform.
-dependencies = ["moxi>=0.1.9,<0.2", "moxi-projects>=0.1.4,<0.2", "psutil>=5.9"]
+dependencies = ["moxi>=0.1.11,<0.2", "moxi-projects>=0.1.4,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # notes: with it, a project that names no notes folder gets notes' default one, so its
 # rounds folder may be relative.
 notes = ["moxi-notes>=0.1,<0.2"]
 # turns: with it, a session's start runs the sweep of leftover folders when
-# sweep.at_start is on.
-turns = ["moxi-turns>=0.2,<0.3"]
+# sweep.at_start is on, and the watched-paths guard runs while its switch is on; the
+# guard reads the files a call writes with touched_files, new in turns 0.2.8.
+turns = ["moxi-turns>=0.2.8,<0.3"]
+# comms: with it, the merge queue's lander sends its news to builders, leads and the
+# project's director.
+comms = ["moxi-comms>=0.3,<0.4"]
+# ui: with it, the rounds page shows in the browser UI shell.
+ui = ["moxi-ui>=0.2.4,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -38,12 +44,22 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 rounds = "moxi_rounds.module"
 
+# projects asks this before it removes a project: no project goes while a build names it.
+[project.entry-points."moxi.projects"]
+rounds = "moxi_rounds.projects_link"
+
 # The sweep at a session's start, called by turns in a session's endpoint process.
 [project.entry-points."moxi.turns.listeners"]
 rounds = "moxi_rounds.listeners"
 
+# The watched-paths guard, run by turns before a covered write while its switch is on.
+[project.entry-points."moxi.turns.guards"]
+rounds = "moxi_rounds.guards"
+
 [dependency-groups]
-dev = ["pytest", "moxi-dev"]
+# moxi-ui's pytest plugin runs rounds' page in a real shell; its testing extra brings
+# the browser. The browser tests import Playwright themselves, so it is named too.
+dev = ["pytest", "moxi-dev", "moxi-ui[testing]", "playwright>=1.56,<2"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -55,7 +71,7 @@ packages = ["src/moxi_rounds"]
 [tool.hatch.build.targets.sdist]
 # A source distribution holds these paths and nothing else.
 only-include = ["CHANGELOG.md", "LICENSE", "README.md", "conftest.py",
-                "src/moxi_rounds", "tests"]
+                "src/moxi_rounds", "tests", "web"]
 
 # A plain `pytest` runs the units and contract seams: the tiers are deselected here.
 # `moxi-dev check` runs the same, plus a tier test whose `touches` glob matches a

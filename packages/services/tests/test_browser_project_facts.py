@@ -1,27 +1,23 @@
 """services' `project-facts` in a browser, placed alone in a real shell whose services page
 server acts on a fake supervisor (`browser_kit`): given projects and an opened one, it
 reports each project's failed services and warnings and the opened one's `Services` row,
-from services' own verdicts; it follows the `rows` topic without reading the route again;
-a store services can't read reports null and the next good one puts the facts back; and
-once removed it reports nothing more.
+from services' own verdicts; past the subscription's first value it follows the `rows`
+topic without reading the route again; a store services can't read reports null and the
+next good one puts the facts back; and once removed it reports nothing more.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 
-from browser_kit import fake_site, python, seed, written
+from browser_kit import MARKS, fake_site, python, seed, written
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
-              pytest.mark.skipif(not sys.platform.startswith("linux"),
-                                 reason="services' page is checked in a browser on Linux; the "
-                                        "Windows and macOS runs are owed")]
+pytestmark = MARKS
 
 #: How long a test waits for the component to report, in seconds: the ui kit's bound.
 WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
@@ -43,9 +39,10 @@ UNITS = {"written": {
 GIVEN = [{"key": "atlas-api", "root": "/home/me/code/atlas-api", "lead": None, "associated": []},
          {"key": "kestrel-web", "root": "/home/me/code/kestrel-web", "lead": "kim",
           "associated": []}]
-SECTION_LINK = {"text": "Services", "module": "services", "route": ""}
-DOCS = {"text": "docs failed", "heavy": True, "rank": 30}
-PREVIEW = {"text": "preview is stopped", "warn": True}
+SECTION_LINK = {"text": "Services", "module": "services", "route": "project/atlas-api"}
+DOCS = {"text": "docs down", "heavy": True, "rank": 30}
+#: The browser's own words for STOPPED's time of day, as the component's clock gives them.
+_STOP_TIME = """at => new Date(at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })"""
 
 # Places services' component in a hidden host on the shell's document, through the client
 # as the Projects page places it, and keeps every report it sends in `window.__reports`.
@@ -114,6 +111,18 @@ def _reported(page, check, what: str) -> Any:
     raise AssertionError(f"the last report is not {what}: {json.dumps(last)}")
 
 
+def _reads_of_rows(page, asked: list[str], least: int) -> int:
+    """Wait until `asked` holds at least `least` reads of `/api/rows`; return how many."""
+    deadline = time.monotonic() + WAIT_S
+    while True:
+        reads = sum(1 for url in asked if "/m/services/api/rows" in url)
+        if reads >= least:
+            return reads
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"the component read /api/rows {reads} times, not {least}")
+        page.wait_for_timeout(50)
+
+
 def _atlas_section(report: dict) -> dict:
     return report["projects"]["atlas-api"]["sections"][0]
 
@@ -124,12 +133,14 @@ def test_it_reports_services_verdicts_for_the_given_projects_and_follows_the_top
     asked: list[str] = []
     page.on("request", lambda request: asked.append(request.url))
     assert page.evaluate(_PLACE, [GIVEN, None]) == "moxi-services-project-facts"
+    stopped = f"preview stopped by hand at {page.evaluate(_STOP_TIME, STOPPED.timestamp())}"
+    preview = {"text": stopped, "warn": True}
 
     # Closed: each given project with a row; failed rows first, then the warning.
     report = _reported(page, lambda r: r is not None and r["projects"]["atlas-api"].get("parts")
-                       == [DOCS, PREVIEW], "atlas-api's failed docs and stopped preview")
+                       == [DOCS, preview], "atlas-api's failed docs and stopped preview")
     assert (report["version"], report["order"], report["gathers"]) == (1, 60, "services")
-    assert report["projects"] == {"atlas-api": {"parts": [DOCS, PREVIEW]}, "kestrel-web": {}}
+    assert report["projects"] == {"atlas-api": {"parts": [DOCS, preview]}, "kestrel-web": {}}
 
     # Opened: the `Services` row, ranked while a row fails, its lines and its quiet line.
     page.evaluate(_SET, ["open", "atlas-api"])
@@ -137,13 +148,15 @@ def test_it_reports_services_verdicts_for_the_given_projects_and_follows_the_top
     section = _atlas_section(report)
     assert (section["label"], section["rank"], section["link"]) == ("Services", 30, SECTION_LINK)
     lines = [[part["text"] for part in line["parts"]] for line in section["lines"]]
-    assert lines[:2] == [["docs failed", "not running"], ["preview is stopped"]], lines
-    assert len(lines) == 3 and sorted(lines[2])[0] == "spare off", lines
-    assert sorted(lines[2])[1].startswith("web running"), lines
+    # The failed row's reason has a line of its own, so the warning under it isn't drawn dim.
+    assert lines[:3] == [["docs down"], ["not running"], [stopped]], lines
+    assert len(lines) == 4 and sorted(lines[3])[0] == "spare off", lines
+    assert sorted(lines[3])[1].startswith("web running"), lines
     assert "sections" not in report["projects"]["kestrel-web"]
 
-    # A row added under kestrel-web comes by the topic, with no read of the route again.
-    reads = sum(1 for url in asked if "/m/services/api/rows" in url)
+    # Its first read, then one more for the subscription's first value, the one the server
+    # held. A row added under kestrel-web then comes by the topic, with no read of the route.
+    reads = _reads_of_rows(page, asked, 2)
     seed(ui_shell, written("api", project="kestrel-web"))
     report = _reported(page, lambda r: r["projects"]["kestrel-web"].get("parts")
                        == [{"text": "api failed", "heavy": True, "rank": 30}], "api failed")

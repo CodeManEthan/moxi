@@ -114,9 +114,9 @@ def test_the_sets_hold_the_expected_rules():
     data = gen.build(RULES)
     credentials, broad = data["sets"]["credentials"], data["sets"]["broad"]
     sources = [r["source"] for r in credentials["rules"]]
-    assert (sources.count("gitleaks"), sources.count("local")) == (221, 10)
+    assert (sources.count("gitleaks"), sources.count("local")) == (221, 11)
     assert rule_ids(data, "broad") == ["generic-api-key", "credential-assignment",
-                                       "high-entropy-run"]
+                                       "high-entropy-run", "high-entropy-slash-run"]
     assert "generic-api-key" not in rule_ids(data, "credentials")
     assert credentials["dropped"] == broad["dropped"] == []
 
@@ -182,6 +182,17 @@ def test_an_unimplemented_field_drops_the_rule(tmp_path, extra, field):
     reason = dropped(data, "credentials")["widget-token"]
     assert field in reason and "does not implement" in reason
     assert rule_ids(data, "credentials") == ["gadget-token"]
+
+
+def test_requires_is_read_in_broad_only(tmp_path):
+    broad = BROAD + "requires = ['[0-9]', '^[a-z]']\n"
+    credentials = CREDENTIALS + "requires = ['[0-9]']\n"
+    data = gen.build(make_rules(tmp_path, broad=broad, credentials=credentials))
+    long_run = data["sets"]["broad"]["rules"][1]
+    assert [p["pattern"] for p in long_run["requires"]] == ["[0-9]", "^[a-z]"]
+    assert [p["fallback"] for p in long_run["requires"]] == ["[0-9]", "^[a-z]"]
+    assert "requires" in dropped(data, "credentials")["gadget-token"]
+    assert data["sets"]["credentials"]["rules"][0]["requires"] == []
 
 
 @pytest.mark.parametrize("change", [

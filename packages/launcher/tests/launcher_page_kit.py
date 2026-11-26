@@ -104,24 +104,29 @@ def launch_log(shell: Any) -> Iterator[Any]:
 def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = False,
          session_id: str | None = None, cwd: str = "/work/page", by: str = "ann",
          config_dir: str | os.PathLike | None = None, claimed: bool = False,
-         values: dict | None = None) -> str:
-    """A Claude launch's row made by `by`, started; its process this test's own when
-    `live`, else one that has ended. With `config_dir` the row records it as the
-    session's `CLAUDE_CONFIG_DIR`, where `transcript` writes. With `claimed` its claim
-    names this test's own process as the turns endpoint, so `target.find` passes for a
-    turns whose session gives this process's id as `endpoint_pid`. `values` are added to
-    the row's values (`keep_warm`, ...). Returns its session id."""
+         values: dict | None = None, posture: str = "operator", slot: str = "3",
+         project_key: str | None = None, identity: str | None = None,
+         resume_of: str | None = None) -> str:
+    """A Claude launch's row made by `by`, under `posture`, started; its process this
+    test's own when `live`, else one that has ended. A slot launch runs in `slot`. With
+    `config_dir` the row records it as the session's `CLAUDE_CONFIG_DIR`, where
+    `transcript` writes. With `claimed` its claim names this test's own process as the
+    turns endpoint, so `target.find` passes for a turns whose session gives this process's
+    id as `endpoint_pid`. `values` are added to the row's values (`keep_warm`, ...). The
+    row records `project_key` and `identity` when given, and `resume_of`, the launch it
+    resumes, which may hold the same `session_id`. Returns its session id."""
     sid = session_id or str(uuid.uuid4())
     base_env = None if config_dir is None else {"CLAUDE_CONFIG_DIR": str(config_dir)}
     me = proc.identity(os.getpid())
-    slot = "3" if target == "slot" else None
+    slot = slot if target == "slot" else None
     # The values a resume replays: where the session ran, and how.
     values = {"harness": "claude", "target": target, "cwd": cwd, "model": "opus",
-              **({"slot": slot} if slot else {}), **(values or {})}
+              "posture": posture, **({"slot": slot} if slot else {}), **(values or {})}
     with launch_log(shell) as conn:
         store.insert(conn, request_id=request_id, by=by, harness="claude",
                      target=target, cwd=cwd, values=values, argv=["claude"], env={},
-                     posture="operator", session_id=sid, slot=slot, base_env=base_env)
+                     posture=posture, session_id=sid, slot=slot, base_env=base_env,
+                     project_key=project_key, identity=identity, resume_of=resume_of)
         # A start time no running process has, so an ended launch's process reads ended.
         store.set_state(conn, request_id, "started", pid=me.pid,
                         pid_started=me.started if live else 1.0)
@@ -129,6 +134,14 @@ def seed(shell: Any, request_id: str, *, target: str = "slot", live: bool = Fals
             conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = ?",
                          (f"{me.pid}@{me.started:.6f}", request_id))
     return sid
+
+
+def revive(shell: Any, request_id: str) -> None:
+    """Marks the launch `request_id` started by this test's own process again, so it reads
+    running: a row read as ended, whose process turns out alive."""
+    me = proc.identity(os.getpid())
+    with launch_log(shell) as conn:
+        store.set_state(conn, request_id, "started", pid=me.pid, pid_started=me.started)
 
 
 def transcript(config_dir: str | os.PathLike, session_id: str, *,

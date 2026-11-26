@@ -16,7 +16,11 @@ the flow `flow` would be, with that flow's steps as the config has them now:
   from a flow `tiers` does not list, and any move that would lose a recorded step.
 
 The lead makes a step up alone: `step_up(round, flow, actor=...)` appends one
-`flow.changed` event with the new name and steps. Asked for any other move it refuses
+`flow.changed` event with the new name and steps. A round whose flow has no design
+step and whose opening marks a checklist item steps up to `FULL` at its opening
+(`opening.open_round`), judged the same way (`judge_from`); its `flow.changed` holds
+the marks that moved it as `marked`, so `by` says who moved the round and `marked`
+why. Asked for any other move it refuses
 and names the ruling that makes it. The operator's move is a ruling, recorded by
 `ruling.rule` with the item `flow:<name>`; `gates` and `fields` here are what that
 form runs and records.
@@ -42,6 +46,10 @@ FLOW = corrections.FLOW
 #: Who a `flow.changed` event says moved the round.
 LEAD = "lead"
 
+#: The flow a round with no design step steps up to when its opening marks a checklist
+#: item, by name, as the config has it.
+FULL = "full"
+
 
 @dataclass(frozen=True)
 class Flow:
@@ -59,7 +67,8 @@ class Move:
     - `was`: the name of the flow the round follows now.
     - `steps`: the new flow's entries as the config has them, None when the config
       has no such flow; `known` then names the flows it has.
-    - `same`: the round already follows that flow with exactly those steps.
+    - `same`: the round already follows that flow with those steps, a path under the
+      home folder in a command's argv counting the same in its `~` form.
     - `lost`: the steps the round's recorded list has and the new one lacks.
     - `up`: the move is a step up, which the lead makes alone.
     - `why`: for a move that is not, the reason it is the operator's.
@@ -102,28 +111,36 @@ def has_step(state: states.State, step: str) -> bool:
 def judge(state: states.State, flow: str, settings) -> Move:
     """What moving the round `state` is of to the flow `flow` would be, with the steps
     and the tiers `settings` has now."""
+    return judge_from(state.flow, state.steps, flow, settings)
+
+
+def judge_from(was: str | None, was_steps, flow: str, settings) -> Move:
+    """What moving a round that follows the flow `was`, with the step entries
+    `was_steps`, to the flow `flow` would be, as `judge` says it: for a round that has
+    no state yet, as at its opening."""
     known = flows.read(settings)
     steps = known.get(flow)
     if steps is None:
-        return Move(was=state.flow, flow=flow, steps=None, known=tuple(known))
+        return Move(was=was, flow=flow, steps=None, known=tuple(known))
     have = flows.names(steps)
-    lost = tuple(step for step in flows.names(state.steps) if step not in have)
-    same = flow == state.flow and steps == state.steps
+    lost = tuple(step for step in flows.names(was_steps) if step not in have)
+    same = (flow == was
+            and flows.recorded(steps) == flows.recorded(was_steps))
     tiers = list(settings["tiers"])
     why = None
     if lost:
         why = (f"the flow {flow} has no {' and no '.join(lost)} step, which the round "
                "follows now, and a move that loses a step")
-    elif flow != state.flow:
-        outside = [name for name in (state.flow, flow) if name not in tiers]
+    elif flow != was:
+        outside = [name for name in (was, flow) if name not in tiers]
         if outside:
             why = (f"{' and '.join(str(name) for name in outside)} "
                    f"{'is' if len(outside) == 1 else 'are'} not among the tiers "
                    f"({', '.join(tiers)}), and a move to or from such a flow")
-        elif tiers.index(flow) < tiers.index(state.flow):
-            why = (f"{flow} comes before {state.flow} in the tiers "
+        elif tiers.index(flow) < tiers.index(was):
+            why = (f"{flow} comes before {was} in the tiers "
                    f"({', '.join(tiers)}), and a step down")
-    return Move(was=state.flow, flow=flow, steps=steps, known=tuple(known), same=same,
+    return Move(was=was, flow=flow, steps=steps, known=tuple(known), same=same,
                 lost=lost, up=why is None and not same, why=why)
 
 
@@ -150,9 +167,9 @@ def gates(flow: str, *, name: str, settings, again: str) -> list[write.Gate]:
 
 def fields(flow: str, view: write.View, settings) -> dict[str, object]:
     """What the event of a move to `flow` holds: the name the round's flow had, the
-    new name, and its steps as the config has them now."""
+    new name, and its steps as the config has them now, as a record holds them."""
     return {"was": view.state.flow, "flow": flow,
-            "steps": judge(view.state, flow, settings).steps}
+            "steps": flows.recorded(judge(view.state, flow, settings).steps)}
 
 
 def step_up(target: str, flow: str, *, by: str, settings=None,
@@ -202,5 +219,5 @@ def step_up(target: str, flow: str, *, by: str, settings=None,
                    steps=tuple(event["steps"]), event=event, failed=written.failed)
 
 
-__all__ = ["FLOW", "LEAD", "Flow", "Move", "Stepped", "current", "has_step", "judge",
-           "gates", "fields", "step_up"]
+__all__ = ["FLOW", "LEAD", "FULL", "Flow", "Move", "Stepped", "current", "has_step",
+           "judge", "judge_from", "gates", "fields", "step_up"]

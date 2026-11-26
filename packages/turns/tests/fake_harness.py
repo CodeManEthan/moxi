@@ -18,6 +18,7 @@ import os
 import threading
 import time
 
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns.harness import CommandRequest, Delivery, Harness, Live
 from moxi_turns.results import Agent, Agents, Ran, Shells
 
@@ -26,7 +27,8 @@ class FakeHarness(Harness):
     name = "fake"
 
     def __init__(self, can=("deliver", "only-if-idle", "steer", "stop-handler", "clear",
-                            "exit", "compact", "agents", "stop-shells"), *, auto=True, auto_steer=True,
+                            "exit", "compact", "agents", "stop-shells", "keep"), *,
+                 auto=True, auto_steer=True,
                  pid=None):
         self.can = frozenset(can)
         self.pid = os.getpid() if pid is None else pid
@@ -48,6 +50,8 @@ class FakeHarness(Harness):
         self.box_fails = False
         self.submitted: list[Delivery] = []
         self.appended: list[Delivery] = []
+        #: The forks handed in, in order; the test starts and ends each.
+        self.forked: list[Delivery] = []
         self.commands: list[CommandRequest] = []
         self.auto_commands = True
         self.open_turn: str | None = None
@@ -96,6 +100,9 @@ class FakeHarness(Harness):
         if self.auto_steer:
             self.take(delivery)
 
+    def fork(self, delivery: Delivery) -> None:
+        self.forked.append(delivery)
+
     def command(self, request: CommandRequest) -> None:
         self.commands.append(request)
         if self.auto_commands:
@@ -128,7 +135,7 @@ class FakeHarness(Harness):
         except Exception:  # noqa: BLE001 - an unreadable list reads as unknown
             return None
 
-    def handed(self, count: int, timeout: float = 5.0) -> list[Delivery]:
+    def handed(self, count: int, timeout: float = PROC_WAIT_S) -> list[Delivery]:
         """The deliveries submitted so far, once there are `count` of them or the timeout
         has passed. The endpoint's worker hands them over after the call has answered."""
         deadline = time.monotonic() + timeout
@@ -149,9 +156,9 @@ class FakeHarness(Harness):
         self.endpoint.turn_started(turn_id, delivery_id)
         return turn_id
 
-    def end_turn(self, outcome: str = "answer") -> None:
+    def end_turn(self, outcome: str = "answer", answer: str | None = None) -> None:
         turn_id, self.open_turn = self.open_turn, None
-        self.endpoint.turn_ended(turn_id, outcome)
+        self.endpoint.turn_ended(turn_id, outcome, answer=answer)
 
     def run_command(self, request: CommandRequest) -> None:
         if self.endpoint.command_entering(request.id) is not None:

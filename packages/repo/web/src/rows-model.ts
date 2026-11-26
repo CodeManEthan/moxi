@@ -78,7 +78,8 @@ export function shownNames(pieces: readonly Pick<PieceRow, "id">[]): Map<string,
 
 /** Line one's `where`: each piece by name in run order (`<name> off` for one that is off),
  * `, then its own hook` after the last piece of an event whose own git hook runs after
- * them, then `its own hook <event words>` for each event with no piece but a hook of his. */
+ * them, then `its own hook <event words>` for each event with no piece but a hook of the
+ * user's own. */
 export function whereLine(repo: Pick<RepoRow, "pieces" | "events" | "own_hooks">): string {
   const pieces = runOrder(repo.pieces);
   const names = shownNames(pieces);

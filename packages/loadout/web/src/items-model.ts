@@ -206,7 +206,7 @@ export function globalRow(view: View): GlobalRow {
   return { label: "Global file", mode: modeWord(view.global.mode, view.global.chosen), cells };
 }
 
-const USER_SECTION: ViewSection = { name: "user", where: "user", root: null, refused: null };
+const USER_SECTION: ViewSection = { name: "user", where: "user", root: null, project: null, refused: null };
 
 function group(key: string, label: string, section: ViewSection, module: string | null,
                rows: ItemRow[], global: GlobalRow | null, harnesses: readonly string[]): GroupView {
@@ -272,7 +272,7 @@ export function harnessCounts(items: ItemsView): HarnessCount[] {
   return out;
 }
 
-/** The counts line: with nothing needing him `Claude Code 10 · Codex 9`, else `Claude
+/** The counts line: with nothing needing the user `Claude Code 10 · Codex 9`, else `Claude
  * Code 9 of 10 placed · Codex 7 of 9`. */
 export function countsLine(counts: readonly HarnessCount[], fine: boolean): string {
   return counts.map((count, at) => {

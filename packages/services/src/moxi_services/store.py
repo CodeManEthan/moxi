@@ -1,7 +1,8 @@
 """services' store: the user's rows, written and adopted, in one SQLite file.
 
 The store is `services.db` in services' data directory. Module rows are never stored:
-they come from the modules' declarations.
+they come from the modules' declarations. Only a module daemon's stop by hand is, in
+`module_stops`, by the row's id.
 
 Reads never write: they never create the store, never migrate it and never change a byte
 of it. A missing store is an empty list. A store this code can't read raises
@@ -79,12 +80,21 @@ STEPS: tuple[str, ...] = (
         CHECK (days IS NULL OR at IS NOT NULL)
     );
     """,
+    """
+    CREATE TABLE module_stops (
+        id         TEXT PRIMARY KEY,
+        stopped    TEXT NOT NULL,
+        changed    TEXT NOT NULL,
+        changed_by TEXT NOT NULL
+    );
+    """,
 )
 
 #: The schema version this code writes.
 VERSION = len(STEPS)
-#: The schema versions this code reads as they are.
-READS = frozenset({1})
+#: The schema versions this code reads as they are. A version-1 store has no module
+#: stops.
+READS = frozenset({1, 2})
 #: How long a read or a write waits for another writer's lock, in seconds, before `Busy`.
 TIMEOUT = 5.0
 
@@ -126,44 +136,46 @@ def unreadable(where: str, exc: BaseException) -> Unreadable:
 
 # --- reading ----------------------------------------------------------------------------
 
-def read_rows(where: str | None = None, *, strict: bool = False) -> list[UserRow]:
-    """Every user row, by name. Never writes.
+def _read(where: str | None, fn: Callable[[sqlite3.Connection, int], T], empty: T, *,
+          strict: bool = False) -> T:
+    """`fn(conn, version)` on the store at `where`, or `empty` when there is no store yet.
+    Never writes.
 
-    A missing store has no rows. So does one a first write has created and not yet set
-    up (an empty file, or schema version 0), unless `strict`: then that store raises
-    `Unreadable`, so that only a missing file reads as no rows at all. Raises
-    `Unreadable`, `TooNew` or `Busy` when the store can't be read."""
+    A missing store is `empty`. So is one a first write has created and not yet set up
+    (an empty file, or schema version 0), unless `strict`: then that store raises
+    `Unreadable`. Raises `Unreadable`, `TooNew` or `Busy` when the store can't be read."""
     where = where or path()
     try:
-        empty = os.path.getsize(where) == 0
+        is_empty = os.path.getsize(where) == 0
     except FileNotFoundError:
-        return []
+        return empty
     except OSError as exc:
         raise unreadable(where, exc) from exc
-    if empty:
+    if is_empty:
         # Created a moment ago by a write that hasn't set it up yet. `connect` would
         # switch an empty file to WAL, which is a write.
-        return _not_set_up(where, strict=strict)
+        _not_set_up(where, strict=strict)
+        return empty
     try:
         conn = moxi.store.connect(where, create=False, timeout_s=TIMEOUT)
     except moxi.store.StoreError as exc:
         if not os.path.exists(where):
-            return []
+            return empty
         raise unreadable(where, exc) from exc
     except (sqlite3.Error, OSError) as exc:
         raise unreadable(where, exc) from exc
     try:
         version = int(conn.execute("PRAGMA user_version").fetchone()[0])
         if version == 0:
-            return _not_set_up(where, strict=strict)
+            _not_set_up(where, strict=strict)
+            return empty
         if version > VERSION:
             raise TooNew(where, version, VERSION)
         if version not in READS:
             raise Unreadable(f"the services store {where} is at schema version {version}, "
                              "older than this version of moxi-services reads", _INSTALL,
                              where)
-        return [_rows.from_sql(row)
-                for row in conn.execute(f"{_SELECT} ORDER BY name").fetchall()]
+        return fn(conn, version)
     except Unreadable:
         raise
     except (sqlite3.Error, OSError, ValueError) as exc:
@@ -172,12 +184,30 @@ def read_rows(where: str | None = None, *, strict: bool = False) -> list[UserRow
         conn.close()
 
 
-def _not_set_up(where: str, *, strict: bool) -> list[UserRow]:
+def read_rows(where: str | None = None, *, strict: bool = False) -> list[UserRow]:
+    """Every user row, by name. Never writes.
+
+    A missing store has no rows. So does one a first write has created and not yet set
+    up, unless `strict`: then that store raises `Unreadable`, so that only a missing file
+    reads as no rows at all. Raises `Unreadable`, `TooNew` or `Busy` when the store can't
+    be read."""
+    return _read(where, lambda conn, _: [
+        _rows.from_sql(row) for row in conn.execute(f"{_SELECT} ORDER BY name").fetchall()],
+        [], strict=strict)
+
+
+def read_module_stops(where: str | None = None) -> dict[str, str]:
+    """Each module daemon's recorded stop by hand, UTC, by row id. Never writes. A
+    missing store, and one at schema version 1, has none. Raises as `read_rows` does."""
+    return _read(where, lambda conn, version: {} if version < 2 else dict(
+        conn.execute("SELECT id, stopped FROM module_stops ORDER BY id").fetchall()), {})
+
+
+def _not_set_up(where: str, *, strict: bool) -> None:
     if strict:
         raise Unreadable(f"the services store {where} is not set up yet: a write made it "
                          "and has not finished", "try again in a moment; if it stays, "
                          f"{_INSTALL}", where)
-    return []
 
 
 def get(name: str, where: str | None = None) -> UserRow | None:
@@ -342,6 +372,20 @@ def set_stopped(conn: sqlite3.Connection, name: str, when: str | None, *,
     return _set(conn, name, by, "stopped", when)
 
 
+def set_module_stop(conn: sqlite3.Connection, ident: str, when: str | None, *,
+                    by: str) -> None:
+    """Record a module daemon's stop by hand at `when` (UTC, as `now()` gives it), by its
+    row id, or clear it with None."""
+    if when is None:
+        conn.execute("DELETE FROM module_stops WHERE id = ?", (ident,))
+        return
+    conn.execute(
+        "INSERT INTO module_stops (id, stopped, changed, changed_by) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (id) DO UPDATE SET stopped = excluded.stopped, "
+        "changed = excluded.changed, changed_by = excluded.changed_by",
+        (ident, when, now(), by))
+
+
 def delete(conn: sqlite3.Connection, name: str) -> bool:
     """Delete the row named `name`; True when there was one."""
     return conn.execute("DELETE FROM services WHERE name = ?", (name,)).rowcount > 0
@@ -349,5 +393,6 @@ def delete(conn: sqlite3.Connection, name: str) -> bool:
 
 __all__ = [
     "FILE", "STEPS", "VERSION", "READS", "TIMEOUT", "path", "now", "unreadable",
-    "read_rows", "get", "of_project", "writing", "write", "migrate_existing", "fetch",
-    "insert", "set_enabled", "set_removing", "set_stopped", "delete"]
+    "read_rows", "read_module_stops", "get", "of_project", "writing", "write",
+    "migrate_existing", "fetch", "insert", "set_enabled", "set_removing", "set_stopped",
+    "set_module_stop", "delete"]

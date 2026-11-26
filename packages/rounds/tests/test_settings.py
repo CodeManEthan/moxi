@@ -21,6 +21,7 @@ DEFAULTS = {
     "defaults.ratify": "majors",
     "defaults.trace": False,
     "defaults.check_on": "merged",
+    "defaults.director": "",
     "defaults.idle_days": 14,
     "defaults.dormant_days": 30,
     "defaults.slice_minutes": 45,
@@ -30,16 +31,19 @@ DEFAULTS = {
     "sweep.armed": False,
     "sweep.at_start": False,
     "sweep.grace_hours": 2,
+    "watched_paths_guard.enabled": False,
     "projects": {},
 }
 
 TYPES = {
     "flows": "table", "tiers": "list", "models": "table", "worktree_dir": "path",
     "defaults.flow": "string", "defaults.dir": "string", "defaults.ratify": "enum",
-    "defaults.trace": "bool", "defaults.check_on": "enum", "defaults.idle_days": "int",
+    "defaults.trace": "bool", "defaults.check_on": "enum", "defaults.director": "string",
+    "defaults.idle_days": "int",
     "defaults.dormant_days": "int", "defaults.slice_minutes": "int",
     "defaults.sitting_at": "int", "defaults.disposable": "list", "sweep.armed": "bool",
-    "sweep.at_start": "bool", "sweep.grace_hours": "int", "projects": "table",
+    "sweep.at_start": "bool", "sweep.grace_hours": "int",
+    "watched_paths_guard.enabled": "bool", "projects": "table",
 }
 
 FLOWS = """\
@@ -119,6 +123,7 @@ def test_moxi_config_prints_one_line_per_key(config_file):
                  'defaults.ratify = "majors"    [default]',
                  "defaults.trace = false    [default]",
                  'defaults.check_on = "merged"    [default]',
+                 'defaults.director = ""    [default]',
                  "defaults.idle_days = 14    [default]",
                  "defaults.dormant_days = 30    [default]",
                  "defaults.slice_minutes = 45    [default]",
@@ -155,6 +160,8 @@ def test_moxi_config_shows_each_key_with_a_label_and_the_words_of_each_enum_valu
         ("majors", "the major ones"), ("majors+minors", "major and minor"), ("off", "none")]
     assert [choice["value"] for choice in rows["defaults.check_on"]["choices"]] == [
         "merged", "tip"]
+    switch = rows.pop("watched_paths_guard.enabled")
+    assert switch["common"] is True and switch["hurts"]["when"] == "off"
     for row in rows.values():
         assert row["common"] is False and row["group"] is None and row["hurts"] is None
         assert row["elsewhere"] is None

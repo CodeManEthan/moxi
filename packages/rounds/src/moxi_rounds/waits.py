@@ -1,5 +1,5 @@
 """Waiting items: work a build's verification can't finish without the operator, such
-as a check on his phone.
+as a check on the operator's phone.
 
 A report of a build lists each as a `[[wait]]`. When its verdict is recorded, each is an
 open waiting item of the round at once, keyed `B2.W1` outside the report: its stage, its
@@ -22,7 +22,7 @@ sentence names the same item, and adds no second one. A new item takes an id tha
 earlier report of its stage used, a dropped build's included, as a new finding does.
 An item keeps its key when its build is dropped: what waits on the operator still does.
 
-**The pointer** that shows an item done is one of the four shapes, or the id of a
+**The pointer** that shows an item done is one of the five shapes, or the id of a
 commit (7 to 40 hex digits) that the repo of its stage's build holds; the mark records
 that commit's whole id.
 

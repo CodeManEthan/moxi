@@ -10,11 +10,13 @@ Codex or OpenCode host). This module is its harness-free core; an adapter
   `hello.json` once it listens. The key is the launch's nonce, not the session id, so a
   `/clear` keeps the endpoint and `hello.json` follows the id;
 - answers the socket protocol (`contracts/socket-protocol.md`) through `rpc.Rpc`:
-  `session`, `facts`, `agents`, `deliver`, `steer`, `wait`, `command`, `watch`,
-  `stops.handle` and `stops.answer`;
+  `session`, `facts`, `agents`, `deliver`, `steer`, `fork`, `fork.continue`, `wait`,
+  `ack`, `command`, `watch`, `stops.handle` and `stops.answer`;
 - keeps the turn ledger the adapter feeds, ties deliveries to turns, holds a
   delivery made while a turn runs until that turn ends, and answers `wait` from the
-  ledger alone;
+  ledger alone, or from the kept ends for a `ref` it holds no delivery for;
+- writes the end of a delivery asked with `keep` to turns' state folder as it settles
+  (`kept.py`), and removes it only on the asker's `ack` of its `ref`;
 - hands every delivery and command to the harness on one ordered worker (below);
 - checks a session command's consent and its idle snapshot;
 - asks the session's stop handler at each Stop, bounded by its wait;
@@ -84,14 +86,16 @@ from typing import Any
 from moxi.paths import Layout
 
 from . import config as turns_config
+from . import kept as turns_kept
 from . import listeners as turns_listeners
 from . import protocol
 from .harness import SHELL_STOP_S, CommandRequest, Delivery, Harness, Live
 from .ledger import Reading, Turn, TurnLedger
-from .results import (COMMANDS, DELIVERY_REFUSALS, FAILED_TIMEOUT, LOST_UNKNOWN, OUTCOMES,
-                      SHELL_UNLISTED, Agents, DeliveryRef, Ended, Facts, Failed, Gone,
-                      LeftShell, Lost, OpenTurn, Passed, Ran, Ready, Refused, SessionEvent,
-                      Shells, Started, StopFacts, TurnEnded, TurnStarted, TurnSteered)
+from .results import (COMMANDS, DELIVERY_REFUSALS, FAILED_TIMEOUT, LOST_DENIED, LOST_GONE,
+                      LOST_UNKNOWN, OUTCOMES, SHELL_UNLISTED, Agents, DeliveryRef, Ended, Facts, Failed, Gone,
+                      LeftShell, Lost, OpenTurn, Passed, Ran, Ready, REFUSED_GONE, Refused,
+                      SessionEvent, Shells, Started, StopFacts, TurnEnded, TurnStarted,
+                      TurnSteered, from_wire)
 
 log = logging.getLogger("moxi.turns.endpoint")
 
@@ -99,7 +103,8 @@ log = logging.getLogger("moxi.turns.endpoint")
 COMMAND_RATE_S = 60.0
 #: How long a `command` waits for the harness to settle it, unless the caller says.
 COMMAND_WAIT_S = 30.0
-#: How many settled deliveries an endpoint remembers for a late `wait`.
+#: How many settled deliveries an endpoint remembers for a late `wait`. A delivery asked
+#: with `keep` is not among them: it stays until its `ref` is acked.
 SETTLED_KEPT = 256
 #: How long a delivery or command handed to the adapter may stay unsettled. Past it the
 #: endpoint settles it (a delivery `Lost`, a command `Failed`) and frees its slot, so an
@@ -119,8 +124,9 @@ OPEN_WAIT_S = 10.0
 ANSWER_WAIT_S = 1.0
 
 #: A delivery's states: held behind a turn or the load gate; handed to `submit` and not
-#: yet tied; a steer handed to `append` and not yet confirmed; taken into a turn; settled.
-_QUEUED, _INFLIGHT, _STEERING = "queued", "in-flight", "steering"
+#: yet tied; a steer handed to `append` and not yet confirmed; a fork handed to `fork`
+#: and not yet started; taken into a turn (or a fork started); settled.
+_QUEUED, _INFLIGHT, _STEERING, _FORKING = "queued", "in-flight", "steering", "forking"
 _STARTED, _DONE = "started", "done"
 
 
@@ -151,6 +157,20 @@ class Handed:
     #: The refusal the endpoint decided from its own record before it handed the
     #: delivery on, which the `deliver` or `steer` answer carries.
     early: Refused | None = None
+    #: Asked with `keep`: its end is written to the kept ends when it settles, and it
+    #: stays out of the settled deliveries the endpoint drops, until its `ref` is acked.
+    keep: bool = False
+    #: A held steer whose own turn ended before any request carried its text
+    #: (`on_steer_held`): it has opened its one further turn.
+    missed: bool = False
+
+    @property
+    def agent(self) -> str | None:
+        """A fork's agent id: its round's own (`fork.continue`), else the one its start
+        named; None for any other delivery, and for a fork not started yet."""
+        if self.spec.agent_id is not None:
+            return self.spec.agent_id
+        return self.started.agent_id if isinstance(self.started, Started) else None
 
     @property
     def id(self) -> str:
@@ -303,6 +323,11 @@ class Endpoint:
         self.pending_ttl_s = PENDING_TTL_S
         self.registry = registry if registry is not None \
             else turns_listeners.load(env=self.env)
+        #: The session's prompt bound: `listen.wait_ms`, or a longer bound a `prompt` row
+        #: asks for this session (its `wait_ms` option). Decided once, from the
+        #: session's environment, so the harness's hook waits it too.
+        self.prompt_wait_s = turns_listeners.prompt_wait_ms(
+            self.registry, self.env, int(self.listen_wait_s * 1000)) / 1000
         rows = turns_listeners.after_rows(self.registry)
         #: Each after-tool row's floor, by row id.
         self.floors = turns_listeners.Floors(rows, self.after_tool_wait_s,
@@ -335,6 +360,9 @@ class Endpoint:
         self._ready: Ready | None = None
         #: Turns whose events wait for the tie, oldest first.
         self._held: list[Turn] = []
+        #: The last main-loop turn whose `TurnEnded` went out, which a held steer that
+        #: needs no turn of its own ends with (`on_steer_carried`).
+        self._last_closed: Turn | None = None
         self._attached = False
         self._holder: _Holder | None = None
         self._asks = itertools.count(1)
@@ -482,13 +510,18 @@ class Endpoint:
             # its events go out as the person's before `session.gone`.
             for turn in list(self._held):
                 self._decide(turn, None)
-            self._gone = reason
             self._stopping.set()
             lost = Lost(reason)
+            # A fork is gone with its session: its reason says so, as a fork's own does.
+            fork_lost = Lost(f"{LOST_GONE}: {reason}")
             for d in list(self._deliveries.values()):
                 if d.state != _DONE:
-                    self._settle(d, started=lost if d.started is None else None,
-                                 ended=lost)
+                    end = fork_lost if d.spec.kind == "fork" else lost
+                    self._settle(d, started=end if d.started is None else None,
+                                 ended=end)
+            # Marked gone once every open delivery has settled and its kept end is
+            # written: a caller the `gone` error reaches finds the kept ends complete.
+            self._gone = reason
             for c in self._commands.values():
                 if c.result is None:
                     c.result = Failed(reason)
@@ -624,12 +657,45 @@ class Endpoint:
             refresh.join(self.after_tool_wait_s + 1.0)
         return context
 
-    def prompt(self, text: str | None = None, origin: str | None = None) -> str | None:
+    def prompt(self, text: str | None = None, origin: str | None = None, *,
+               delivery_id: str | None = None, opens: bool | None = None) -> str | None:
         """A prompt entered (UserPromptSubmit), with its text and its origin's kind where
-        the harness gives them. Returns the listeners' added context."""
+        the harness gives them. Returns the listeners' added context.
+
+        The event's `own` is true when the origin is on `prompt.own_origins`, read now.
+        `delivery_id` is the delivery the adapter handed in as this prompt, whose `by` and
+        `senders` the event carries as `delivery_by` and `delivery_senders` (None for a
+        prompt turns did not hand in). When that delivery is a steer the harness held
+        (`on_steer_held`), the event's `text` is the steer's text: the harness's prompt
+        only points at the text it holds, and the listeners read what the steer says, as
+        they read a delivery's prompt. `opens` is true when the prompt opens a turn, false
+        when it joins one already running; the adapter says where it knows, else it is
+        true when no main-loop turn is open now."""
         if self._gone is not None:
             return None
-        return self._ask(self._event("prompt", text=text, origin=origin))
+        with self._lock:
+            d = self._deliveries.get(delivery_id) if delivery_id is not None else None
+            if opens is None:
+                opens = self.ledger.open is None
+        by, senders = (None, None) if d is None else (d.spec.by, d.spec.senders)
+        if d is not None and d.spec.kind == "steer":
+            text = d.spec.text
+        event = self._event("prompt", text=text, origin=origin, own=self._own(origin),
+                            delivery_by=by, delivery_senders=senders, opens=opens)
+        return turns_listeners.ask(self.registry, event, self.prompt_wait_s,
+                                   after=self.floors.after_call)
+
+    def _own(self, origin: str | None) -> bool:
+        """Whether a prompt of `origin` is the person's own: the origin is on
+        `prompt.own_origins`. A prompt with no origin never is."""
+        if origin is None:
+            return False
+        try:
+            listed = self._config.use(turns_config.OWN_ORIGINS)
+        except Exception as exc:  # noqa: BLE001 - a config that reads nothing counts none
+            log.warning("prompt.own_origins does not read (%s); the prompt is not own", exc)
+            return False
+        return origin in {o for o in listed or () if isinstance(o, str)}
 
     def after_tool(self, tool: str, *, tool_use_id: str | None = None,
                    agent_id: str | None = None, is_error: bool | None = None,
@@ -649,6 +715,14 @@ class Endpoint:
                             tool=tool, tool_use_id=tool_use_id, is_error=is_error,
                             point=point, record_path=record_path)
         return self._after_tool.ask(event, rows)
+
+    def load(self) -> None:
+        """The adapter learned the session's id for the first time in this process: the
+        `load` rows are told, with that id, and not waited for. The adapter raises it
+        once per endpoint process."""
+        if self._gone is not None:
+            return
+        self._ask(self._event("load"))
 
     def usage(self, reading: dict[str, Any]) -> None:
         """A usage reading from the harness, as given: the `usage` rows are told, with the
@@ -726,8 +800,11 @@ class Endpoint:
             self._emit(self._turn_started(turn))
             self._cond.notify_all()
 
-    def turn_ended(self, turn_id: str | None, outcome: str) -> None:
-        """The open main-loop turn ended with `outcome` (one of `results.OUTCOMES`)."""
+    def turn_ended(self, turn_id: str | None, outcome: str, *,
+                   answer: str | None = None) -> None:
+        """The open main-loop turn ended with `outcome` (one of `results.OUTCOMES`).
+        `answer` is the turn's final text where the harness gives it; every delivery the
+        turn took ends with it."""
         if outcome not in OUTCOMES:
             log.warning("turn %s ended with outcome %r, not one of %s; it counts as "
                         "error", turn_id, outcome, ", ".join(OUTCOMES))
@@ -739,6 +816,7 @@ class Endpoint:
             if turn is None:
                 log.warning("turn %s ended while no turn was open; ignored", turn_id)
                 return
+            turn.answer = answer
             if turn_id is not None and turn.turn_id is not None and turn_id != turn.turn_id:
                 log.warning("turn %s ended while the ledger held turn %s open; the open "
                             "one ends", turn_id, turn.turn_id)
@@ -818,6 +896,12 @@ class Endpoint:
             d = self._deliveries.get(delivery_id)
             return d is not None and d.state in (_QUEUED, _INFLIGHT) and not d.expired
 
+    def delivery_text(self, delivery_id: str) -> str | None:
+        """The text of a delivery the endpoint still keeps, or None."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            return None if d is None else d.spec.text
+
     def learn_session(self, session_id: str | None) -> bool:
         """The adapter learned the session's id (on Claude Code the runner sends it on
         every load). True when it changed; `hello.json` follows it."""
@@ -889,8 +973,92 @@ class Endpoint:
                 # text went into a turn whose `turn.ended` has gone out without it.
                 log.warning("steer %s confirmed after its turn %s ended; it ends with "
                             "that turn", d.id, turn.turn_id)
-                self._settle(d, ended=Ended(turn.turn_id, turn.outcome or "error"))
+                self._settle(d, ended=Ended(turn.turn_id, turn.outcome or "error",
+                                            answer=turn.answer))
             self._cond.notify_all()
+
+    def on_steer_held(self, delivery_id: str) -> None:
+        """The harness took a steer, but the turn it went into ended before any request
+        carried it, and the harness holds the text for the session's next request (Claude
+        Code's plugin note). The steer leaves that turn, whose `turn.ended` then does not
+        name it, and waits to open a turn of its own, ahead of every queued delivery: it
+        goes to the adapter's `submit` once no turn runs and none is in flight, and the
+        turn it opens names it, its end settling the steer; where another turn's request
+        carried the text first, the adapter says so instead (`on_steer_carried`).
+
+        The word may come for the turn the steer opened: that turn ended too before any
+        request carried the text (a compaction inside its first request dropped what the
+        harness held). The steer leaves it the same way, that turn's `turn.ended` not
+        naming it, and opens one more turn, once: a second such word changes nothing, and
+        the steer ends with its turn. A word on a steer that has settled, or on a delivery
+        that is no steer, changes nothing."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            if (self._gone is not None or d is None or d.spec.kind != "steer"
+                    or d.state not in (_STEERING, _STARTED) or d.expired):
+                log.info("steer %s reported held after it settled; it changes nothing",
+                         delivery_id)
+                return
+            turn = d.turn
+            if turn is not None and turn.delivery_id == d.id:
+                if d.missed:
+                    log.warning("steer %s was missed again by turn %s, which it opened; "
+                                "it ends with that turn", d.id, turn.turn_id)
+                    return
+                d.missed = True
+                turn.delivery_id = None
+                log.warning("steer %s was missed by turn %s, which it opened; it opens "
+                            "one more turn", d.id, turn.turn_id)
+            elif turn is not None and d.id in turn.steered:
+                turn.steered.remove(d.id)
+            log.info("steer %s was held at the end of turn %s; it opens a turn of its own",
+                     d.id, turn.turn_id if turn is not None else None)
+            d.turn = None
+            d.state = _QUEUED
+            d.handed_at = None
+            self._queue.appendleft(d.id)
+            self._cond.notify_all()
+        self._pump()
+
+    def on_steer_carried(self, delivery_id: str) -> bool:
+        """A held steer handed to `submit` needs no turn of its own: a request of another
+        turn carried the text the harness held (the person's prompt went first, or a
+        delivery handed before the steer was reported held), and the adapter submitted
+        nothing. With a main-loop turn open, the one whose requests carry the text, the
+        steer joins it as a steer: it reads `Started` on it, watchers get `turn.steered`,
+        and it ends with that turn. With none open it ends with the last turn that ended,
+        the one that carried it, whose `turn.ended` has gone out without it. False,
+        changing nothing, for a delivery that is no steer waiting to start, or when no
+        turn has ended yet."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            turn = self.ledger.open
+            if (self._gone is not None or d is None or d.spec.kind != "steer"
+                    or d.state not in (_QUEUED, _INFLIGHT)
+                    or (turn is None and self._last_closed is None)):
+                return False
+            if self._inflight == d.id:
+                self._inflight = None
+            with contextlib.suppress(ValueError):
+                self._queue.remove(d.id)
+            if turn is not None:
+                log.info("steer %s needs no turn of its own: turn %s carries it", d.id,
+                         turn.turn_id)
+                d.state = _STARTED
+                d.turn = turn
+                d.started = Started(turn.turn_id)
+                turn.steered.append(d.id)
+                if not turn.held:
+                    self._emit(self._turn_steered(turn, d.id))
+            else:
+                last = self._last_closed
+                log.info("steer %s needs no turn of its own: turn %s carried it", d.id,
+                         last.turn_id)
+                self._settle(d, ended=Ended(last.turn_id, last.outcome or "error",
+                                            answer=last.answer))
+            self._cond.notify_all()
+        self._pump()
+        return True
 
     def on_stop(self, facts: StopFacts) -> str | None:
         """A Stop of the main loop: ask the stop handler. A string holds the turn open
@@ -1088,7 +1256,8 @@ class Endpoint:
 
     def deliver(self, text: str, *, ref: str | None = None, only_if_idle: bool = False,
                 if_turn_number: int | None = None, refuse_draft: bool = False,
-                refuse_agents: bool = False) -> Handed:
+                refuse_agents: bool = False, by: str | None = None,
+                senders: tuple[str, ...] = (), keep: bool = False) -> Handed:
         """A new turn now if the session is idle, else when the running turn ends; held at
         a load gate until a load is accepted.
 
@@ -1098,12 +1267,17 @@ class Endpoint:
         when `if_turn_number` differs from the ledger's, `loading` with no accepted load.
         `refuse_draft` and `refuse_agents` need the harness's live read, which the adapter
         makes where the delivery takes effect, so their refusal is the settled value.
+        `by` (the module that asked) and `senders` (the names the text speaks for) ride
+        on the `prompt` event the delivery raises. `keep` (with a `ref`): its end is kept
+        until the `ref` is acked (`ack`); raises `kept.RefKept`, recording nothing,
+        while a kept end of this session still holds the `ref`.
 
         Never waits on the harness: the delivery is recorded and its hand-off put on the
         worker under one hold of the lock (`early` holds a refusal decided here)."""
         with self._lock:
-            d = self._new("deliver", text, ref, only_if_idle=only_if_idle,
-                          refuse_draft=refuse_draft, refuse_agents=refuse_agents)
+            d = self._new("deliver", text, ref, keep=keep, only_if_idle=only_if_idle,
+                          refuse_draft=refuse_draft, refuse_agents=refuse_agents, by=by,
+                          senders=tuple(senders))
             if not only_if_idle:
                 self._admit(d)
                 return d
@@ -1118,15 +1292,17 @@ class Endpoint:
             self._hand_submit(d)
             return d
 
-    def steer(self, text: str, *, ref: str | None = None) -> Handed:
+    def steer(self, text: str, *, ref: str | None = None, by: str | None = None,
+              senders: tuple[str, ...] = ()) -> Handed:
         """The text into the running turn: `idle` when none runs (or the open one is
         ending), `loading` with no accepted load. Never waits on the harness: the steer is
         recorded against the open turn and its `append` put on the worker under one hold
         of the lock. It reads `Started`, and watchers get `turn.steered`, once the adapter
         confirms the harness took it (`steered`); the harness's refusal settles it
-        `refused` `idle`. It never becomes a turn of its own."""
+        `refused` `idle`. It becomes a turn of its own only when the harness reports it
+        held at its turn's end (`on_steer_held`). `by` and `senders` are as `deliver`'s."""
         with self._lock:
-            d = self._new("steer", text, ref)
+            d = self._new("steer", text, ref, by=by, senders=tuple(senders))
             reason = self._unable("steer")
             turn = self.ledger.open
             if reason is None and (turn is None or turn.ending):
@@ -1143,6 +1319,99 @@ class Endpoint:
                 log.exception("the adapter failed to note steer %s", d.id)
             self._worker.put(self._handoff(d, self.harness.append))
             return d
+
+    def fork(self, text: str, *, by: str, ref: str | None = None, keep: bool = False,
+             round_timeout_s: float | None = None) -> Handed:
+        """Start a fork of the session's main loop with `text` as its task. The fork runs
+        beside the main loop's turns and holds no slot: it is handed on at once, whatever
+        turn runs. `started` names the fork (`Started.agent_id`) once the harness has
+        started it; `ended` carries its answer, or the fork's `Lost` (`denied`, `gone`).
+        `unsupported` in the answer when the session cannot fork. `keep` as `deliver`'s.
+        `round_timeout_s`: how long the adapter waits for the task round's answer before
+        the fork reads `Lost` `gone`; None for the adapter's default. Never waits on the
+        harness, as `deliver`."""
+        with self._lock:
+            d = self._new("fork", text, ref, keep=keep, by=by,
+                          round_timeout_s=round_timeout_s)
+            reason = self._unable("fork")
+            if reason is not None:
+                self._refuse(d, reason, early=True)
+                return d
+            d.state = _FORKING
+            d.handed_at = time.monotonic()
+            self._worker.put(self._handoff(d, self.harness.fork))
+            return d
+
+    def fork_continue(self, of: str, text: str, *, ref: str | None = None,
+                      keep: bool = False, round_timeout_s: float | None = None) -> Handed:
+        """Give the fork that delivery `of` (its `fork` or an earlier round) started its
+        next round, with `text`. The fork must have answered: `of` ended with an answer
+        and no later round of the fork is still open. A new delivery, a `fork` naming the
+        fork's agent id, asked by the fork's own asker; its values are a fork's. `Lost`
+        at once, `gone`, when `of` names no fork this endpoint still knows, one that never
+        started, or one whose round was lost; `denied` while a round of the fork is still
+        open. `unsupported` in the answer when the session cannot fork. `keep` and
+        `round_timeout_s` as `fork`'s, for this round."""
+        with self._lock:
+            prior = self._deliveries.get(of)
+            fork = prior if prior is not None and prior.spec.kind == "fork" else None
+            agent_id = fork.agent if fork is not None else None
+            d = self._new("fork", text, ref, keep=keep,
+                          by=fork.spec.by if fork is not None else None, agent_id=agent_id,
+                          round_timeout_s=round_timeout_s)
+            reason = self._unable("fork")
+            if reason is not None:
+                self._refuse(d, reason, early=True)
+                return d
+            problem = self._not_continuable(of, fork, d)
+            if problem is not None:
+                lost = Lost(problem)
+                self._settle(d, started=lost, ended=lost)
+                return d
+            d.state = _FORKING
+            d.handed_at = time.monotonic()
+            self._worker.put(self._handoff(d, self.harness.fork))
+            return d
+
+    def _not_continuable(self, of: str, fork: Handed | None, d: Handed) -> str | None:
+        """Under the lock: why the fork `of` names can't take a round now, or None."""
+        if fork is None:
+            return f"{LOST_GONE}: no fork delivery {of} on this endpoint"
+        if fork.agent is None:
+            return f"{LOST_GONE}: the fork of {of} never started"
+        if not isinstance(fork.ended, Ended):
+            if fork.ended is None:
+                return f"{LOST_DENIED}: the fork's round {of} has not ended"
+            return f"{LOST_GONE}: the fork's round {of} did not end with an answer"
+        for other in self._deliveries.values():
+            if (other is not d and other.spec.kind == "fork" and other.state != _DONE
+                    and other.agent == fork.agent):
+                return f"{LOST_DENIED}: the fork's round {other.id} has not ended"
+        return None
+
+    def fork_started(self, delivery_id: str, agent_id: str) -> None:
+        """The harness started the fork `delivery_id` asked for, as `agent_id`."""
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            if d is None or d.state != _FORKING:
+                log.info("fork %s started as %s after it settled; ignored", delivery_id,
+                         agent_id)
+                return
+            d.state = _STARTED
+            self._settle(d, started=Started(None, agent_id=agent_id))
+
+    def fork_ended(self, delivery_id: str, answer: str | None, *,
+                   outcome: str = "answer") -> None:
+        """The fork `delivery_id` asked for answered its task: `answer` is its final text,
+        None when it had none."""
+        if outcome not in OUTCOMES:
+            outcome = "error"
+        with self._lock:
+            d = self._deliveries.get(delivery_id)
+            if d is None or d.spec.kind != "fork" or d.state == _DONE:
+                return
+            self._settle(d, started=Started(None) if d.started is None else None,
+                         ended=Ended(None, outcome, answer=answer))
 
     def wait(self, delivery_id: str, until: str, timeout: float | None):
         """`Started | Refused | Lost` (until "started") or `Ended | Refused | Lost`
@@ -1164,11 +1433,18 @@ class Endpoint:
 
     def wait_ref(self, ref: str, until: str, timeout: float | None):
         """`wait` for the newest delivery carrying `ref`: `(delivery id, value)`, the
-        value None when `timeout` passes first. With no delivery carrying it, `(None,
-        Lost)` with a reason starting `unknown delivery`."""
+        value None when `timeout` passes first. With none in this endpoint's record, the
+        newest kept end of this session carrying `ref` (an earlier endpoint's of the
+        same session among them), read from the kept ends. With neither, `(None, Lost)`
+        with a reason starting `unknown delivery`."""
         with self._lock:
             newest = next((d for d in reversed(self._deliveries.values())
                            if d.ref == ref), None)
+            if newest is None:
+                record = turns_kept.find(ref, session_ids=self.session_ids(),
+                                         endpoint=self.name, env=self.env)
+                if record is not None:
+                    return record.get("delivery"), from_wire(record[until])
         if newest is None:
             return None, Lost(f"{LOST_UNKNOWN}: no delivery at this endpoint carries this "
                               "ref", None, ref)
@@ -1237,12 +1513,28 @@ class Endpoint:
 
     # -- internals ---------------------------------------------------------------------
 
-    def _new(self, kind: str, text: str, ref: str | None = None, **checks) -> Handed:
-        """Under the lock: record a new delivery."""
+    def _new(self, kind: str, text: str, ref: str | None = None, *, keep: bool = False,
+             **checks) -> Handed:
+        """Under the lock: record a new delivery. `keep` needs a `ref`, and one no kept
+        end of this session holds (`kept.RefKept`)."""
+        if keep and ref is None:
+            raise ValueError("keep needs a ref: an end is kept and acked by its ref")
+        if keep and self._ref_kept(ref):
+            raise turns_kept.RefKept(f"the ref {ref!r} still holds a kept end that is not acked: ack "
+                          "it first, or give this delivery a ref of its own")
         d = Handed(Delivery(f"{self.nonce}-{next(self._ids)}", text, kind, ref=ref,
-                            **checks), _QUEUED, ref=ref)
+                            **checks), _QUEUED, ref=ref, keep=keep)
         self._deliveries[d.id] = d
         return d
+
+    def _ref_kept(self, ref: str) -> bool:
+        """Under the lock: whether a kept end of this session still holds `ref`: a
+        delivery asked with `keep` in this endpoint's record, open or settled and not
+        acked, or a kept end in the state folder, an earlier endpoint's among them."""
+        if any(d.keep and d.ref == ref for d in self._deliveries.values()):
+            return True
+        return turns_kept.find(ref, session_ids=self.session_ids(), endpoint=self.name,
+                               env=self.env) is not None
 
     def _unable(self, capability: str) -> str | None:
         if self._gone is not None:
@@ -1327,7 +1619,7 @@ class Endpoint:
 
         def run() -> None:
             with self._lock:
-                skip = d.state not in (_INFLIGHT, _STEERING) or d.expired
+                skip = d.state not in (_INFLIGHT, _STEERING, _FORKING) or d.expired
                 gone = self._gone is not None
             if skip:
                 log.info("delivery %s settled before its hand-off; skipped", d.id)
@@ -1469,10 +1761,55 @@ class Endpoint:
             d.ended = ended
         if d.ended is not None and d.state != _DONE:
             d.state = _DONE
-            self._settled.append(d.id)
-            while len(self._settled) > SETTLED_KEPT:
-                self._deliveries.pop(self._settled.popleft(), None)
+            # A kept end stays in the record, out of the settled ones, until acked.
+            if not (d.keep and self._write_kept(d)):
+                self._remember_settled(d)
         self._cond.notify_all()
+
+    def _remember_settled(self, d: Handed) -> None:
+        """Under the lock: `d` joins the settled deliveries kept for a late `wait`."""
+        d.keep = False
+        self._settled.append(d.id)
+        while len(self._settled) > SETTLED_KEPT:
+            self._deliveries.pop(self._settled.popleft(), None)
+
+    def _write_kept(self, d: Handed) -> bool:
+        """Under the lock: write the kept end of `d`, which has just settled. A request
+        the endpoint answered `gone` was never taken, so nothing is kept for it. False
+        when nothing was written; a write that fails is logged, and the end stays in
+        this endpoint's record until acked."""
+        if isinstance(d.early, Refused) and d.early.reason == REFUSED_GONE:
+            return False
+        ended = d.value("ended")
+        started = d.value("started") or ended
+        record = turns_kept.entry(
+            endpoint=self.name, session_ids=self.session_ids(), delivery=d.id,
+            ref=d.ref, kind=d.spec.kind, by=d.spec.by, started=started.to_wire(),
+            ended=ended.to_wire())
+        try:
+            turns_kept.write(record, self.env)
+        except OSError:
+            log.exception("the kept end of %s (ref %r) was not written", d.id, d.ref)
+        return True
+
+    def ack(self, ref: str) -> bool:
+        """The asker is done with the kept end of `ref`: remove it, from this
+        endpoint's record and from the kept ends of this session, earlier endpoints'
+        included. A delivery carrying `ref` that has not settled yet is left as it is:
+        its end is kept when it settles. True when a kept end was removed."""
+        with self._lock:
+            removed = False
+            for d in list(self._deliveries.values()):
+                if d.ref == ref and d.keep and d.state == _DONE:
+                    self._remember_settled(d)
+                    removed = True
+            try:
+                removed = turns_kept.remove(ref, session_ids=self.session_ids(),
+                                            endpoint=self.name, env=self.env) or removed
+            except OSError:
+                log.exception("the kept ends of ref %r were not removed", ref)
+                raise
+            return removed
 
     def _settle_command(self, c: _Command, result) -> None:
         c.result = result
@@ -1545,11 +1882,12 @@ class Endpoint:
             turn.ended_held = True   # its TurnEnded waits with its TurnStarted
             return
         outcome = turn.outcome or "error"
-        ended = Ended(turn.turn_id, outcome)
+        ended = Ended(turn.turn_id, outcome, answer=turn.answer)
         for delivery_id in [turn.delivery_id, *turn.steered]:
             d = self._deliveries.get(delivery_id) if delivery_id else None
             if d is not None and d.state != _DONE:
                 self._settle(d, ended=ended)
+        self._last_closed = turn
         self._emit(TurnEnded(turn.turn_id, turn.session_id, turn.turn_number, outcome,
                              self._turn_deliveries(turn), turn.command))
         self._ask(self._event("turn", turn_id=turn.turn_id, outcome=outcome))

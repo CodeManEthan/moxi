@@ -1,8 +1,8 @@
 """A stored launch made again (`api.ReplayRequest`): the replay's argv against a fresh
 launch of the same values, the environment built from the row and the settings only, a
-scratch launch's directory kept, the brief left out, a self relaunch's handoff header and
-stamp, a director's posture, a resume's argv and session id, and a respawn into the slot
-the relaunch holds."""
+scratch launch's directory kept, the brief left out, a relaunch's handoff header and stamp
+(a self relaunch's and a director's), a director's posture with no handoff, a resume's argv
+and session id, and a respawn into the slot the relaunch holds."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import dataclasses
 import json
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,7 @@ from moxi.paths import Layout
 import launcher_fake_slots as fake
 import launcher_fake_turns as fake_turns
 from launcher_fake_harness import Harness
-from moxi_launcher import api, catalog, first, slots, store, targets
+from moxi_launcher import api, catalog, first, names, slots, store, targets
 from moxi_launcher.api import LaunchRequest, ReplayRequest
 from moxi_launcher.compose import Context, claude, codex, common
 
@@ -329,6 +330,46 @@ def test_a_replay_env_is_the_base_then_the_pass_list_and_nothing_else():
     assert got == {"PATH": "/then/bin", "HOME": "/home/then", "TOKEN": "t"}
 
 
+BUS = "DBUS_SESSION_BUS_ADDRESS"
+
+
+def test_a_launch_records_the_session_bus_when_its_caller_has_one():
+    assert common.base_env({"HOME": "/h", BUS: "unix:path=/run/user/7/bus"},
+                           is_windows=False) == {"HOME": "/h", BUS: "unix:path=/run/user/7/bus"}
+    assert common.base_env({"HOME": "/h"}, is_windows=False) == {"HOME": "/h"}
+    assert common.short_env({BUS: "unix:path=/b"}, is_windows=False) == {BUS: "unix:path=/b"}
+
+
+def test_a_replay_takes_the_session_bus_from_its_caller_and_else_from_the_record():
+    base = {"HOME": "/h", BUS: "unix:path=/run/user/7/then"}
+    now = {"HOME": "/elsewhere", BUS: "unix:path=/run/user/7/now"}
+    assert common.replay_env(base, now) == {"HOME": "/h", BUS: "unix:path=/run/user/7/now"}
+    assert common.replay_env(base, {"HOME": "/elsewhere"}) == base
+    assert common.replay_env(base, {BUS: ""}) == base
+    assert common.replay_env({"HOME": "/h"}, {"HOME": "/elsewhere"}) == {"HOME": "/h"}
+
+
+def test_a_replay_restores_the_session_bus_the_launch_recorded(work, harness, no_exec,
+                                                               monkeypatch):
+    monkeypatch.setenv(BUS, "unix:path=/run/user/7/bus")
+    api.launch(request(work))
+    assert row("r1").base_env[BUS] == "unix:path=/run/user/7/bus"
+    # Replayed from a process with no bus: the recorded one comes back.
+    monkeypatch.delenv(BUS)
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert no_exec[-1]["env"][BUS] == "unix:path=/run/user/7/bus"
+    assert row("r2").base_env[BUS] == "unix:path=/run/user/7/bus"
+
+
+def test_a_launch_with_no_session_bus_adds_none_to_its_replay(work, harness, no_exec,
+                                                              monkeypatch):
+    monkeypatch.delenv(BUS, raising=False)
+    api.launch(request(work))
+    assert BUS not in row("r1").base_env
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann"))
+    assert BUS not in no_exec[-1]["env"]
+
+
 def test_no_credentials_when_the_base_shows_a_sign_in_and_nothing_is_passed():
     assert common.no_credentials({"CLAUDE_CODE_OAUTH_TOKEN": None}, [])
     assert common.no_credentials({"CLAUDE_CODE_USE_VERTEX": "1"}, [])
@@ -460,6 +501,35 @@ def test_a_director_relaunch_takes_only_the_directors_listed_names(work, harness
     assert got.base == "row"
 
 
+def test_a_director_relaunch_with_a_handoff_is_relaunched_stamped_and_gives_it(
+        work, harness, no_exec, tmp_path):
+    from moxi_launcher import job, presets
+
+    file = presets.path()
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("[seat.lead]\n")
+    api.launch(LaunchRequest(seat="lead", cwd=str(work), request_id="r1", session_id=SID,
+                             actor="ann"))
+    handoff = tmp_path / "lead-handoff.md"
+    handoff.write_text("where it stands\n")
+    request = dataclasses.replace(
+        job.replay_request(row("r1"), "run9", mode="director", handoff=str(handoff),
+                           by="boss", slot=None, hold=None, respawn=False, director=True),
+        request_id="r2")
+    api.launch(request)
+    new = row("r2")
+    assert new.relaunch_of == "r1" and new.actor == "boss"
+    assert new.posture == f"relaunched (handoff: {handoff})"
+    assert new.handoff_path == str(handoff)
+    assert new.env[common.RELAUNCH_ENV] == "run9"
+    assert no_exec[-1]["env"][common.RELAUNCH_ENV] == "run9"
+    conn = store.connect(create=False)
+    try:
+        assert store.picked(conn, "lead") == [str(handoff)]
+    finally:
+        conn.close()
+
+
 def test_a_token_seats_director_relaunch_with_none_passed_says_no_credentials(
         work, harness, no_exec, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "seat-token")
@@ -553,16 +623,18 @@ def test_a_fresh_launch_reports_no_base(work, harness, no_exec):
     assert api.launch(request(work)).base is None
 
 
-def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec):
+def test_a_scratch_replay_keeps_the_rows_dir(harness, tmp_path, no_exec, monkeypatch):
     api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
                              session_id=SID, actor="ann"))
     where = row("r1").cwd
-    assert where == str(common.scratch_dir("r1"))
+    assert where == str(common.scratch_dir(row("r1").values["name"]))
     ended()
+    # Under another name the folder would be another; the replay keeps the row's.
+    monkeypatch.setattr(names, "now", lambda: datetime(2026, 11, 9, 8, 0))
     got = api.launch(ReplayRequest(row("r1"), resume_of="r1", request_id="r2",
                                    actor="ann"))
     assert row("r2").cwd == where and no_exec[-1]["cwd"] == where
-    assert not common.scratch_dir("r2").exists()
+    assert row("r2").values["name"] == row("r1").values["name"]
     assert got.state == "started"
 
 
@@ -686,6 +758,7 @@ def ended_and_held(rig, number: int = 3, holder: str = "run1") -> None:
                                   "hold": {"holder": holder, "until": 1.9e9}}})
 
 
+@pytest.mark.slot_target
 def test_a_relaunch_respawns_its_slot_under_its_hold(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig)
@@ -701,6 +774,7 @@ def test_a_relaunch_respawns_its_slot_under_its_hold(work, harness, rig):
     assert row("r2").slot == "3"
 
 
+@pytest.mark.slot_target
 def test_the_chain_is_the_first_launch_of_the_relaunches(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig)
@@ -712,6 +786,7 @@ def test_the_chain_is_the_first_launch_of_the_relaunches(work, harness, rig):
     assert [c["meta"]["chain"] for c in rig.calls("respawn")] == ["r1", "r1"]
 
 
+@pytest.mark.slot_target
 def test_a_resume_into_a_slot_starts_a_chain_of_its_own(work, harness, rig, monkeypatch):
     for name in TERMINAL:
         monkeypatch.delenv(name, raising=False)
@@ -727,6 +802,7 @@ def test_a_resume_into_a_slot_starts_a_chain_of_its_own(work, harness, rig, monk
     assert start["argv"][1:3] == ["--resume", SID]
 
 
+@pytest.mark.slot_target
 def test_a_slot_held_by_another_is_refused_even_with_a_hold(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig, holder="someone")
@@ -736,6 +812,7 @@ def test_a_slot_held_by_another_is_refused_even_with_a_hold(work, harness, rig):
     assert rig.calls("respawn") == []
 
 
+@pytest.mark.slot_target
 def test_a_respawn_slots_refuses_fails_the_row(work, harness, rig):
     slot_launch(work, rig)
     ended_and_held(rig)
@@ -744,3 +821,219 @@ def test_a_respawn_slots_refuses_fails_the_row(work, harness, rig):
                                    hold="run1", respawn=True))
     assert (got.state, got.reason) == ("failed", "live-pane")
     assert row("r2").state == "failed"
+
+
+def test_a_relaunched_row_keeps_recycle_at_limit_relaunch(work, harness, no_exec,
+                                                          monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    api.launch(request(work))
+    old = row("r1")
+    stored = {**old.values, "recycle_at_limit": "relaunch"}
+    replayed = api._replayed(ReplayRequest(
+        dataclasses.replace(old, target="slot", values_json=json.dumps(stored)),
+        relaunch_of="r1", request_id="r2", actor="ann"))
+    assert replayed.values["recycle_at_limit"] == "relaunch"
+    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+
+
+def test_a_replay_of_an_older_scratch_row_set_to_relaunch_recycles_off(
+        harness, tmp_path, no_exec, monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    api.launch(LaunchRequest(typed={"scratch": True}, cwd=str(tmp_path), request_id="r1",
+                             session_id=SID, actor="ann"))
+    old = row("r1")
+    # Recorded before a scratch launch was refused recycle_at_limit = relaunch.
+    stored = {**old.values, "recycle_at_limit": "relaunch"}
+    old = dataclasses.replace(old, target="slot", values_json=json.dumps(stored))
+    for replay in (dict(relaunch_of="r1"), dict(resume_of="r1")):
+        replayed = api._replayed(ReplayRequest(old, request_id="r2", actor="ann",
+                                               **replay))
+        assert replayed.values["recycle_at_limit"] == "off"
+        assert ("recycle_at_limit relaunch is not applied: a scratch launch can't recycle "
+                "itself") in replayed.warnings
+        # So the launch check does not refuse the replay.
+        assert "scratch-recycle" not in {r.code for r in api._check(replayed, {})}
+
+
+#: The warning a replay of a row recorded with `recycle_at_limit = compact` carries.
+COMPACT_NOT_APPLIED = ("recycle_at_limit compact is not applied: "
+                       + catalog.launcher()["recycle_at_limit"].retired_values["compact"])
+
+
+def test_a_replay_drops_a_stored_limit_at_and_replays_compact_as_off(
+        harness, tmp_path, no_exec):
+    api.launch(LaunchRequest(cwd=str(tmp_path), request_id="r1", session_id=SID,
+                             actor="ann"))
+    old = row("r1")
+    stored = {**old.values, "recycle_at_limit": "compact", "limit_at": "1.5x",
+              "sources": {"recycle_at_limit": "preset"}}
+    old = dataclasses.replace(old, values_json=json.dumps(stored))
+    for replay in (dict(relaunch_of="r1"), dict(resume_of="r1")):
+        replay = ReplayRequest(old, request_id="r2", actor="ann", **replay)
+        replayed = api._replayed(replay)
+        assert replayed.values["recycle_at_limit"] == "off"
+        assert "limit_at" not in replayed.values
+        assert [w for w in replayed.warnings if "recycle_at_limit" in w or "limit_at" in w
+                ] == [COMPACT_NOT_APPLIED]
+        # The launch check does not refuse it.
+        assert not [r for r in api._check(replayed, {}) if r.code == "retired"]
+
+
+# -- whether a replay can recycle itself ---------------------------------------------------
+
+
+@pytest.fixture
+def recyclable(monkeypatch):
+    """turns, usage and slots offered, slots running here and notes not installed, so a
+    Claude slot launch in a folder warned at a mark can recycle itself."""
+    from moxi import modules
+
+    monkeypatch.setattr(slots, "links", lambda module: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+def slot_row(work, **values):
+    """r1 made again as a Claude slot launch in `work` warned at 2x, with `values` over
+    its stored ones (a value None is left out)."""
+    api.launch(request(work))
+    old = row("r1")
+    stored = {k: v for k, v in {**old.values, "warn_at": "2x", "target": "slot",
+                                **values}.items() if v is not None}
+    stored.pop("sources", None) if "sources" not in values else None
+    return dataclasses.replace(old, target="slot", slot="3", values_json=json.dumps(stored))
+
+
+def replayed_row(old):
+    """The replay of `old` as its row records it: its values (`api._recorded`), on the
+    same launch."""
+    replay = ReplayRequest(old, relaunch_of="r1", request_id="r2", actor="ann")
+    replayed = api._replayed(replay)
+    values = api._recorded(replay, replayed, dict(replayed.values))
+    return replayed, dataclasses.replace(old, values_json=json.dumps(values))
+
+
+def can(found_row) -> bool:
+    from moxi_launcher import selfrecycle
+
+    return selfrecycle.missing_of_row(found_row) is None
+
+
+@pytest.mark.parametrize("recycle, sources, holds", [
+    ("relaunch", {"recycle_at_limit": "preset"}, True),
+    ("relaunch", {"recycle_at_limit": "typed"}, True),
+    ("relaunch", None, True),
+    ("off", {"recycle_at_limit": "typed"}, False),
+    ("off", {"recycle_at_limit": "preset"}, False),
+    ("off", {"recycle_at_limit": "defaults"}, False),
+    ("off", {"recycle_at_limit": "left-out"}, False),
+    ("compact", {"recycle_at_limit": "preset"}, False),
+    # The shipped off, recorded since or before relaunch was a setting, stays off.
+    ("off", {"recycle_at_limit": "shipped"}, False),
+    ("off", None, False),
+])
+def test_a_replay_never_changes_whether_the_launch_can_recycle_itself(
+        work, harness, no_exec, recyclable, recycle, sources, holds):
+    old = slot_row(work, recycle_at_limit=recycle, sources=sources)
+    assert can(old) is holds
+    replayed, new = replayed_row(old)
+    assert can(new) is holds
+    # A row recorded with the retired compact replays off, opted out as it was.
+    assert replayed.values["recycle_at_limit"] == (
+        "off" if recycle == "compact" else recycle)
+    # And again, from the replay's own row.
+    _, newer = replayed_row(new)
+    assert can(newer) is holds
+
+
+@pytest.mark.parametrize("sources", [None, {"recycle_at_limit": "shipped"}])
+def test_a_launch_at_the_shipped_off_is_not_told_after_its_relaunch(
+        work, harness, no_exec, recyclable, sources):
+    old = slot_row(work, recycle_at_limit="off", sources=sources)
+    replayed, _ = replayed_row(old)
+    assert replayed.values["recycle_at_limit"] == "off"
+    assert not any("recycle_at_limit" in said for said in replayed.warnings)
+    assert common.option_stamps(replayed.values) == {}
+
+
+def test_a_relaunch_launch_is_told_after_its_relaunch(work, harness, no_exec, recyclable):
+    old = slot_row(work, recycle_at_limit="relaunch", sources={"recycle_at_limit": "preset"})
+    replayed, _ = replayed_row(old)
+    assert common.option_stamps(replayed.values) == {"MOXI_USAGE_CROSSING_AT": "2x"}
+
+
+def test_a_relaunch_the_install_can_no_longer_run_is_replayed_off(work, harness, no_exec,
+                                                                  recyclable, monkeypatch):
+    old = slot_row(work, recycle_at_limit="relaunch",
+                   sources={"recycle_at_limit": "preset"})
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    assert not can(old)
+    replayed, new = replayed_row(old)
+    assert replayed.values["recycle_at_limit"] == "off"
+    assert any(said.startswith("recycle_at_limit relaunch is not applied")
+               for said in replayed.warnings)
+    assert not can(new)
+
+
+def test_a_seat_row_with_no_mark_of_its_own_replays_with_none(work, harness, no_exec,
+                                                              recyclable):
+    # A seat holds no warn_at unless set, and its replay keeps the row as recorded: no
+    # mark, so no warning and no relaunch line, but its self relaunch stays armed.
+    old = slot_row(work, warn_at="", recycle_at_limit="relaunch",
+                   sources={"warn_at": "shipped", "recycle_at_limit": "preset"})
+    replayed, new = replayed_row(old)
+    assert new.values["warn_at"] == "" and "usage" not in replayed.links
+    assert common.option_stamps(replayed.values) == {}
+    assert can(new)
+
+
+# -- the model pin ------------------------------------------------------------------------
+
+
+def events_of(rid: str, kind: str) -> list[dict]:
+    conn = store.connect(create=False)
+    try:
+        return [e.detail for e in store.events(conn, rid) if e.kind == kind]
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("harness_name, flag, sid", [("claude", "--model", SID),
+                                                     ("codex", "-m", None)])
+def test_a_relaunch_runs_on_the_pin_and_the_new_row_keeps_no_model(
+        work, harness, no_exec, harness_name, flag, sid):
+    api.launch(request(work, sid=sid, harness=harness_name))
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="ann", model_pin="claude-fable-5-2"))
+    assert got.argv[got.argv.index(flag) + 1] == "claude-fable-5-2"
+    assert not row("r2").values.get("model")
+    assert events_of("r2", api.MODEL_PIN) == [{"model": "claude-fable-5-2",
+                                               "how": "pinned"}]
+    # A replay of the relaunched launch with no pin runs the row's own model: the default.
+    again = api.launch(ReplayRequest(row("r2"), relaunch_of="r2", request_id="r3",
+                                     actor="ann"))
+    assert flag not in again.argv and "claude-fable-5-2" not in again.argv
+    assert events_of("r3", api.MODEL_PIN) == []
+
+
+def test_a_resume_of_a_pinned_relaunch_runs_the_rows_own_model(work, harness, no_exec):
+    api.launch(request(work))
+    api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2", actor="ann",
+                             model_pin="claude-fable-5-2"))
+    ended("r2")
+    resumed = api.launch(ReplayRequest(row("r2"), resume_of="r2", request_id="r3",
+                                       actor="ann"))
+    assert "--resume" in resumed.argv
+    assert "--model" not in resumed.argv and "claude-fable-5-2" not in resumed.argv
+
+
+def test_a_row_that_names_a_model_takes_no_pin(work, harness, no_exec):
+    api.launch(request(work, model="opus"))
+    got = api.launch(ReplayRequest(row("r1"), relaunch_of="r1", request_id="r2",
+                                   actor="ann", model_pin="claude-fable-5-2"))
+    assert got.argv[got.argv.index("--model") + 1] == "opus"
+    assert "claude-fable-5-2" not in got.argv
+    assert row("r2").values["model"] == "opus" and events_of("r2", api.MODEL_PIN) == []

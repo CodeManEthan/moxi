@@ -1,4 +1,4 @@
-"""comms' interface 2 (`moxi_comms.api`): the announcement, the pins, and the library's
+"""comms' interfaces 2 and 3 (`moxi_comms.api`): the announcement, the pins, and the library's
 send against a live rig.
 
 The pins hold every public name and the send's signature, so a change to the interface
@@ -37,10 +37,10 @@ def backend():
 
 # --------------------------------------------------------------------------- the pins
 
-def test_the_announcement_offers_interface_2():
-    assert module.INTERFACES == frozenset({2})
+def test_the_announcement_offers_interfaces_2_and_3():
+    assert module.INTERFACES == frozenset({2, 3})
     assert module.API == "moxi_comms.api"
-    assert api.INTERFACE == 2
+    assert api.INTERFACE == 3
 
 
 def test_the_codex_wrapper_takes_a_resume():
@@ -104,7 +104,11 @@ def test_load_finds_comms_and_its_api():
     assert found.ok, found
     assert found.api is api
     modules.reset()
+    assert modules.load("comms", interface=3).api is api
+    modules.reset()
     assert not modules.load("comms", interface=1).ok
+    modules.reset()
+    assert not modules.load("comms", interface=4).ok
 
 
 def test_interface_2_holds_its_names():
@@ -119,8 +123,10 @@ def test_interface_2_holds_its_names():
         "CODEX_RESUME",
         "ENDS_ON_BIND_TIMEOUT", "BIND_WAIT", "HEADLESS", "parse_exit", "BACKEND_ENV", "CLAIM_SOCKET_ENV",
         "COMMAND_ENV", "DIRECTORS_ENV", "GLOBAL_ENV", "MOCK_BACKEND_ENV", "NAME_ENV",
-        "OPERATOR_ENV", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
-        "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV"}
+        "OPERATOR_ENV", "POLICY_DIRECTORS_ENV", "policy_directors", "effective", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
+        "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV",
+        "send_scoped", "scoped_sender", "scoped_state", "ScopedSender", "ScopedState",
+        "SCOPED_REASONS"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer
@@ -169,6 +175,24 @@ def test_waiting_has_one_meaning_bound_with_no_endpoint():
     assert "unbound    no session holds the name" in doc
 
 
+def test_the_scoped_senders_are_pinned():
+    params = inspect.signature(api.send_scoped).parameters
+    assert list(params) == ["module", "parent", "to", "text", "word", "expires",
+                            "interrupt", "timeout_s"]
+    assert all(params[n].kind is inspect.Parameter.KEYWORD_ONLY
+               for n in list(params)[4:])
+    assert list(inspect.signature(api.scoped_sender).parameters) == ["name"]
+    params = inspect.signature(api.scoped_state).parameters
+    assert list(params) == ["module", "parent", "word"]
+    assert params["word"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert list(api.ScopedSender.__dataclass_fields__) == ["qualified", "module", "word",
+                                                           "parent"]
+    assert list(api.ScopedState.__dataclass_fields__) == ["module", "parent", "word",
+                                                          "qualified", "can_send",
+                                                          "reason", "why"]
+    assert api.SCOPED_REASONS == ("undeclared", "conflict", "unreadable")
+
+
 def test_the_reads_and_names_are_pinned():
     for name, params in {"attributed": ["message_id", "timeout_s"],
                          "session": ["identity", "timeout_s"],
@@ -178,7 +202,8 @@ def test_the_reads_and_names_are_pinned():
                          "record_dir": [], "daemon_socket": []}.items():
         assert list(inspect.signature(getattr(api, name)).parameters) == params, name
     assert list(api.Agent.__dataclass_fields__) == ["qualified", "name", "scope", "tier",
-                                                    "adapter", "directors"]
+                                                    "adapter", "directors",
+                                                    "policy_directors"]
     assert list(api.Standing.__dataclass_fields__) == ["qualified", "name", "scope",
                                                        "kind", "module", "holder"]
     assert list(api.IdentityState.__dataclass_fields__) == ["qualified", "state", "holder",
@@ -190,10 +215,12 @@ def test_the_reads_and_names_are_pinned():
     assert list(api.Roster.__dataclass_fields__) == ["bound", "standing", "waiting"]
     assert list(api.Waiting.__dataclass_fields__) == ["qualified", "count", "oldest"]
     assert list(api.Owner.__dataclass_fields__) == ["session_id", "identity", "adapter",
-                                                    "directors", "awaiting"]
+                                                    "directors", "awaiting",
+                                                    "policy_directors"]
     assert list(api.RosterRow.__dataclass_fields__) == [
         "qualified", "name", "scope", "live", "kind", "module", "tier", "adapter",
-        "directors", "session_id", "bound_at", "awaiting", "cache", "holder"]
+        "directors", "session_id", "bound_at", "awaiting", "cache", "holder", "via",
+        "policy_directors"]
     assert list(api.CacheFact.__dataclass_fields__) == ["kind", "until"]
     params = inspect.signature(api.roster_rows).parameters
     assert params["timeout_s"].default == api.READ_DEADLINE
@@ -465,6 +492,22 @@ def test_attributed_and_session(rig):
     assert s["bound"] is True and s["adapter"] == "claude-shim"
     assert s["session_id"] == reviewer.session_id
     assert api.session("nobody")["bound"] is False
+
+
+def test_roster_and_owner_carry_the_policy_directors(rig):
+    reviewer = rig.shim(name="reviewer", directors=("planner@proj-a", "fleet-lead"),
+                        policy_directors=("fleet-lead",))
+    with rig.session_holding(_sender(rig, "reviewer")):
+        got = api.roster()
+        owner = api.owner(reviewer.session_id)
+        rows = api.roster_rows()
+    (agent,) = [a for a in got.bound if a.qualified == "reviewer"]
+    assert (agent.directors, agent.policy_directors) == (("planner@proj-a", "fleet-lead"),
+                                                         ("fleet-lead",))
+    assert (owner.directors, owner.policy_directors) == (("planner@proj-a", "fleet-lead"),
+                                                         ("fleet-lead",))
+    (row,) = [r for r in rows if r.qualified == "reviewer"]
+    assert row.policy_directors == ("fleet-lead",)
 
 
 def test_roster_and_owner_carry_declared_directors(rig):

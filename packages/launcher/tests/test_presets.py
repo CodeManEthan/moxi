@@ -15,6 +15,7 @@ from moxi.config import ConfigError
 
 from moxi_launcher import catalog, presets
 from moxi_launcher.catalog import NeedsModule
+from moxi_launcher.compose import common
 from moxi_launcher.presets import Request
 
 
@@ -182,6 +183,56 @@ def test_a_plain_launch_takes_the_shipped_defaults():
     assert got.preset_kind is None and got.chosen == frozenset()
     assert got.cwd == "/work" and got.values["cwd"] == "/work"
     assert got.target == "terminal"
+
+
+def test_a_launch_with_usage_warns_at_2x_unless_it_sets_another_mark(monkeypatch):
+    """Every launch with usage installed is stamped with a mark: its own, else the shipped
+    default of 2x. An install without usage neither offers the row nor stamps it."""
+    from moxi_launcher import compose
+    from moxi_launcher.compose import Context
+
+    def stamped(got):
+        ctx = Context(request_id="r1", session_id="5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f",
+                      actor="ann", runs_dir="/runs", windows=False)
+        return compose.compose(dict(got.values), ctx).env.get("MOXI_USAGE_WARN_AT")
+
+    with_usage = only("usage")
+    got = resolve(available=with_usage)
+    assert got.values["warn_at"] == "2x" and got.sources["warn_at"] == presets.SHIPPED
+    assert "usage" in got.links and stamped(got) == "2x"
+    assert stamped(resolve(available=with_usage, typed={"warn_at": "1.5x"})) == "1.5x"
+    assert stamped(resolve(available=with_usage, typed={"warn_at": "off"})) == "off"
+
+    real = modules.load
+    monkeypatch.setattr(modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name == "usage" else real(name, **kw)))
+    got = resolve()
+    assert "warn_at" not in catalog.offered("claude", NONE)
+    assert "warn_at" not in got.values and "usage" not in got.links
+    assert stamped(got) is None
+
+
+def test_a_seat_or_codex_launch_warns_only_at_a_mark_it_sets():
+    """The 2x default reaches one-off, project and scratch launches only. A seat outside
+    a scratch folder, or a Codex launch, holds no mark unless `[defaults]`, its preset or
+    a flag sets one; then it holds that mark."""
+    with_usage = only("usage")
+    seat = '[seat.s]\nmodel = "opus"\n'
+
+    def mark(text="", **request):
+        got = resolve(text, available=with_usage, **request)
+        return got.values["warn_at"], "usage" in got.links
+
+    assert mark(seat, seat="s") == ("", False)
+    assert mark(seat, seat="s", left_out=["warn_at"]) == ("", False)
+    assert mark(typed={"harness": "codex"}) == ("", False)
+    assert mark('[seat.s]\nwarn_at = "1x"\n', seat="s") == ("1x", True)
+    assert mark(seat, seat="s", typed={"warn_at": "1.5x"}) == ("1.5x", True)
+    assert mark('[defaults]\nwarn_at = "off"\n' + seat, seat="s") == ("off", True)
+    assert mark(typed={"harness": "codex", "warn_at": "2x"}) == ("2x", True)
+    assert mark() == ("2x", True)
+    assert mark('[project.p]\nmodel = "opus"\n', project_preset="p") == ("2x", True)
+    assert mark('[seat.s]\nscratch = true\n', seat="s") == ("2x", True)
 
 
 def test_each_later_layer_wins():
@@ -509,6 +560,119 @@ def test_the_with_posture_needs_comms():
         resolve(typed={"posture": "later"})
 
 
+def test_a_go_launch_with_nothing_to_start_on_is_refused():
+    # Go with no brief is refused, since nobody directs the session.
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go"})
+    assert (caught.value.code, caught.value.row) == ("posture-brief", "brief")
+    assert "posture go needs a brief" in caught.value.problem
+    with pytest.raises(presets.PostureBrief):
+        resolve(typed={"posture": "go", "brief": "  \n"})
+
+
+@pytest.mark.parametrize("first", [{"brief": "Build it."}, {"brief_file": "/w/brief.md"},
+                                   {"handoff": "/w/handoff.md"}])
+def test_a_go_launch_with_a_first_turn_resolves(first):
+    assert resolve(typed={"posture": "go", **first}).posture == "go"
+
+
+def test_a_go_launch_with_no_identity_starts_on_the_words_typed_after_the_dashes():
+    # On a launch that binds no comms identity, any words typed after `--` carry the
+    # task, flags alone included: they go last on the harness's argv.
+    for tail in (["Carry on."], ["--verbose", "Carry on."], ["--verbose"]):
+        got = resolve(typed={"posture": "go"}, extra=tail, tail=tail)
+        assert got.posture == "go"
+    # comms not installed: the identity is ignored, so the launch binds none.
+    assert resolve(typed={"posture": "go", "identity": "builder"},
+                   extra=["Carry on."], tail=["Carry on."]).posture == "go"
+
+
+def test_a_go_launch_does_not_start_on_flags_passed_on_but_not_typed_after_the_dashes():
+    # Unknown flags typed before `--`, the page's field (both reach `extra` with no
+    # tail), a preset's `extra_flags` and `[defaults]`' carry no first turn.
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go"}, extra=["--add-dir", "Carry on."])
+    assert "or its task after --" in caught.value.hint
+    with pytest.raises(presets.PostureBrief):
+        resolve('[seat.s]\nposture = "go"\nextra_flags = ["--add-dir", "/x"]\n', seat="s")
+    with pytest.raises(presets.PostureBrief):
+        resolve('[defaults]\nextra_flags = ["--append-system-prompt", "be terse"]\n',
+                typed={"posture": "go"})
+
+
+def test_a_go_launch_that_binds_an_identity_does_not_start_on_words_passed_on():
+    with pytest.raises(presets.PostureBrief) as caught:
+        resolve(typed={"posture": "go", "identity": "builder"}, extra=["Carry on."],
+                tail=["Carry on."], available=only("comms"))
+    assert "after --" not in caught.value.hint
+
+
+def test_a_brief_under_with_is_refused():
+    # Under with:<agent> that agent sends the first message.
+    for first in ({"brief": "Build it."}, {"brief_file": "/w/brief.md"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            resolve(typed={"posture": "with:lead", **first}, available=only("comms"))
+        assert caught.value.code == "posture-brief"
+        assert caught.value.problem == ("posture with:lead takes no brief: lead sends the "
+                                        "first message")
+    got = resolve(typed={"posture": "with:lead"}, available=only("comms"))
+    assert got.posture == "with:lead"
+
+
+def test_a_handoff_under_with_is_sent_first_and_the_director_follows():
+    # A typed handoff is the session's first turn under any posture; under
+    # with:<agent> the director's message comes after it.
+    for posture in ("with:lead", "operator", ""):
+        got = resolve(typed={"posture": posture, "handoff": "/w/handoff.md"},
+                      available=only("comms"))
+        assert (got.posture, got.values["handoff"]) == (posture, "/w/handoff.md")
+
+
+def test_a_resume_of_a_go_launch_needs_a_brief():
+    # A resumed session does not wake itself either.
+    with pytest.raises(presets.PostureBrief) as caught:
+        presets.check_resume_brief("go", brief="  \n")
+    assert (caught.value.code, caught.value.row) == ("posture-brief", "brief")
+    assert caught.value.problem == ("posture go needs a brief on a resume: a resumed "
+                                    "session does not wake itself either, so with no "
+                                    "first turn it sits idle")
+    assert caught.value.hint == "give the resume --brief or --brief-file"
+    presets.check_resume_brief("go", brief="Carry on.")
+    presets.check_resume_brief("go", brief_file="/w/brief.md")
+
+
+def test_a_resume_takes_the_brief_as_a_launch_does_under_each_posture():
+    for first in ({"brief": "Go."}, {"brief_file": "/w/brief.md"}):
+        with pytest.raises(presets.PostureBrief) as caught:
+            presets.check_resume_brief("with:lead", **first)
+        assert caught.value.problem == ("posture with:lead takes no brief: lead sends the "
+                                        "first message")
+    presets.check_resume_brief("with:lead")
+    for posture in ("operator", ""):
+        presets.check_resume_brief(posture)
+        presets.check_resume_brief(posture, brief="Read the design.")
+    with pytest.raises(presets.BadValue) as caught:
+        presets.check_resume_brief("go", brief="Go.", brief_file="/w/brief.md")
+    assert (caught.value.row, caught.value.problem, caught.value.hint) == (
+        "brief", "both brief and brief_file are given", "give one of them")
+
+
+def test_a_brief_under_operator_or_no_posture_is_sent():
+    # Under operator the session reads its brief and waits, as the operator ruled; with no
+    # posture the brief goes as it always did. Neither needs one.
+    for posture in ("operator", ""):
+        assert resolve(typed={"posture": posture, "brief": "Read the design."}).posture \
+            == posture
+        assert resolve(typed={"posture": posture}).posture == posture
+
+
+def test_a_go_posture_from_a_seat_needs_the_brief_too():
+    with pytest.raises(presets.PostureBrief):
+        resolve('[seat.s]\nposture = "go"\n', seat="s")
+    assert resolve('[seat.s]\nposture = "go"\n', seat="s",
+                   typed={"brief": "Go."}).posture == "go"
+
+
 @pytest.mark.parametrize("harness, target, links, mode, turns", [
     ("claude", "terminal", (), "interactive", False),
     ("claude", "slot", ("turns",), "interactive", True),
@@ -625,6 +789,32 @@ def test_a_headless_launch_without_an_identity_keeps_its_mode(monkeypatch):
                    available=only("comms", "turns")).mode == "exec"
 
 
+def test_the_defaults_refuse_the_policy_opt_out_by_name_with_comms_installed():
+    # One line there would opt every seat out; a seat opts out on its own.
+    found = errors('[defaults]\ntakes_policy_directors = true\n', available=only("comms"))
+    assert [(p.where, p.key, p.code) for p in found] == [
+        ("defaults", "takes_policy_directors", "per-seat")]
+    assert "every seat" in found[0].problem
+    assert errors('[seat.s]\nidentity = "s"\ntakes_policy_directors = false\n',
+                  available=only("comms")) == []
+    with pytest.raises(presets.BadPreset) as raised:
+        resolve('[defaults]\ntakes_policy_directors = false\n', available=only("comms"))
+    assert raised.value.found.code == "per-seat"
+
+
+def test_a_seat_opted_out_resolves_and_records_false():
+    got = resolve('[seat.s]\nidentity = "s"\ntakes_policy_directors = false\n',
+                  available=only("comms"), seat="s")
+    assert got.values["takes_policy_directors"] is False
+    assert resolve("", available=only("comms")).values["takes_policy_directors"] is True
+
+
+def test_comms_has_policy_probes_for_the_call():
+    assert presets.comms_has_policy(SimpleNamespace(policy_directors=lambda: ())) is True
+    assert presets.comms_has_policy(SimpleNamespace()) is False
+    assert presets.comms_has_policy(None) is False
+
+
 @pytest.mark.parametrize("value, want", [
     (None, frozenset()), ("codex", frozenset()), (3, frozenset()),
     (["codex"], frozenset({"codex"})), (frozenset({"claude", "codex"}),
@@ -704,7 +894,7 @@ def test_the_exit_rule_needs_comms(monkeypatch):
                        "headless_exit": ["cold"]}, available=only("turns"))
 
 
-@pytest.mark.parametrize("row, value", [("keep_warm", "on"), ("recycle_on_expiry", "clear"),
+@pytest.mark.parametrize("row, value", [("recycle_on_expiry", "clear"),
                                         ("recycle_on_expiry", "compact")])
 def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity(
         monkeypatch, row, value):
@@ -718,6 +908,67 @@ def test_the_cache_timer_rows_are_left_out_of_a_headless_launch_with_an_identity
     plain = headless_launch(monkeypatch, headless_comms("claude", "codex"),
                             harness="claude", identity="", brief="b", **{row: value})
     assert plain.values[row] == value
+
+
+@pytest.mark.parametrize("value", ["on", "off"])
+def test_a_headless_launch_with_an_identity_keeps_its_keep_warm(monkeypatch, value):
+    """Its nudges start the exit rule's idle count again, as any turn does, so the
+    session ends by its rule once they stop: the row is kept, with no warning."""
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
+    got = headless_launch(monkeypatch, headless_comms("claude", "codex"), harness="claude",
+                          brief="b", keep_warm=value)
+    assert got.values["keep_warm"] == value
+    assert not any("keep_warm" in w for w in got.warnings)
+
+
+# -- keep_warm: a launch setting, off unless set ------------------------------------------
+
+WARM = only("turns", "cache", "slots")
+
+
+@pytest.fixture
+def warm_rows(monkeypatch):
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+
+
+@pytest.mark.parametrize("target", ["terminal", "slot", "headless"])
+def test_a_launch_that_sets_no_keep_warm_holds_it_off(warm_rows, target):
+    got = resolve(typed={"target": target, "brief": "b"}, available=WARM)
+    assert got.values["keep_warm"] == "off"
+    assert not any("keep_warm" in w for w in got.warnings)
+
+
+@pytest.mark.parametrize("setting", ["off", "on"])
+@pytest.mark.parametrize("where", ["typed", "preset", "preset-slot", "defaults",
+                                   "defaults-headless"])
+def test_keep_warm_from_any_layer_launches_as_given(warm_rows, setting, where):
+    """`off` as well as `on`, typed, in a preset or from `[defaults]`, on any target: no
+    refusal, no warning, and the value kept."""
+    line = f'keep_warm = "{setting}"\n'
+    text, request_ = {
+        "typed": ("", {"typed": {"keep_warm": setting}}),
+        "preset": ("[seat.s]\n" + line, {"seat": "s"}),
+        "preset-slot": ('[seat.s]\ntarget = "slot"\n' + line, {"seat": "s"}),
+        "defaults": ("[defaults]\n" + line, {}),
+        "defaults-headless": ("[defaults]\n" + line,
+                              {"typed": {"target": "headless", "brief": "b"}}),
+    }[where]
+    got = resolve(text, available=WARM, **request_)
+    assert got.values["keep_warm"] == setting
+    assert not any("keep_warm" in w for w in got.warnings)
+
+
+def test_presets_check_takes_keep_warm_off_and_on_on_any_seat(warm_rows):
+    text = ('[seat.s]\nkeep_warm = "off"\n'
+            '[seat.h]\ntarget = "headless"\nkeep_warm = "off"\n'
+            '[seat.o]\nkeep_warm = "on"\n')
+    assert not [p for p in errors(text, WARM) if p.key == "keep_warm"]
+
+
+def test_keep_warm_is_left_alone_on_a_codex_launch_and_where_it_is_not_offered(warm_rows):
+    assert "keep_warm" not in resolve(typed={"harness": "codex"}, available=WARM).values
+    assert "keep_warm" not in resolve(available=only("turns")).values
 
 
 @pytest.mark.parametrize("target", ["terminal", "slot"])
@@ -851,6 +1102,10 @@ def test_a_good_file_checks_clean(tmp_path):
     ('[seat.s]\nsession_id = "x"\n', "seat.s", "session_id", "owned"),
     ('[seat.s]\nslot = "1"\n', "seat.s", "slot", "needs-module"),
     ('[seat.s]\ndirector = ["a"]\n', "seat.s", "director", "needs-module"),
+    ('[seat.s]\ntakes_policy_directors = false\n', "seat.s", "takes_policy_directors",
+     "needs-module"),
+    ('[defaults]\ntakes_policy_directors = false\n', "defaults",
+     "takes_policy_directors", "per-seat"),
     ('[seat.s]\ninstructions_file = "rel/x.md"\n', "seat.s", "instructions_file",
      "bad-value"),
     ('[seat.s]\ninstructions = "a"\ninstructions_file = "/x.md"\n', "seat.s",
@@ -1249,13 +1504,342 @@ def test_leaving_out_the_harness_is_refused_since_a_launch_needs_one():
         assert caught.value.row == "harness" and "a launch needs one" in caught.value.problem
 
 
-def test_a_word_enum_left_out_ends_a_seats_recycling():
-    available = only("turns", "usage")
-    text = '[seat.s]\nrecycle_at_limit = "compact"\nlimit_at = "2x"\n'
-    assert resolve(text, available, seat="s").values["limit_at"] == "2x"
-    with pytest.raises(catalog.NeedsModule, match="limit_at needs recycle_at_limit"):
-        resolve(text, available, seat="s", typed={"recycle_at_limit": "off"})
-    got = resolve(text, available, seat="s", typed={"recycle_at_limit": "off"},
-                  left_out=("limit_at",))
-    assert got.values["recycle_at_limit"] == "off" and got.values["limit_at"] == "1x"
-    assert got.sources["limit_at"] == presets.LEFT_OUT and "limit_at" not in got.chosen
+def test_a_word_enum_left_out_ends_a_seats_recycling(recyclable):
+    available = SLOTTED
+    text = '[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n'
+    assert resolve(text, available, seat="s").values["recycle_at_limit"] == "relaunch"
+    got = resolve(text, available, seat="s", left_out=("recycle_at_limit",))
+    assert got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
+    assert "recycle_at_limit" not in got.chosen
+
+
+# -- a scratch launch can't recycle itself --------------------------------------------------
+
+RECYCLES = only("turns", "usage")
+
+
+def test_a_preset_that_sets_scratch_and_relaunch_is_flagged():
+    found = errors('[seat.scratchy]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                   RECYCLES)
+    assert [(p.where, p.key, p.code) for p in found] == [
+        ("seat.scratchy", "recycle_at_limit", "scratch-recycle")]
+    assert found[0].problem == "a scratch launch can't recycle itself"
+    assert found[0].hint == "set recycle_at_limit off, or launch in a directory"
+
+
+def test_a_defaults_relaunch_is_not_flagged_on_a_scratch():
+    # `[defaults]` reaches every launch, so its relaunch holds off on a scratch one.
+    for text in ('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                 '[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = true\n',
+                 '[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n'
+                 '[seat.s]\nposture = "go"\n'):
+        assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_a_preset_place_replaces_the_defaults_scratch_in_the_check():
+    text = ('[defaults]\nscratch = true\n'
+            '[seat.s]\ncwd = "/work"\nrecycle_at_limit = "relaunch"\n')
+    assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_a_preset_meeting_the_defaults_in_the_pair_is_flagged():
+    text = '[defaults]\nscratch = true\n[seat.s]\nrecycle_at_limit = "relaunch"\n'
+    assert [(p.where, p.code) for p in errors(text, RECYCLES)] == [
+        ("seat.s", "scratch-recycle")]
+
+
+@pytest.mark.parametrize("text", [
+    '[seat.s]\nscratch = true\nrecycle_at_limit = "compact"\n',
+    '[seat.s]\nrecycle_at_limit = "relaunch"\n',
+    '[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = false\n'])
+def test_compact_on_a_scratch_and_relaunch_elsewhere_are_not_flagged(text):
+    assert "scratch-recycle" not in {p.code for p in problems(text, RECYCLES)}
+
+
+def test_resolve_refuses_a_scratch_set_to_relaunch():
+    with pytest.raises(catalog.ScratchRecycle) as caught:
+        resolve('[seat.s]\nscratch = true\n', RECYCLES, seat="s",
+                typed={"recycle_at_limit": "relaunch"})
+    assert caught.value.code == "scratch-recycle" and caught.value.exit_code == 3
+
+
+def test_resolve_refuses_a_scratch_whose_preset_sets_relaunch():
+    for text in ('[seat.s]\nscratch = true\nrecycle_at_limit = "relaunch"\n',
+                 '[defaults]\nscratch = true\n[seat.s]\nrecycle_at_limit = "relaunch"\n'):
+        with pytest.raises(catalog.ScratchRecycle):
+            resolve(text, RECYCLES, seat="s")
+
+
+@pytest.mark.parametrize("text, asked", [
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\nscratch = true\n',
+     {"seat": "s"}),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n', {"typed": {"scratch": True}}),
+    ('[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n', {})])
+def test_a_defaults_relaunch_holds_off_on_a_scratch_with_a_warning(text, asked):
+    got = resolve(text, RECYCLES, **asked)
+    assert got.scratch and got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
+    assert presets.SCRATCH_RECYCLE_OFF in got.warnings
+    assert "recycle_at_limit" not in got.chosen
+
+
+def test_a_defaults_relaunch_stays_outside_a_scratch(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    got = resolve('[defaults]\nrecycle_at_limit = "relaunch"\n',
+                  only("turns", "usage", "slots"), typed={"target": "slot"})
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert presets.SCRATCH_RECYCLE_OFF not in got.warnings
+
+
+# -- relaunch, a setting off by default, and its marks ---------------------------------------
+
+#: turns, usage and slots installed: a slot launch here can recycle itself.
+SLOTTED = only("turns", "usage", "slots")
+#: A launch in a slot.
+IN_SLOT = {"target": "slot"}
+#: A seat in a slot that relaunches itself, warned at a mark of its own.
+RELAUNCH_SEAT = '[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\nwarn_at = "2x"\n'
+
+
+@pytest.fixture
+def recyclable(monkeypatch):
+    """slots runs here and notes is not installed, so the launcher keeps the handoffs."""
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+
+
+@pytest.mark.parametrize("text, asked", [
+    ('[seat.s]\ntarget = "slot"\nwarn_at = "2x"\n', {"seat": "s"}),
+    ("", {"typed": IN_SLOT}),
+    ("", {"typed": {"target": "terminal"}}),
+])
+def test_recycle_at_limit_ships_off(recyclable, text, asked):
+    # Nothing shipped turns relaunch on, even on a launch that could recycle itself.
+    got = resolve(text, SLOTTED, **asked)
+    assert got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.SHIPPED
+    assert got.warnings == ()
+    # Not told: no crossing is stamped.
+    assert "MOXI_USAGE_CROSSING_AT" not in common.option_stamps(
+        {**got.values, "harness": got.harness})
+
+
+@pytest.mark.parametrize("text, asked, source", [
+    ("", {"typed": {"recycle_at_limit": "relaunch", **IN_SLOT}}, presets.TYPED),
+    (RELAUNCH_SEAT, {"seat": "s"}, presets.PRESET),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n', {"typed": IN_SLOT}, presets.DEFAULTS),
+])
+def test_a_relaunch_set_by_a_flag_a_preset_or_defaults_holds(recyclable, text, asked,
+                                                             source):
+    got = resolve(text, SLOTTED, **asked)
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert got.sources["recycle_at_limit"] == source
+    assert got.warnings == ()
+    # Told at its warn_at mark.
+    assert common.option_stamps({**got.values, "harness": got.harness})[
+        "MOXI_USAGE_CROSSING_AT"] == "2x"
+
+
+def no_notes_dir(monkeypatch):
+    from moxi_launcher import handoffs
+
+    def homeless(cwd, **kw):
+        raise handoffs.NoNotesDir(cwd)
+
+    monkeypatch.setattr(handoffs, "handoff_dir", homeless)
+
+
+#: The hint of `recycle_at_limit = compact`, and of `limit_at`.
+COMPACT_HINT = catalog.launcher()["recycle_at_limit"].retired_values["compact"]
+LIMIT_AT_HINT = catalog.launcher()["limit_at"].retired
+
+
+@pytest.mark.parametrize("text, asked, row", [
+    ("", {"typed": {"recycle_at_limit": "compact"}}, "recycle_at_limit"),
+    ('[seat.s]\nrecycle_at_limit = "compact"\n', {"seat": "s"}, "recycle_at_limit"),
+    ("", {"typed": {"limit_at": "1x"}}, "limit_at"),
+    ('[seat.s]\nlimit_at = "1x"\n', {"seat": "s"}, "limit_at"),
+])
+def test_a_retired_value_or_row_typed_or_in_a_preset_is_refused(recyclable, text, asked,
+                                                                 row):
+    with pytest.raises(catalog.Refused) as caught:
+        resolve(text, SLOTTED, **asked)
+    refused = caught.value
+    code = refused.found.code if isinstance(refused, presets.BadPreset) else refused.code
+    assert code == "retired" and refused.row == row
+    assert refused.hint == (COMPACT_HINT if row == "recycle_at_limit"
+                                 else LIMIT_AT_HINT)
+
+
+def test_a_defaults_compact_launches_holding_off_with_its_warning(recyclable):
+    from moxi_launcher import selfrecycle
+
+    got = resolve('[defaults]\nrecycle_at_limit = "compact"\n', SLOTTED, typed=IN_SLOT)
+    assert got.values["recycle_at_limit"] == "off"
+    assert got.sources["recycle_at_limit"] == presets.LEFT_OUT
+    assert got.warnings == (f"recycle_at_limit compact is left out: {COMPACT_HINT}",)
+    found = selfrecycle.missing(harness=got.harness, target=got.target, in_slot=True,
+                                cwd=got.cwd, values=got.values,
+                                source=got.sources["recycle_at_limit"])
+    assert found is not None and found.item == selfrecycle.OPTED_OUT
+    # A preset over it wins, and the stale [defaults] line is still named.
+    seat = resolve('[defaults]\nrecycle_at_limit = "compact"\n' + RELAUNCH_SEAT, SLOTTED,
+                   seat="s")
+    assert seat.values["recycle_at_limit"] == "relaunch"
+    assert seat.sources["recycle_at_limit"] == presets.PRESET
+    assert f"recycle_at_limit compact is left out: {COMPACT_HINT}" in seat.warnings
+
+
+def test_a_defaults_limit_at_is_left_out_with_its_warning_and_the_launch_goes_ahead(
+        recyclable):
+    got = resolve('[defaults]\nlimit_at = "1x"\n' + RELAUNCH_SEAT, SLOTTED, seat="s")
+    assert got.values["recycle_at_limit"] == "relaunch" and "limit_at" not in got.values
+    assert got.warnings == (f"limit_at is left out: {LIMIT_AT_HINT}",)
+    assert common.option_stamps({**got.values, "harness": got.harness})[
+        "MOXI_USAGE_CROSSING_AT"] == "2x"
+
+
+def test_a_launch_carries_the_config_files_left_out_warning(recyclable, monkeypatch):
+    from moxi_launcher import settings
+
+    from moxi.paths import Layout
+
+    path = Layout(settings.MODULE).config_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[recycle]\nlimit_wait_s = 600\n")
+    got = resolve("", SLOTTED, typed=IN_SLOT)
+    words = settings.schema().keys["recycle.limit_wait_s"].retired
+    assert got.warnings == (f"recycle.limit_wait_s is left out: {words}",)
+
+
+@pytest.mark.parametrize("text, asked, source", [
+    ("", {"typed": {"recycle_at_limit": "relaunch", "warn_at": "off", **IN_SLOT}},
+     presets.TYPED),
+    ('[seat.s]\ntarget = "slot"\n', {"seat": "s", "typed": {"recycle_at_limit": "relaunch"}},
+     presets.TYPED),
+    (RELAUNCH_SEAT.replace('"2x"', '"off"'), {"seat": "s"}, presets.PRESET),
+    ('[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n', {"seat": "s"},
+     presets.PRESET),
+    ('[defaults]\nwarn_at = "off"\n[seat.s]\ntarget = "slot"\n'
+     'recycle_at_limit = "relaunch"\n', {"seat": "s"}, presets.PRESET),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\nwarn_at = "off"\n', {"typed": IN_SLOT},
+     presets.DEFAULTS),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\ntarget = "slot"\n',
+     {"seat": "s"}, presets.DEFAULTS),
+])
+def test_a_relaunch_with_no_warn_at_mark_launches_armed_and_untold(recyclable, text, asked,
+                                                                    source):
+    # Typed, preset or [defaults], with warn_at off or a seat that sets none: no refusal
+    # and no warning. The self arm accepts it, and no crossing is stamped, so it is never
+    # told.
+    from moxi_launcher import selfrecycle
+
+    got = resolve(text, SLOTTED, **asked)
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert got.sources["recycle_at_limit"] == source
+    assert got.values["warn_at"] in ("off", "")
+    assert got.warnings == ()
+    found = selfrecycle.missing(harness=got.harness, target=got.target, in_slot=True,
+                                cwd=got.cwd, values=got.values, source=source)
+    assert found is None
+    assert "MOXI_USAGE_CROSSING_AT" not in common.option_stamps(
+        {**got.values, "harness": got.harness})
+
+
+def test_the_presets_check_flags_the_retired_values_and_rows(recyclable):
+    found = problems('[defaults]\nrecycle_at_limit = "compact"\nlimit_at = "1x"\n'
+                     '[seat.s]\nrecycle_at_limit = "compact"\n[seat.t]\nlimit_at = "2x"\n',
+                     SLOTTED)
+    assert [(p.where, p.key, p.code, p.level) for p in found] == [
+        ("defaults", "recycle_at_limit", "retired", presets.WARNING),
+        ("defaults", "limit_at", "retired", presets.WARNING),
+        ("seat.s", "recycle_at_limit", "retired", presets.ERROR),
+        ("seat.t", "limit_at", "retired", presets.ERROR)]
+    # A preset over a [defaults] compact meets no error from the rules between rows.
+    assert not errors('[defaults]\nrecycle_at_limit = "compact"\n' + RELAUNCH_SEAT,
+                      SLOTTED)
+    assert not errors('[defaults]\nrecycle_at_limit = "compact"\n[seat.u]\n'
+                      'target = "slot"\n', SLOTTED)
+
+
+def test_the_presets_check_passes_a_relaunch_with_no_warn_at(recyclable):
+    seat = '[seat.s]\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n'
+    assert not errors(seat, SLOTTED)
+    assert not errors(seat + 'warn_at = "off"\n', SLOTTED)
+    assert not errors('[defaults]\nrecycle_at_limit = "relaunch"\n[seat.s]\n'
+                      'target = "slot"\n', SLOTTED)
+
+
+@pytest.mark.parametrize("text, asked", [
+    ("", {"typed": {"recycle_at_limit": "relaunch", "harness": "codex", **IN_SLOT}}),
+    ('[seat.s]\nharness = "codex"\ntarget = "slot"\nrecycle_at_limit = "relaunch"\n',
+     {"seat": "s"}),
+    ('[defaults]\nrecycle_at_limit = "relaunch"\n',
+     {"typed": {"harness": "codex", **IN_SLOT}}),
+])
+def test_a_relaunch_set_for_a_launch_that_cannot_act_on_it_is_kept_with_a_warning(
+        recyclable, text, asked):
+    # Not refused, not stamped and not armed; the warning names what it fails. A Codex
+    # launch holds no warn_at, and is warned of its harness, not refused for its mark.
+    got = resolve(text, SLOTTED, **asked)
+    assert got.values["recycle_at_limit"] == "relaunch"
+    [said] = [w for w in got.warnings if w.startswith("recycle_at_limit relaunch does")]
+    assert said == ("recycle_at_limit relaunch does nothing on this launch: it is a codex "
+                    "launch, and only a Claude session can be exited and relaunched; launch "
+                    "the seat on Claude")
+
+
+def test_a_typed_relaunch_with_no_handoff_dir_is_warned_of(recyclable, monkeypatch):
+    no_notes_dir(monkeypatch)
+    got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
+    assert got.values["recycle_at_limit"] == "relaunch"
+    assert presets.RELAUNCH_NOT_APPLIED.format(
+        problem="has no notes directory (no notes_dir and none for /work), so it has no "
+                "handoffs/ to read from",
+        hint="launch it with notes_dir set, or in a folder notes keeps notes for",
+    ) in got.warnings
+
+
+def test_a_relaunch_that_can_act_says_nothing(recyclable):
+    got = resolve("", SLOTTED, typed={"recycle_at_limit": "relaunch", **IN_SLOT})
+    assert got.warnings == ()
+
+
+# -- what a launch with no preset meets from [defaults] -----------------------------------
+
+def _bare(text: str, available) -> list[tuple]:
+    return [(p.where, p.key, p.level, p.problem, p.hint) for p in problems(text, available)
+            if p.where == "defaults"]
+
+
+def test_check_warns_of_a_defaults_value_a_bare_launch_refuses(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    found = _bare('[defaults]\nrecycle_at_limit = "relaunch"\n',
+                  only("turns", "usage", "slots"))
+    assert found == [("defaults", "recycle_at_limit", presets.WARNING,
+                      "a launch with no preset is refused: relaunch at limit needs slots "
+                      "and a slot launch",
+                      "launch it in a slot (--target slot) where tmux slots run, or "
+                      "set recycle_at_limit off")]
+    # A seat that launches in a slot meets no refusal, so only the warning is said.
+    assert not errors('[defaults]\nrecycle_at_limit = "relaunch"\n'
+                      '[seat.s]\ntarget = "slot"\n', only("turns", "usage", "slots"))
+
+
+def test_check_warns_of_an_unplaced_item_a_bare_launch_fails(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    found = _bare('[defaults]\nrecycle_at_limit = "relaunch"\ntarget = "slot"\n',
+                  only("turns", "usage", "slots"))
+    assert found == [("defaults", "recycle_at_limit", presets.WARNING,
+                      "recycle_at_limit relaunch does nothing on a Codex launch with no "
+                      "preset: it is a codex launch, and only a Claude session can be "
+                      "exited and relaunched", "launch the seat on Claude")]
+
+
+def test_check_says_nothing_of_defaults_a_bare_launch_takes(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    for text in ('[defaults]\npermission_mode = "plan"\n',
+                 '[defaults]\nscratch = true\nrecycle_at_limit = "relaunch"\n'):
+        assert _bare(text, only("turns", "usage", "slots")) == []

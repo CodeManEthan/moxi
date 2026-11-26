@@ -103,6 +103,20 @@ step (an environment variable, a keychain entry), it names that step, and removi
 copy there is the cure. comms' uninstall frees every program's name and removes every
 `comms/send-only/` token too.
 
+A word a module declares for scoped senders has a token minted for that module when the
+word is read (the module's install, the daemon's start, `moxi doctor`), as
+`comms/scoped/<word>`; the daemon keeps only its hash. One token sends under the module's
+scoped sender for every parent, and only to that parent: the daemon refuses any other
+recipient before anything is posted. As for a module's name, no session is given it, a
+session's binding token never sends under a scoped sender, and the daemon refuses a send
+under one from any process inside a live session, or one whose ancestry it can't read. A
+process of your user that reads the token and leaves every session's process tree can
+still send under it, to a parent. When a send finds no token it can use, comms leaves a
+doctor record naming the process, until a send under the word works again or `moxi comms
+reserved renew --word WORD`, run from that environment, mints a new token. A word no
+module declares any more is freed and its token removed, and so are the tokens of a word
+two modules declare.
+
 comms' config file, `config.toml`, holds non-secret values only. comms refuses to load
 it when a key looks like a token.
 
@@ -118,9 +132,32 @@ indented. The rule a model is taught is that only the left margin is comms speak
 `moxi comms whois` cards are read the same way: a card is its holder's own claim, budgeted
 and rendered in the same envelope, and never a source of authority.
 
-A declared director's message is shown as a directive only when its attribution is
-verified. That calibrates how a model weighs a message. It doesn't stop a model from
+A director's message is shown as a directive only when its attribution is verified. The
+grant is the receiving side's: the session's launch (`--director`, a roster row's
+`directors`) and its machine's own comms config (`[policy] directors`), never a sender's
+claim. That calibrates how a model weighs a message. It doesn't stop a model from
 obeying a stranger or ignoring its director, and it isn't access control.
+
+**Policy directors and the provisioning guard.** `[policy] directors` (by default the
+plain name `fleet-lead`) directs every comms session on the box that doesn't opt out
+(`--no-policy-directors`, `takes_policy_directors = false`). comms lets any session bind
+any unheld name that isn't reserved or retired, and the daemon then stamps its messages
+verified, so a shipped name alone would let the first session that binds it direct every
+agent. A policy director's message is therefore a directive only when its author is at
+the standing tier: the name holds a standing row, which only provisioning writes
+(`moxi-comms-provision --standing fleet-lead`). Until then its messages are information,
+`moxi comms doctor` warns that the name isn't provisioned, and the launcher grants it no
+relaunch and sends it no notices. A launch-declared director keeps its own rule: verified,
+at any tier.
+
+The risk the guard leaves: a standing row holds no credential. Once a policy name is
+provisioned, any session that binds it while the real holder isn't running gets directive
+standing over every agent that didn't opt out, and the launcher lets it run a director's
+relaunch of any seat and sends it the failure notices, since the launcher proves the
+caller's name from its claim, not which session holds it. That is the exposure every
+`--director` name has, but box-wide. Closing it needs a credential on a chosen name, which
+comms doesn't have. Keep the list to names you provision and run, and empty it
+(`[policy] directors = []`) on a box that runs no fleet lead.
 
 ## The Codex adapter (experimental)
 
@@ -137,7 +174,11 @@ from the internet through the connector, behind its sign-in.
 
 - They send as their own name, `[connector] identity` (`claude-app` by default), never as
   you. Agents see that name's mail as information, not your directives, unless a launch
-  makes it a director. `check_messages` and `send_and_wait` read only mail sent to that
+  makes it a director, or `[policy] directors` names it: the connector provisions its
+  name as a standing identity when it starts, so as a policy director its mail is a
+  directive in every agent that didn't opt out. As a recipient it can't be directed: it
+  delivers into no agent turn, renders no standing, and its tools label every message as
+  information. `check_messages` and `send_and_wait` read only mail sent to that
   name, from its queue or the record, never mail to `operator`.
 - Message bodies, and the names you send to, cross Anthropic's servers and the tunnel
   provider's.

@@ -2,11 +2,11 @@
 Codex session with a comms identity, through turns' Codex host.
 
     moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
-                     [--model M] [--sandbox MODE | --permissions PROFILE]
+                     [--no-policy-directors] [--model M] [--sandbox MODE | --permissions PROFILE]
                      [--option KEY=VALUE]... [--options-file F]
                      [--resume THREAD_ID] [--no-window] [--dry-run]
     moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
-                     [settings flags] --headless [--exit WHEN]...
+                     [--no-policy-directors] [settings flags] --headless [--exit WHEN]...
                      (--brief TEXT | --brief-file F) [--dry-run]
 
     moxi-comms-codex IDENTITY [--config PATH] [--window] [--dry-run]
@@ -403,17 +403,21 @@ def _named_agent(args, cwd: str) -> codex_roster.CodexAgent:
         raise Refused("--scope and --global are one choice; name one")
     if args.scope is not None and not NAME_RE.match(args.scope):
         raise Refused(f"--scope {args.scope!r} is not a scope")
-    try:
-        load()                  # a bad config file fails here, before Codex starts
-        directors = directors_mod.declare(args.director)
-    except (ConfigError, directors_mod.BadDirector) as exc:
-        raise Refused(str(exc)) from None
     scope = args.scope or GLOBAL
     qualified = qualify(args.name, scope)
+    takes = not args.no_policy_directors
+    try:
+        cfg = load()            # a bad config file fails here, before Codex starts
+        # The box's policy directors join the launch's own here, once (`effective`).
+        directors, policy = directors_mod.effective(args.director, cfg, own=qualified,
+                                                    use_policy=takes)
+    except (ConfigError, directors_mod.BadDirector) as exc:
+        raise Refused(str(exc)) from None
     return codex_roster.CodexAgent(
         qualified=qualified, name=args.name, scope=scope, cwd=cwd,
         thread_file=codex_threads_dir() / f"{qualified}.json", sandbox=None,
-        directors=list(directors))
+        directors=list(directors), policy_directors=list(policy),
+        takes_policy_directors=takes)
 
 
 def headless_plan(args) -> tuple:
@@ -472,7 +476,9 @@ def plan(args, *, cwd: str | None = None, endpoint=None) -> Launch:
             raise Refused("--resume goes with --name: a roster launch starts a new thread")
         given = [flag for flag, value in (
             ("--scope", args.scope), ("--global", args.global_ or None),
-            ("--director", args.director or None), ("--model", args.model),
+            ("--director", args.director or None),
+            ("--no-policy-directors", args.no_policy_directors or None),
+            ("--model", args.model),
             ("--sandbox", args.sandbox), ("--permissions", args.permissions),
             ("--option", args.option or None), ("--options-file", args.options_file),
             ("--no-window", args.no_window or None)) if value is not None]
@@ -581,6 +587,10 @@ def build_parser(prog: str = PROG) -> argparse.ArgumentParser:
     ap.add_argument("--director", action="append", default=[],
                     help="declare a director for THIS session (repeatable): messages "
                          "from that identity, verified, render as directives")
+    ap.add_argument("--no-policy-directors", action="store_true",
+                    help="take none of the box's policy directors ([policy] directors in "
+                         "comms' config) for THIS session (with --name); --director still "
+                         "declares")
     host = ap.add_argument_group("settings", "turns' Codex host's own flags")
     host.add_argument("--model", help="the model the thread runs")
     choice = host.add_mutually_exclusive_group()
@@ -748,8 +758,11 @@ def start(launch: Launch, host, *, prog: str = PROG, ready_wait: float = READY_W
     info = roster if roster is not None else fetch_roster()
     # A launch carrying comms' tools gets layer one's tools form: the tools first, the
     # CLI last as the fallback, or not at all when the shell can't reach comms.
+    # The director sentence keys on the launch's own directors, not the policy ones.
+    declared = directors_mod.launch_declared(launch.agent.directors,
+                                             launch.agent.policy_directors)
     launch.write_instructions(layer_one_text(info, launch.comms_path or BARE_COMMS,
-                                             directors=launch.agent.directors,
+                                             directors=declared,
                                              form=layer_one_form(env)))
     argv = launch.host_argv(host)
     if life_r is not None:

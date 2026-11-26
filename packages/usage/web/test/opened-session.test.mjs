@@ -92,10 +92,10 @@ test("went to sums the classes dearest first, with a tier's part and the harness
                        { class: "cache_read", tier: "batch", tokens: 5, cost: 0.10 },
                        { class: "input", tier: null, tokens: 3, cost: 0.22 }] } });
   const parts = wentLine(terms);
-  assert.equal(words(parts), "cache writes $1.81 · output $0.85 · cache reads $0.79 · $0.10 at the batch price"
-    + " · fresh input $0.22 · harness $3.50");
+  assert.equal(words(parts), "cache create $1.81 · output $0.85 · cache reads $0.79 · $0.10 at the batch price"
+    + " · input $0.22 · harness $3.50");
   assert.deepEqual(parts.filter((part) => !part.dim).map((part) => part.text),
-                   ["cache writes $1.81", "output $0.85", "cache reads $0.79", "fresh input $0.22"]);
+                   ["cache create $1.81", "output $0.85", "cache reads $0.79", "input $0.22"]);
   assert.equal(wentLine(report([], {}, { total: { ...sums(), split: [], saving: null } })), null);
 });
 
@@ -109,6 +109,10 @@ test("the subagents line counts the agents but main and gives their share of the
 test("the session line gives harness, newest model and start, each absent when unknown", () => {
   assert.equal(words(sessionLine("claude", "m-opus", at("2026-11-08 12:45"), TODAY, UTC)), "claude · m-opus · started today 12:45");
   assert.equal(words(sessionLine("codex", null, null, TODAY, UTC)), "codex");
+  // The effort a running launch was launched with follows the model.
+  assert.equal(words(sessionLine("claude", "m-opus", at("2026-11-08 12:45"), TODAY, UTC, "high")),
+               "claude · m-opus · high · started today 12:45");
+  assert.equal(words(sessionLine("codex", null, null, TODAY, UTC, "low")), "codex · low");
   assert.equal(newestModel([request(1, null), request(2, null, { model: "m-b" }), request(3, null, { model: null })]), "m-b");
 });
 
@@ -164,8 +168,8 @@ test("the table has a row a request with tokens and cost by class, and a compact
   const table = requestsTable(report(rows, {}, { total: { ...sums(), ...requestsTotal({
     marks: [{ after: 1, ts: at("2026-11-08 12:50"), trigger: "auto", pre_tokens: 150_000 }] }) } }), TODAY, UTC);
   assert.deepEqual(table.columns.map((column) => column.label),
-                   ["#", "Time", "Turn", "Model", "Context", "Fresh input", "Cache read", "Cache write 5m",
-                    "Cache write 1h", "Output", "Cost"]);
+                   ["#", "Time", "Turn", "Model", "Context", "Input", "Cache read", "Cache write 5m",
+                    "Cache write 1h", "Output", "Est. cost"]);
   assert.deepEqual(table.rows.map((row) => row.key), ["r:1", "c:1", "r:2"]);
   assert.deepEqual(table.rows[0].cells, ["1", "today 12:45", "1", "m-opus", "1,000", "10 · <$0.01", "100", "20", "0",
                                          "5 · <$0.01", "$0.01"]);
@@ -237,4 +241,16 @@ test("an addressed session's row comes from the session answer over its whole li
   assert.deepEqual(row.context, { tokens: 10, window: 100 });
   assert.equal(placedRow(report([], {}, { ref: REF }), null), null);
   assert.equal(placedRow(report([agent("main", 1)], {}, { ref: null }), null), null);
+});
+
+test("the opened session's Session line carries the effort it is given, and none without one", () => {
+  const rows = [request(1, "2026-11-08 12:45")];
+  const requests = { value: report(rows, {}, { total: { ...sums({ requests: 1 }), ...requestsTotal() } }), loading: false };
+  const session = { value: report([agent("main", 1)], { cost: 1 }, { ref: REF }), loading: false };
+  const out = { value: null, loading: true };
+  const line = (effort) => words(openedSession({ harness: "claude", id: "s-1", requests, terms: out, session, restart: null,
+                                                 today: TODAY, effort }, UTC).items.find((item) => item.key === "session").parts);
+  assert.equal(line("high"), "claude · m-opus · high · started today 12:45");
+  assert.equal(line(null), "claude · m-opus · started today 12:45");
+  assert.equal(line(undefined), "claude · m-opus · started today 12:45");
 });

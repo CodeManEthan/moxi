@@ -20,6 +20,7 @@ from conftest import bare, end_endpoint, opener, write_config
 from moxi_turns import claude_leg as leg
 from moxi_turns import client, listeners, protocol
 from moxi_turns.claude_endpoint import ClaudeHarness
+from moxi_turns import endpoint as endpoint_mod
 from moxi_turns.endpoint import Endpoint
 from moxi_turns.listeners import Listener, Registry
 
@@ -75,6 +76,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     first = runner.first
     assert first["op"] == "hello" and first["leg"] == leg.LEG
     assert first["stop_wait_ms"] == 2000 and first["listen_wait_ms"] == 2000
+    assert first["prompt_wait_ms"] == 2000
     assert first["stop_after_clear"] is leg.STOP_AFTER_CLEAR
     assert first["mod_sock"] == str(ep.dir / protocol.MOD_SOCK)
     assert turns.sessions() == []                # no socket until the id comes
@@ -85,7 +87,7 @@ def test_the_first_line_and_no_hello_before_the_session_id(claude):
     assert s.capabilities == frozenset({"deliver", "only-if-idle", "steer", "stop-handler",
                                         "clear", "exit", "compact", "agents",
                                         "stop-shells", "guards", "after-tool", "usage",
-                                        "environ"})
+                                        "environ", "fork", "keep", "stale-agents"})
     assert s.info["mod_version"] == "0.1.0"
 
 
@@ -105,11 +107,38 @@ def test_an_idle_start_is_tied_at_the_resolve_and_its_events_wait(claude):
         d.wait_started(0.1)
     runner.close(d.id, leg.END_RESOLVE)
     assert bare(d.wait_started(2)) == turns.Started("T1")
-    runner.turn_complete("T1")
-    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer")
+    runner.turn_complete("T1", answer="hi back")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer", answer="hi back")
     got = drain(events)
     assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnEnded"]
     assert opener(got[0]) == d.id and opener(got[1]) == d.id
+
+
+def test_a_prompt_with_no_origin_in_an_admitted_window_is_that_windows_delivery(claude):
+    events = []
+
+    def answer(event):
+        events.append(event)
+
+    ep, runner = claude(registry=Registry((Listener("sample", frozenset({"prompt"}),
+                                                    "sample.module:answer", _fn=answer),)))
+    s = turns.find(session_id="s-1")
+    d = s.deliver("digest", by="comms", senders=["ann"])
+    line = runner.next_line()
+
+    def ask(text, origin, *, opens=True):
+        runner.post(leg.PATH_CONTEXT, {"event": "prompt", "session_id": "s-1",
+                                       "text": text, "origin": origin, "opens": opens})
+
+    ask("digest", None)                          # the window is not admitted yet
+    assert runner.enter(line["nonce"], draft=False, agents=0)["verdict"] == "pass"
+    ask("digest", None)
+    ask("typed meanwhile", "composer")
+    runner.turn_start("T1")
+    ask("joined", "composer", opens=False)
+    assert [(e.text, e.delivery_by, e.delivery_senders, e.opens) for e in events] == [
+        ("digest", None, None, True), ("digest", "comms", ("ann",), True),
+        ("typed meanwhile", None, None, True), ("joined", None, None, False)]
 
 
 def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claude):
@@ -125,6 +154,17 @@ def test_a_turn_that_ends_before_the_close_raises_both_events_at_the_close(claud
     assert bare(d.wait_ended(2)) == turns.Ended("T1", "aborted")
     assert [(type(e).__name__, opener(e)) for e in drain(events)] == [
         ("TurnStarted", d.id), ("TurnEnded", d.id)]
+
+
+def test_a_turn_with_no_final_text_ends_its_delivery_with_no_answer(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("quiet")
+    runner.next_line()
+    runner.turn_start("T1")
+    runner.turn_complete("T1", answer="")
+    runner.close(d.id, leg.END_RESOLVE)
+    assert d.wait_ended(2).answer is None
 
 
 def test_a_person_turn_in_the_window_is_released_by_the_later_turn_start(claude):
@@ -318,6 +358,89 @@ def test_agents_maps_the_runners_list(claude):
     assert a.busy() == 3
 
 
+def _stale_transcripts(runner, root, *agent_ids):
+    """A record under `root`, named at a ready, with a transcript two hours silent for each
+    of `agent_ids`, its last record an `end_turn`."""
+    import json
+    from datetime import datetime, timezone
+    record = root / "s-1.jsonl"
+    record.write_text("")
+    sub_dir = root / "s-1" / "subagents"
+    sub_dir.mkdir(parents=True)
+    old = time.time() - 2 * 3600
+    for agent_id in agent_ids:
+        path = sub_dir / f"agent-{agent_id}.jsonl"
+        path.write_text(json.dumps({
+            "type": "assistant",
+            "timestamp": datetime.fromtimestamp(old, timezone.utc).isoformat(),
+            "message": {"stop_reason": "end_turn", "content": []}}) + "\n")
+        os.utime(path, (old, old))
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                   "session_id": "s-1", "transcript_path": str(record)})
+    return old
+
+
+def test_agents_judges_the_waiting_subagents_beside_the_ready_transcript(claude, tmp_path):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.agent_list = [
+        {"id": "old", "type": "general-purpose", "description": "d", "status": "waiting"},
+        {"id": "fork", "type": "fork", "description": "subconscious", "status": "waiting"},
+        {"id": "new", "type": "general-purpose", "description": "d", "status": "running"}]
+    a = s.agents()                               # no transcript path yet: none judged
+    assert [e.state for e in a.entries] == ["waiting", "waiting", "running"]
+    old = _stale_transcripts(runner, tmp_path, "old", "fork")
+    a = s.agents()
+    assert [(e.id, e.state, e.is_fork) for e in a.entries] == [
+        ("old", "idle", False), ("fork", "waiting", True), ("new", "running", False)]
+    assert abs(a.entries[0].last_write_at - old) < 1 and a.entries[1].last_write_at is None
+    assert a.busy() == 2
+
+
+def test_live_and_the_gate_count_the_judged_entries_and_an_integer_unjudged(
+        claude, tmp_path, monkeypatch):
+    monkeypatch.setenv("MOXI_TURNS_COMMANDS", "clear")
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    _stale_transcripts(runner, tmp_path, "old")
+    stale = {"id": "old", "type": "general-purpose", "status": "waiting"}
+    unseen = {"id": "unseen", "type": "general-purpose", "status": "waiting"}
+    runner.agents = [stale, {"id": "done", "type": "x", "status": "completed"}]
+    assert s.facts().agents == 0
+    runner.agents = [stale, unseen]              # no transcript: Claude's status holds
+    assert s.facts().agents == 1
+    runner.agents = 1                            # an older runner's own count
+    assert s.facts().agents == 1
+    for agents, verdict in (([stale], "pass"), ([unseen], "drop"), (0, "pass"), (2, "drop")):
+        d = s.deliver("x", only_if_idle=True, refuse_agents=True)
+        line = runner.next_line()
+        answer = runner.enter(line["nonce"], agents=agents)
+        assert answer["verdict"] == verdict, agents
+        if verdict == "pass":
+            runner.close(d.id, leg.END_RESOLVE)
+            runner.turn_start(f"T-{d.id}")
+            runner.turn_complete(f"T-{d.id}")
+        else:
+            assert answer["reason"] == "busy-agents"
+            runner.close(d.id, leg.END_DROP, answer["text"])
+        d.wait_started(2)
+    runner.agents = [stale]                      # the command's own check, before the gate
+    monkeypatch.setattr(endpoint_mod, "COMMAND_RATE_S", 0.0)
+    for agents, verdict in ((1, "drop"), ([stale], "pass")):
+        out: queue.Queue = queue.Queue()
+        threading.Thread(target=_command, args=(s, "clear", out), daemon=True).start()
+        line = runner.next_line()
+        answer = runner.post(leg.PATH_GATE_COMMAND, {"request": line["request"],
+                                                     "agents": agents, "draft": False})
+        assert answer["verdict"] == verdict, agents
+        if verdict == "pass":
+            runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
+                                           "session_id": "s-1"})
+            assert out.get(timeout=3) == turns.Ran("s-1")
+        else:
+            assert out.get(timeout=3) == turns.Refused("busy-agents")
+
+
 def test_an_unread_or_late_agent_list_is_not_complete(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
@@ -390,6 +513,65 @@ def test_context_asks_reach_the_listeners_and_a_clear_follows_the_id(claude):
         ("Ready", "startup"), ("Ready", "clear")]
 
 
+#: The `load` and `ready` rows' calls: (event, session id, harness, env, cwd).
+SEEN: queue.Queue = queue.Queue()
+
+
+def _seen(event):
+    SEEN.put((event.event, event.session_id, event.harness, event.env, event.cwd))
+
+
+def _seen_calls(count, timeout=2.0):
+    """The first `count` calls, then any more that come within a short wait."""
+    out = [SEEN.get(timeout=timeout) for _ in range(count)]
+    return out + drain(SEEN, timeout=0.3)
+
+
+@pytest.fixture
+def seen():
+    drain(SEEN, timeout=0)
+    yield SEEN
+    drain(SEEN, timeout=0)
+
+
+def test_load_is_raised_once_at_the_first_session_line_with_the_id(claude, seen):
+    registry = Registry((Listener("launcher", frozenset({"load"}), f"{__name__}:_seen"),))
+    ep, runner = claude(registry=registry)
+    [(event, session_id, harness, env, cwd)] = _seen_calls(1)
+    assert (event, session_id, harness, cwd) == ("load", "s-1", "claude", ep.harness.cwd)
+    assert env == ep.env
+    # The runner sends its line again on a reload; a later id comes with a ready.
+    runner.session("s-1")
+    runner.session("s-2")
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear",
+                                   "session_id": "s-3"})
+    assert drain(seen) == []
+
+
+def test_a_session_line_with_no_id_raises_no_load_and_the_ready_raises_it_first(
+        claude, seen, monkeypatch):
+    registry = Registry((Listener("launcher", frozenset({"load", "ready"}),
+                                  f"{__name__}:_seen"),))
+    raised = []
+    launch = listeners._launch
+
+    def record(chosen, event, after=None):
+        raised.append(event.event)
+        return launch(chosen, event, after)
+
+    monkeypatch.setattr(listeners, "_launch", record)
+    ep, runner = claude(registry=registry, session=None)
+    runner.report(leg.R_SESSION, session_id=None, mod_version="0.1.0")
+    assert drain(seen) == [] and raised == []
+    runner.post(leg.PATH_CONTEXT, {"event": "ready", "source": "startup",
+                                   "session_id": "s-1"})
+    assert raised == ["load", "ready"]
+    calls = _seen_calls(2)
+    assert sorted((c[0], c[1]) for c in calls) == [("load", "s-1"), ("ready", "s-1")]
+    runner.session("s-1")
+    assert drain(seen) == [] and raised == ["load", "ready"]
+
+
 def _command(s, name, out):
     out.put(s.command(name, timeout_s=5))
 
@@ -448,6 +630,115 @@ def test_exit_reads_ran_only_once_the_harness_process_is_gone(claude, monkeypatc
         harness_proc.wait()
 
 
+def test_a_fork_goes_on_a_line_and_its_reports_start_and_end_it(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall what we said", by="memory", ref="r-1")
+    assert runner.next_line() == {"op": "fork", "delivery": d.id,
+                                  "text": "recall what we said"}
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    started = d.wait_started(2)
+    assert isinstance(started, turns.Started) and started.agent_id == "agent-7"
+    assert started.turn_id is None
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="two points", reason="answer",
+                  is_aborted=False)
+    ended = d.wait_ended(2)
+    assert isinstance(ended, turns.Ended)
+    assert (ended.turn_id, ended.outcome, ended.answer) == (None, "answer", "two points")
+
+
+def test_a_further_round_goes_on_a_fork_continue_line_naming_the_agent(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="one", reason="answer",
+                  is_aborted=False)
+    d.wait_ended(2)
+    r = s.fork_continue(d.id, "go on")
+    assert runner.next_line() == {"op": "fork.continue", "delivery": r.id,
+                                  "agent_id": "agent-7", "text": "go on"}
+    runner.report(leg.R_FORK_STARTED, delivery=r.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=r.id, answer="two", reason="answer",
+                  is_aborted=False)
+    assert r.wait_ended(2).answer == "two"
+
+
+def test_the_askers_round_bound_rides_on_the_fork_and_fork_continue_lines(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory", round_timeout_s=1800)
+    assert runner.next_line() == {"op": "fork", "delivery": d.id, "text": "recall",
+                                  "round_timeout_ms": 1_800_000}
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="one", reason="answer",
+                  is_aborted=False)
+    d.wait_ended(2)
+    r = s.fork_continue(d.id, "go on", round_timeout_s=2.5)
+    assert runner.next_line() == {"op": "fork.continue", "delivery": r.id,
+                                  "agent_id": "agent-7", "text": "go on",
+                                  "round_timeout_ms": 2500}
+
+
+def test_a_fork_round_that_ended_in_an_error_or_with_no_text_reads_so(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_STARTED, delivery=d.id, agent_id="agent-7")
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="", reason="error",
+                  is_aborted=False)
+    ended = d.wait_ended(2)
+    assert (ended.outcome, ended.answer) == ("error", None)
+
+
+@pytest.mark.parametrize("reason, read", [
+    ("denied: too many agents", "denied: too many agents"),
+    ("gone: the warm-up did not complete within 30 s",
+     "gone: the warm-up did not complete within 30 s"),
+    ("something else", "gone: something else"),
+])
+def test_a_lost_fork_reads_lost_denied_or_gone(claude, reason, read):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_LOST, delivery=d.id, reason=reason)
+    assert bare(d.wait_started(2)) == turns.Lost(read)
+    assert bare(d.wait_ended(2)) == turns.Lost(read)
+
+
+def test_a_fork_report_for_no_open_fork_changes_nothing(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    other = s.deliver("hello")
+    runner.next_line()
+    # A fork report naming a delivery that is no fork is logged and changes nothing.
+    runner.report(leg.R_FORK_LOST, delivery=other.id, reason="gone: no")
+    runner.report(leg.R_FORK_DONE, delivery="nobody", answer="x", reason="answer")
+    with pytest.raises(TimeoutError):
+        other.wait_started(0.2)
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    runner.report(leg.R_FORK_DONE, delivery=d.id, answer="first", reason="answer",
+                  is_aborted=False)
+    assert d.wait_ended(2).answer == "first"
+    # A second end for a settled fork changes nothing.
+    runner.report(leg.R_FORK_LOST, delivery=d.id, reason="gone: late")
+    assert d.wait_ended(2).answer == "first"
+
+
+def test_a_fork_started_with_no_agent_id_is_a_bad_report(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.fork("recall", by="memory")
+    runner.next_line()
+    status, body = post(runner.mod_sock, leg.PATH_REPORT,
+                        {"seq": 99, "kind": leg.R_FORK_STARTED, "delivery": d.id})
+    assert status == 400 and "agent_id" in body["error"]
+
+
 def test_steer_appends_and_a_failed_append_refuses_idle(claude):
     ep, runner = claude()
     s = turns.find(session_id="s-1")
@@ -462,6 +753,253 @@ def test_steer_appends_and_a_failed_append_refuses_idle(claude):
     assert runner.next_line()["delivery"] == d.id
     runner.report(leg.R_APPEND_FAILED, delivery=d.id, reason="no turn running")
     assert bare(d.wait_ended(1)) == turns.Refused("idle")
+
+
+def _ids(event):
+    return [(r.id, r.how) for r in event.deliveries]
+
+
+def test_a_steer_held_at_its_turns_end_opens_a_turn_of_its_own(claude):
+    from moxi_turns.claude_endpoint import HELD_PROMPT
+
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    events = watcher(s)
+    runner.turn_start("T1")
+    d = s.steer("the word is KIWI", ref="r-1", by="comms", senders=["ann"])
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    assert bare(d.wait_started(1)) == turns.Started("T1")
+    # The runner reads the note unsent: held, ahead of the turn's end.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    line = runner.next_line()
+    # The held note comes with the next request, so the prompt does not repeat it.
+    assert line == {"op": "submit", "delivery": d.id, "kind": "deliver",
+                    "text": HELD_PROMPT, "nonce": line["nonce"], "note": "the word is KIWI"}
+    with pytest.raises(TimeoutError):
+        d.wait_ended(0.1)                        # the first turn's end does not settle it
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.turn_start("T2")
+    runner.close(d.id, leg.END_RESOLVE)
+    runner.turn_complete("T2", answer="KIWI")
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer", answer="KIWI")
+    assert d.wait_ended(0).ref == "r-1"
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnSteered", "TurnEnded",
+                                               "TurnStarted", "TurnEnded"]
+    assert _ids(got[2]) == []                    # T1 ends without naming the held steer
+    assert _ids(got[3]) == [(d.id, "opened")] and got[3].turn_id == "T2"
+    assert _ids(got[4]) == [(d.id, "opened")]
+
+
+def _held_turn(runner, d, text, turn_id):
+    """`d`, the held steer of `text`, opens `turn_id`."""
+    line = runner.next_line()
+    assert line["delivery"] == d.id and line["note"] == text
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.turn_start(turn_id)
+    runner.close(d.id, leg.END_RESOLVE)
+    assert bare(d.wait_started(2)) == turns.Started(turn_id)
+
+
+def test_a_held_steer_its_own_turn_missed_opens_one_more_turn_once(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    events = watcher(s)
+    runner.turn_start("T1")
+    d = s.steer("the word is PLUM")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    _held_turn(runner, d, "the word is PLUM", "T2")
+    # A compaction inside T2's first request dropped the note: held again, ahead of T2's end.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T2", answer="which note?")
+    with pytest.raises(TimeoutError):
+        d.wait_ended(0.1)                        # T2's end does not settle it
+    _held_turn(runner, d, "the word is PLUM", "T3")
+    # Missed again: nothing more opens, and the steer ends with T3.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T3", answer="PLUM")
+    assert bare(d.wait_ended(2)) == turns.Ended("T3", "answer", answer="PLUM")
+    assert runner.no_line()
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [(type(e).__name__, e.turn_id) for e in got] == [
+        ("TurnStarted", "T1"), ("TurnSteered", "T1"), ("TurnEnded", "T1"),
+        ("TurnStarted", "T2"), ("TurnEnded", "T2"), ("TurnStarted", "T3"),
+        ("TurnEnded", "T3")]
+    assert _ids(got[3]) == [(d.id, "opened")] and got[3].turn_id == "T2"
+    assert _ids(got[4]) == []                    # T2 ends without naming the steer
+    assert _ids(got[5]) == _ids(got[6]) == _ids(got[3])     # T3 opens and ends with it
+
+
+def test_a_held_steer_its_own_turn_carried_ends_with_that_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("the word is KIWI")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    _held_turn(runner, d, "the word is KIWI", "T2")
+    runner.turn_complete("T2", answer="KIWI")    # no word from the runner: carried
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer", answer="KIWI")
+    assert runner.no_line()
+
+
+def test_the_prompt_listeners_read_a_held_steers_text_as_its_turns_prompt(claude):
+    from moxi_turns.claude_endpoint import HELD_PROMPT
+
+    events = []
+    ep, runner = claude(registry=Registry((Listener("sample", frozenset({"prompt"}),
+                                                    "sample.module:answer",
+                                                    _fn=events.append),)))
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("the word is KIWI", by="comms", senders=["ann"])
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="the essay")
+    line = runner.next_line()
+    assert line["text"] == HELD_PROMPT           # the model reads the held note once
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.post(leg.PATH_CONTEXT, {"event": "prompt", "session_id": "s-1",
+                                   "text": HELD_PROMPT, "origin": None, "opens": True})
+    assert [(e.text, e.delivery_by, e.delivery_senders, e.opens) for e in events] == [
+        ("the word is KIWI", "comms", ("ann",), True)]
+
+
+def test_a_steer_a_request_carried_starts_no_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("the word is FIG")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.turn_complete("T1", answer="FIG")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer", answer="FIG")
+    assert runner.no_line()
+    assert not s.facts().turn_open
+
+
+def test_a_steer_held_in_place_of_done_opens_a_turn_once_the_turn_ended(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("late note")
+    runner.next_line()
+    runner.turn_complete("T1", answer="done")
+    # The append resolved after the turn's end: held, with no append.done before it.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    line = runner.next_line()
+    assert line["op"] == "submit" and line["delivery"] == d.id
+    assert runner.enter(line["nonce"])["verdict"] == "pass"
+    runner.turn_start("T2")
+    runner.close(d.id, leg.END_RESOLVE)
+    assert bare(d.wait_started(2)) == turns.Started("T2")
+
+
+def test_a_held_steer_goes_ahead_of_a_delivery_queued_behind_its_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    queued = s.deliver("plain mail")
+    d = s.steer("held note")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="x")
+    assert runner.next_line()["delivery"] == d.id
+    assert runner.no_line()                      # one window at a time
+    with pytest.raises(TimeoutError):
+        queued.wait_started(0.1)
+
+
+def test_a_late_held_steer_that_a_queued_delivery_carried_ends_with_that_turn(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    events = watcher(s)
+    runner.turn_start("T1")
+    queued = s.deliver("plain mail")
+    d = s.steer("late note", ref="r-1")
+    runner.next_line()
+    runner.turn_complete("T1", answer="x")
+    mail = runner.next_line()                    # the queued delivery goes first
+    assert mail["delivery"] == queued.id and "note" not in mail
+    # The append resolved after T1's end, once the delivery was already on its way.
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    assert runner.no_line()                      # one window at a time
+    assert runner.enter(mail["nonce"])["verdict"] == "pass"
+    runner.turn_start("T2")
+    runner.close(queued.id, leg.END_RESOLVE)
+    runner.turn_complete("T2", answer="mail and note answered")
+    line = runner.next_line()
+    assert line["delivery"] == d.id and line["note"] == "late note"
+    # The delivery's request carried the note: the runner submits nothing.
+    runner.close(d.id, leg.END_CARRIED)
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer",
+                                                answer="mail and note answered")
+    assert runner.no_line()
+    assert not s.facts().turn_open
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnEnded", "TurnStarted",
+                                               "TurnEnded"]
+
+
+def test_a_held_steer_that_the_open_turn_carries_joins_it_as_a_steer(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    events = watcher(s)
+    runner.turn_start("T1")
+    d = s.steer("held note")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.turn_complete("T1", answer="x")
+    line = runner.next_line()
+    assert line["delivery"] == d.id
+    # The person's prompt started a turn before the runner read the line.
+    runner.turn_start("T2")
+    runner.close(d.id, leg.END_CARRIED)
+    assert bare(d.wait_started(2)) == turns.Started("T2")
+    with pytest.raises(TimeoutError):
+        d.wait_ended(0.1)
+    runner.turn_complete("T2", answer="noted")
+    assert bare(d.wait_ended(2)) == turns.Ended("T2", "answer", answer="noted")
+    got = [e for e in drain(events) if type(e).__name__ != "Ready"]
+    assert [type(e).__name__ for e in got] == ["TurnStarted", "TurnSteered", "TurnEnded",
+                                               "TurnStarted", "TurnSteered", "TurnEnded"]
+    assert got[3].turn_id == "T2" and _ids(got[3]) == []   # the person's turn
+    assert _ids(got[5]) == [(d.id, "steered")]
+
+
+def test_a_carried_close_for_a_delivery_that_is_no_held_steer_reads_lost(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    d = s.deliver("plain")
+    runner.next_line()
+    runner.close(d.id, leg.END_CARRIED)
+    got = bare(d.wait_ended(2))
+    assert isinstance(got, turns.Lost) and got.reason.startswith("untied")
+
+
+def test_a_held_report_for_a_settled_steer_or_a_delivery_changes_nothing(claude):
+    ep, runner = claude()
+    s = turns.find(session_id="s-1")
+    runner.turn_start("T1")
+    d = s.steer("carried")
+    runner.next_line()
+    runner.report(leg.R_APPEND_DONE, delivery=d.id)
+    runner.turn_complete("T1", answer="x")
+    assert bare(d.wait_ended(2)) == turns.Ended("T1", "answer", answer="x")
+    runner.report(leg.R_APPEND_HELD, delivery=d.id)
+    runner.report(leg.R_APPEND_HELD, delivery="nobody")
+    assert runner.no_line()
+    assert bare(d.wait_ended(0)) == turns.Ended("T1", "answer", answer="x")
 
 
 def test_the_endpoint_end_releases_a_held_turn_then_answers_lost(claude):

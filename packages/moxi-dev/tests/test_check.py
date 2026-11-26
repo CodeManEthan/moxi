@@ -7,6 +7,8 @@ real thing once.
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import json
 import os
 import re
@@ -15,12 +17,15 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 from pathlib import Path
 
 import pytest
+from moxi import proc
 
-from moxi_dev import check, testing
+from moxi_dev import check, temp, testing
+from moxi_dev.testing import wait_for
 from test_release import METADATA, release_files
 
 REPO = Path(__file__).resolve().parents[3]
@@ -137,9 +142,11 @@ class Runs:
     def __init__(self, codes=None):
         self.calls = []
         self.codes = codes or {}
+        self.bounds = []                # (cwd's name, timeout_s) of each call
 
-    def __call__(self, cmd, cwd, env):
+    def __call__(self, cmd, cwd, env, /, *, timeout_s=None):
         self.calls.append((list(cmd), Path(cwd), dict(env)))
+        self.bounds.append((Path(cwd).name, timeout_s))
         for key, code in self.codes.items():
             if key(list(cmd), Path(cwd)):
                 return code
@@ -166,11 +173,138 @@ def test_a_turns_change_reaches_comms_but_not_cache(repo):
     assert picked(repo) == ["turns", "comms"]
 
 
-@pytest.mark.parametrize("path", ["uv.lock", "README.md", ".github/workflows/ci.yml",
-                                  "packages/NOTES", "packages/gone/x.py"])
+@pytest.mark.parametrize("path", ["uv.lock", "tools/x.py", "LICENSE", "packages/NOTES",
+                                  "packages/gone/x.py"])
 def test_a_path_outside_a_package_picks_every_package(repo, path):
     commit_file(repo, path)
     assert picked(repo) == list(LAYOUT)
+
+
+def test_the_root_pyproject_picks_every_package(repo):
+    commit_file(repo, "pyproject.toml", (repo / "pyproject.toml").read_text() + "# x\n")
+    assert picked(repo) == list(LAYOUT)
+
+
+@pytest.mark.parametrize("path", ["README.md", "CONTRIBUTING.md",
+                                  ".github/workflows/lint.yml", "docs/queue.md"])
+def test_the_workflows_and_the_root_docs_pick_nothing(repo, path):
+    commit_file(repo, path)
+    assert picked(repo) == []
+    commit_file(repo, "packages/turns/x.py")
+    assert picked(repo) == ["turns", "comms"]
+
+
+def test_a_check_change_picks_every_package(repo):
+    commit_file(repo, "packages/moxi-dev/src/moxi_dev/x.py")
+    assert picked(repo) == list(LAYOUT)
+
+
+def test_pick_prints_the_picked_packages_as_one_json_line_and_runs_nothing(
+        repo, monkeypatch, capsys):
+    commit_file(repo, "packages/sessions/src/moxi_sessions/x.py")
+    base = git(repo, "rev-parse", "main").strip()
+    git(repo, "branch", "-f", "main", "HEAD")   # --base, not main, gives the changes
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo / "packages" / "turns")
+    assert check.main(["--pick", "--base", base]) == 0
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    assert json.loads(out) == {"packages": ["sessions", "cache", "comms"]}
+    assert runs.calls == []
+    assert check.main(["--pick"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"packages": []}
+
+
+def test_pick_with_no_merge_base_exits_2_printing_nothing(repo, monkeypatch, capsys):
+    monkeypatch.chdir(repo)
+    assert check.main(["--pick", "--base", "no-such-rev"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and "no merge base of no-such-rev" in err
+
+
+@pytest.mark.parametrize("args", [["--full"], ["--finding", "L1"], ["--static"],
+                                  ["--only", "refs"]])
+def test_pick_takes_no_other_mode(repo, monkeypatch, args):
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as stop:
+        check.main(["--pick", *args])
+    assert stop.value.code == 2
+
+
+# The real workspace's dev groups: every package lists moxi-dev, which requires moxi and
+# publishing; connector's dev group takes ui, whose pages its browser tests drive.
+DEV_LAYOUT = {
+    "moxi": ("moxi", [], {}, {"dev": ["pytest", "moxi-dev"]}),
+    "publishing": ("moxi-publishing", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "turns": ("moxi-turns", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "comms": ("moxi-comms", ["moxi-turns>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "sessions": ("moxi-sessions", ["moxi>=0.1,<0.2"], {}, {"dev": ["moxi-dev"]}),
+    "ui": ("moxi-ui", ["moxi>=0.1,<0.2"], {"testing": ["pytest"]}, {"dev": ["moxi-dev"]}),
+    "connector": ("moxi-connector", ["moxi>=0.1,<0.2"], {},
+                  {"dev": ["moxi-dev", "moxi-ui[testing]"]}),
+    "moxi-dev": ("moxi-dev", ["moxi", "moxi-publishing", "pytest"], {}, {}),
+}
+
+
+@pytest.fixture
+def dev_repo(tmp_path):
+    root = tmp_path / "d"
+    root.mkdir()
+    git(root, "init", "-q", "-b", "main")
+    write_workspace(root, DEV_LAYOUT)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "start")
+    git(root, "switch", "-q", "-c", "work")
+    return root
+
+
+def test_picking_ignores_the_edges_to_the_check(dev_repo):
+    commit_file(dev_repo, "packages/turns/src/moxi_turns/x.py")
+    assert picked(dev_repo) == ["turns", "comms"]
+
+
+def test_a_change_the_check_requires_picks_the_check_not_everything(dev_repo):
+    commit_file(dev_repo, "packages/publishing/x.py")
+    assert picked(dev_repo) == ["publishing", "moxi-dev"]
+
+
+def test_another_dev_group_edge_still_picks(dev_repo):
+    commit_file(dev_repo, "packages/ui/x.py")
+    assert picked(dev_repo) == ["ui", "connector"]
+
+
+def test_with_every_dev_group_naming_the_check_its_change_picks_every_package(dev_repo):
+    commit_file(dev_repo, "packages/moxi-dev/x.py")
+    assert picked(dev_repo) == list(DEV_LAYOUT)
+    git(dev_repo, "reset", "-q", "--hard", "main")
+    commit_file(dev_repo, "packages/moxi/x.py")
+    assert picked(dev_repo) == list(DEV_LAYOUT)
+
+
+@pytest.mark.parametrize("path", [".github/workflows/publishing.yml",
+                                  ".github/workflows/release.yml"])
+def test_a_workflow_publishings_tests_read_picks_publishing(dev_repo, path):
+    commit_file(dev_repo, path)
+    assert picked(dev_repo) == ["publishing", "moxi-dev"]
+
+
+@pytest.mark.parametrize("path", [".github/workflows/ci.yml",
+                                  ".github/workflows/queue.yml"])
+def test_a_workflow_the_checks_tests_read_picks_the_check_alone(dev_repo, path):
+    commit_file(dev_repo, path)
+    assert picked(dev_repo) == ["moxi-dev"]
+
+
+def test_another_github_path_picks_nothing(dev_repo):
+    commit_file(dev_repo, ".github/workflows/other.yml")
+    commit_file(dev_repo, ".github/dependabot.yml")
+    assert picked(dev_repo) == []
+
+
+def test_the_rename_table_picks_the_check_alone(dev_repo):
+    commit_file(dev_repo, "packages/moxi-dev/renames.tsv", "a\tb\n")
+    assert picked(dev_repo) == ["moxi-dev"]
 
 
 def test_no_change_picks_nothing(repo):
@@ -183,8 +317,8 @@ def test_working_tree_changes_count_staged_unstaged_and_untracked(repo):
     assert picked(repo) == ["cache", "comms"]
     (repo / "packages/turns/tests/test_it.py").write_text("# edited\n")   # unstaged
     assert picked(repo) == ["turns", "cache", "comms"]
-    (repo / "packages/moxi-dev/new.py").write_text("untracked\n")        # untracked
-    assert picked(repo) == ["turns", "cache", "comms", "moxi-dev"]
+    (repo / "packages/sessions/new.py").write_text("untracked\n")        # untracked
+    assert picked(repo) == ["sessions", "turns", "cache", "comms"]
 
 
 def test_ignored_files_do_not_count(repo):
@@ -255,12 +389,24 @@ def test_the_real_workspace_picks_by_the_same_rule():
         return [p.dir for p in check.pick(packages, [path])]
 
     assert {"moxi", "sessions", "turns", "cache", "comms", "moxi-dev"} <= set(dirs)
+    # A root path a package's tests read picks that package; the rest of .github none.
+    assert "memory" in of("README.md") and "publishing" not in of("README.md")
+    assert "publishing" in of(".github/workflows/release.yml")
+    assert of(".github/workflows/ci.yml") == of(".github/workflows/queue.yml") == [
+        "moxi-dev"]
+    assert of(".github/workflows/other.yml") == []
     # cache depends on sessions, comms on cache through an extra, the launcher on comms,
     # and usage and memory on sessions directly.
     assert set(of("packages/sessions/src/moxi_sessions/__init__.py")) == {
-        "sessions", "cache", "comms", "launcher", "usage", "memory"}
+        "sessions", "cache", "comms", "launcher", "usage", "memory", "rounds"}
     assert of("packages/moxi/src/moxi/__init__.py") == dirs
+    assert of("packages/moxi-dev/src/moxi_dev/check.py") == dirs
     assert of("uv.lock") == dirs
+    # Every package lists moxi-dev in its dev group, so only the edges to it would have
+    # carried these to every package.
+    assert len(of("packages/turns/src/moxi_turns/__init__.py")) < len(dirs)
+    assert len(of("packages/publishing/src/moxi_publishing/__init__.py")) < len(dirs)
+    assert "connector" in of("packages/ui/src/moxi_ui/__init__.py")
 
 
 # --- the steps -------------------------------------------------------------------------
@@ -395,6 +541,251 @@ def test_the_suites_drop_what_could_make_them_serial(repo):
         assert env["PYTEST_DEBUG_TEMPROOT"] == "/var/tmp"
 
 
+def test_each_suite_and_nothing_else_runs_under_the_default_bound(repo):
+    runs = Runs()
+    run_check(repo, runs, full=True)
+    assert [(name, bound) for name, bound in runs.bounds if bound is not None] == [
+        (name, check.SUITE_BOUND_S) for name in LAYOUT]
+    assert [cmd for (cmd, _, _), (_, bound) in zip(runs.calls, runs.bounds)
+            if bound is None] == [cmd for cmd, _, _ in runs.calls if "pytest" not in cmd]
+    assert check.SUITE_BOUND_S <= 900
+
+
+def test_the_variable_sets_the_bound(repo):
+    runs = Runs()
+    run_check(repo, runs, full=True, env={"PATH": "/usr/bin",
+                                          "MOXI_TEST_SUITE_BOUND_S": "1200"})
+    assert {bound for _, bound in runs.bounds if bound is not None} == {1200.0}
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "ten", "nan", "inf"])
+def test_a_bad_bound_stops_the_check(repo, value, capsys):
+    runs = Runs()
+    result = run_check(repo, runs, full=True, env={"MOXI_TEST_SUITE_BOUND_S": value})
+    assert result.code == 2 and runs.calls == []
+    assert "MOXI_TEST_SUITE_BOUND_S" in capsys.readouterr().err
+
+
+def test_each_suite_is_told_where_and_when_to_write_its_stacks_and_an_in_time_run_keeps_none(
+        repo):
+    stale = repo / check.RUN_DIR / "cache.stacks"
+    stale.mkdir(parents=True)
+    (stale / "main-1.txt").write_text("old\n")
+    runs = Runs()
+    before = time.time()
+    run_check(repo, runs, full=True, env={"PATH": "/usr/bin",
+                                          "MOXI_TEST_SUITE_BOUND_S": "100"})
+    for cmd, cwd, env in runs.calls:
+        if "pytest" in cmd:
+            assert env[testing.STACKS_ENV] == str(repo / check.RUN_DIR / f"{cwd.name}.stacks")
+            assert env[testing.PARENT_PID_ENV] == str(os.getpid())
+            at = float(env[testing.STACKS_AT_ENV])
+            assert before + 90 - 1 <= at <= time.time() + 90 + 1
+    assert not stale.exists()
+
+
+def test_a_short_bound_writes_the_stacks_at_half_of_it(repo):
+    runs = Runs()
+    before = time.time()
+    run_check(repo, runs, full=True, env={"PATH": "/usr/bin",
+                                          "MOXI_TEST_SUITE_BOUND_S": "6"})
+    ats = [float(env[testing.STACKS_AT_ENV]) for cmd, _, env in runs.calls if "pytest" in cmd]
+    assert ats and all(before + 3 - 1 <= at <= time.time() + 3 + 1 for at in ats)
+
+
+#: A package run that never ends: it starts a child that sleeps, notes the child's pid in
+#: the file its argument names, writes one process's stacks and one empty file where the
+#: kit would, and sleeps.
+HANG = """\
+import os, subprocess, sys, time
+from pathlib import Path
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+Path(sys.argv[1]).write_text(str(child.pid))
+stacks = Path(os.environ["MOXI_TEST_STACKS"])
+stacks.mkdir(parents=True, exist_ok=True)
+(stacks / "main-1.txt").write_text("Thread 0x1 (most recent call first):\\n")
+(stacks / "gw0-2.txt").write_text("")
+time.sleep(120)
+"""
+
+
+def _running(pid: int) -> bool:
+    found = proc.identity(pid)
+    return found is not None and proc.alive(found)
+
+
+def test_a_package_run_past_its_bound_is_ended_with_its_tree_and_fails_alone(
+        repo, tmp_path, capsys):
+    pid_file = tmp_path / "child.pid"
+    runs = Runs()
+
+    def run(cmd, cwd, env, /, *, timeout_s=None):
+        runs(cmd, cwd, env, timeout_s=timeout_s)
+        if "pytest" in cmd and Path(cwd).name == "cache":
+            return check._run([sys.executable, "-c", HANG, str(pid_file)], cwd, env,
+                              timeout_s=timeout_s)
+        return 0
+
+    began = time.monotonic()
+    result = run_check(repo, run, full=True,
+                       env={**os.environ, "MOXI_TEST_SUITE_BOUND_S": "4"})
+    took = time.monotonic() - began
+    assert result.code == 1
+    assert [(n, ok) for n, ok, _ in result.suites] == [
+        (name, name != "cache") for name in LAYOUT]
+    assert result.cut == ["cache"]
+    assert re.search(r"\| moxi pass [\d.]+s, sessions pass [\d.]+s, turns pass [\d.]+s, "
+                     r"cache fail [\d.]+s ended at its bound, comms pass", result.line())
+    assert 4 <= took < 4 + 30
+    stacks = repo / check.RUN_DIR / "cache.stacks"
+    out = capsys.readouterr().out
+    assert (f"moxi-dev check: cache: its tests ran past their 4 s bound, so the check "
+            f"ended the run and every process under it and fails the package; the one "
+            f"process still running then wrote its stacks to {stacks}") in out
+    assert [path.name for path in stacks.iterdir()] == ["main-1.txt"]
+    child = int(pid_file.read_text())
+    wait_for(lambda: not _running(child), testing.PROC_WAIT_S,
+             what="the run's child to be ended")
+
+
+#: A check whose cache package's run is a process that starts a sleeping child, notes
+#: both pids in the file its second argument names, and sleeps.
+SIGNALLED = """\
+import os, sys
+from pathlib import Path
+from moxi_dev import check
+
+TREE = (
+    "import subprocess, sys, time, os\\n"
+    "from pathlib import Path\\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\\n"
+    "Path(sys.argv[1]).write_text(f'{os.getpid()} {child.pid}')\\n"
+    "time.sleep(120)\\n")
+
+
+def run(cmd, cwd, env, /, *, timeout_s=None):
+    if "pytest" in cmd and Path(cwd).name == "cache":
+        return check._run([sys.executable, "-c", TREE, sys.argv[2]], cwd, env,
+                          timeout_s=timeout_s)
+    return 0
+
+
+if len(sys.argv) > 3:
+    import signal
+    signal.signal(getattr(signal, sys.argv[3]), signal.SIG_IGN)
+result = check.check(Path(sys.argv[1]), run=run, full=True, env=dict(os.environ),
+                     plan=lambda package, work, members: [])
+sys.exit(result.code)
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="Windows has no SIGTERM to send: os.kill there ends the process "
+                           "outright, which the test kit's parent watch covers")
+@pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
+def test_a_check_ended_by_a_signal_ends_the_package_run_under_way(repo, tmp_path, name):
+    import signal
+
+    pids_file = tmp_path / "pids"
+    checker = subprocess.Popen([sys.executable, "-c", SIGNALLED, str(repo), str(pids_file)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
+                 testing.PROC_WAIT_S, what="the package run to start")
+        run_pid, child = (int(one) for one in pids_file.read_text().split())
+        signum = getattr(signal, name)
+        checker.send_signal(signum)
+        assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signum
+        wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
+                 what="the package run and its child to be ended")
+    finally:
+        checker.kill()
+        checker.wait()
+        for pid in (pids_file.read_text().split() if pids_file.exists() else ()):
+            with contextlib.suppress(OSError):
+                os.kill(int(pid), signal.SIGKILL)
+
+
+def test_the_check_puts_back_the_signal_handlers_it_found(repo):
+    import signal
+
+    before = {one: signal.getsignal(one) for one in check.END_SIGNALS}
+    run_check(repo, Runs(), full=True)
+    assert {one: signal.getsignal(one) for one in check.END_SIGNALS} == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no SIGHUP")
+def test_a_check_started_ignoring_sighup_survives_it_and_its_run_goes_on(repo, tmp_path):
+    import signal
+
+    pids_file = tmp_path / "pids"
+    checker = subprocess.Popen(
+        [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), "SIGHUP"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
+                 testing.PROC_WAIT_S, what="the package run to start")
+        run_pid, child = (int(one) for one in pids_file.read_text().split())
+        checker.send_signal(signal.SIGHUP)
+        with pytest.raises(subprocess.TimeoutExpired):
+            checker.wait(timeout=1)
+        assert _running(run_pid) and _running(child)
+        checker.send_signal(signal.SIGTERM)
+        assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signal.SIGTERM
+        wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
+                 what="the package run and its child to be ended")
+    finally:
+        checker.kill()
+        checker.wait()
+        for pid in (pids_file.read_text().split() if pids_file.exists() else ()):
+            with contextlib.suppress(OSError):
+                os.kill(int(pid), signal.SIGKILL)
+
+
+def test_the_check_leaves_a_handler_python_did_not_install_in_place(repo, monkeypatch):
+    import signal
+
+    foreign = check.END_SIGNALS[0]
+    getsignal, install = signal.getsignal, signal.signal
+    installed = []
+
+    def recording(signum, handler):                       # as Python's own does for one
+        installed.append(signum)                          # it did not install: None back
+        was = install(signum, handler)
+        return None if signum == foreign else was
+
+    monkeypatch.setattr(signal, "getsignal",
+                        lambda signum: None if signum == foreign else getsignal(signum))
+    monkeypatch.setattr(signal, "signal", recording)
+    before = {one: getsignal(one) for one in check.END_SIGNALS}
+    run_check(repo, Runs(), full=True)
+    assert foreign not in installed
+    assert {one: getsignal(one) for one in check.END_SIGNALS} == before
+
+
+@pytest.mark.parametrize(("written", "said"), [
+    (0, "none of its processes wrote its stacks"),
+    (1, "the one process still running then wrote its stacks to {where}"),
+    (3, "the 3 processes still running then wrote their stacks to {where}"),
+])
+def test_the_cut_line_says_how_many_processes_wrote_their_stacks(tmp_path, written, said):
+    where = tmp_path / "cache.stacks"
+    assert check.stacks_said(written, where) == said.format(where=where)
+
+
+def test_a_run_ended_at_its_bound_with_no_stacks_says_so(repo, capsys):
+    def run(cmd, cwd, env, /, *, timeout_s=None):
+        if "pytest" in cmd and Path(cwd).name == "turns":
+            raise subprocess.TimeoutExpired(cmd, timeout_s)
+        return 0
+
+    result = run_check(repo, run, full=True)
+    assert result.code == 1 and result.cut == ["turns"]
+    assert ("moxi-dev check: turns: its tests ran past their 900 s bound, so the check "
+            "ended the run and every process under it and fails the package; none of its "
+            "processes wrote its stacks") in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("value", ["0", "-2", "two", "1.5"])
 def test_a_bad_worker_cap_stops_the_check(repo, value, capsys):
     runs = Runs()
@@ -431,7 +822,7 @@ def test_a_stale_lock_stops_before_the_sync(repo):
     result = run_check(repo, runs)
     assert result.code == 1 and len(runs.calls) == 1
     assert ("lock fail | tags not run | refs not run | names not run | ruff not run | "
-            "renames not run | release not run | "
+            "renames not run | release not run | pronouns not run | machine not run | "
             "stamps not run | web not run | sync not run | lint not run") in result.line()
 
 
@@ -447,7 +838,7 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
     assert result.code == 0
     assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
     assert ("packages: none | lock pass | tags pass | refs pass | names pass | ruff pass | "
-            "renames none | release pass "
+            "renames none | release pass | pronouns pass | machine pass "
             "| stamps skipped | web skipped | sync skipped | lint not run | no suites run") \
         in result.line()
 
@@ -871,6 +1262,99 @@ def test_only_renames_reads_the_whole_tree_and_filters_printing(repo, monkeypatc
     assert check.main(["--only", "renames", "packages/cache"]) == 0
 
 
+# --- --static: the whole-tree static steps alone ------------------------------------------
+
+STATIC_NOT_RUN = ("| stamps not run | web not run | sync not run | lint not run | "
+                  "no suites run | timed not run | durations none | temp not run |")
+
+
+def test_static_runs_the_static_steps_and_nothing_else(repo, monkeypatch):
+    commit_file(repo, "packages/sessions/x.py")
+    monkeypatch.setattr(check, "changed_paths", lambda *a: pytest.fail("read changes"))
+    monkeypatch.setattr(check, "worker_args", lambda *a: pytest.fail("read workers"))
+    monkeypatch.setattr(check.stamp, "check_stamps", lambda *a, **kw: pytest.fail("stamps"))
+    scanned = []
+    for module in (check.tags, check.refs, check.naming, check.ruff_check,
+                   check.release, check.pronouns, check.machine_text):
+        real = module.scan
+        monkeypatch.setattr(module, "scan", lambda root, real=real, name=module.__name__:
+                            scanned.append(name) or real(root))
+    runs = Runs()
+    result = run_check(repo, runs, static=True)
+    assert result.code == 0 and runs.calls == [], "no command runs: no lock, sync or suite"
+    assert scanned == ["moxi_dev.tags", "moxi_dev.refs", "moxi_dev.naming",
+                       "moxi_dev.ruff_check", "moxi_dev.release", "moxi_dev.pronouns",
+                       "moxi_dev.machine_text"]
+    line = result.line()
+    assert LINE.match(line), line
+    assert ("| packages: none | lock not run | tags pass | refs pass | names pass | "
+            "ruff pass | renames none | release pass | pronouns pass | machine pass "
+            + STATIC_NOT_RUN) in line
+
+
+def test_static_runs_the_renames_step_when_there_is_a_table(repo):
+    with_renames(repo, {X: "fresh = 1\n"}, (X, "-", "name", "old", "fresh"))
+    result = run_check(repo, Runs(), static=True)
+    assert result.code == 0 and "| ruff pass | renames pass | release pass |" in result.line()
+
+
+def test_a_leftover_fails_static_with_the_full_check_s_lines(repo, capsys):
+    with_renames(repo, {X: "def fresh():\n    pass\nthing.old\n"},
+                 (X, "-", "name", "old", "fresh"))
+    runs = Runs()
+    result = run_check(repo, runs, static=True)
+    assert result.code == 1 and result.renames == "fail" and runs.calls == []
+    static_out = [line for line in capsys.readouterr().out.splitlines() if "renames:" in line]
+    assert static_out and static_out[0].startswith(
+        f"moxi-dev check: renames: leftover: {X}:3: unresolved attribute")
+    run_check(repo, Runs())
+    full_out = [line for line in capsys.readouterr().out.splitlines() if "renames:" in line]
+    assert static_out == full_out
+
+
+def test_static_steps_all_run_after_one_fails(repo, monkeypatch, capsys):
+    tag = "[B5]"
+    commit_file(repo, "packages/sessions/x.py", f"# see {tag}\n")
+    monkeypatch.setattr(check.ruff_check, "scan", lambda root: [
+        check.ruff_check.Hit("packages/sessions/x.py", 1, 1, "N802", "bad name")])
+    result = run_check(repo, Runs(), static=True)
+    assert result.code == 1 and result.tags == "fail" and result.ruff == "fail"
+    assert (result.refs == result.names == result.release == result.pronouns
+            == result.machine == "pass")
+    out = capsys.readouterr().out
+    assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in out
+    assert "moxi-dev check: packages/sessions/x.py:1: N802: ruff: bad name" in out
+
+
+def test_main_static_prints_the_line_last_and_returns_its_code(repo, monkeypatch, capsys):
+    tag = "[B5]"
+    commit_file(repo, "packages/turns/x.py", f"# see {tag}\n")
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo / "packages" / "turns")
+    assert check.main(["--static"]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert LINE.match(out[-1]) and out[-1].endswith("exit 1") and "tags fail" in out[-1]
+    assert runs.calls == []
+
+
+def test_a_bad_member_stops_static_with_exit_2(repo, monkeypatch, capsys):
+    (repo / "packages" / "turns" / "pyproject.toml").write_text("[tool.x]\n")
+    monkeypatch.chdir(repo)
+    assert check.main(["--static"]) == 2
+    out, err = capsys.readouterr()
+    assert out.splitlines()[-1].endswith("exit 2") and "names no project" in err
+
+
+@pytest.mark.parametrize("args", [["--full"], ["--base", "main"], ["--finding", "L1"],
+                                  ["--only", "refs"], ["packages/a"]])
+def test_static_takes_no_other_mode(repo, monkeypatch, args):
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as stop:
+        check.main(["--static", *args])
+    assert stop.value.code == 2
+
+
 # --- the summary line -------------------------------------------------------------------
 
 LINE = re.compile(
@@ -882,6 +1366,8 @@ LINE = re.compile(
     r"ruff (pass|fail|not run) \| "
     r"renames (pass|fail|none|not run) \| "
     r"release (pass|fail|not run) \| "
+    r"pronouns (pass|fail|not run) \| "
+    r"machine (pass|fail|not run) \| "
     r"stamps (pass|fail|none|skipped|not run) \| "
     r"web (pass|fail|none|skipped|not run) \| "
     r"sync (pass|fail|skipped|not run) \| "
@@ -889,6 +1375,7 @@ LINE = re.compile(
     r"timed (?P<timed>held \d+|none|not run) \| "
     r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
     r"(none|[+-]\d+\.\d+s vs [0-9a-f]{12}( \([^)]+\))?)) \| "
+    r"(?P<temp>temp (disk|PYTEST_DEBUG_TEMPROOT|not run)( \([^|]+\))?) \| "
     r"memory (?P<memory>[^|]+) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 
@@ -1021,8 +1508,8 @@ class Timed(Runs):
                 **({"lifted": lifted} if lifted else {})}
         return tests
 
-    def __call__(self, cmd, cwd, env):
-        code = super().__call__(cmd, cwd, env)
+    def __call__(self, cmd, cwd, env, /, *, timeout_s=None):
+        code = super().__call__(cmd, cwd, env, timeout_s=timeout_s)
         name = Path(cwd).name
         if "pytest" not in cmd or not self.write:
             return code
@@ -1399,3 +1886,128 @@ def test_the_suites_drop_a_caller_s_left_out_tiers(repo):
     run_check(repo, runs, full=True,
               env={"PATH": "/usr/bin", testing.LEAVE_OUT_ENV: "slow"})
     assert all(testing.LEAVE_OUT_ENV not in env for _, _, _, env in pytest_calls(runs))
+
+
+# --- where the suites keep their temp --------------------------------------------------
+
+@pytest.fixture
+def fake_temp(tmp_path, monkeypatch):
+    """A Linux machine for moxi_dev.temp: a disk root on ext4 and a RAM root on tmpfs."""
+    disk, ram = tmp_path / "disk", tmp_path / "shm"
+    disk.mkdir()
+    ram.mkdir()
+    mounts = tmp_path / "mountinfo"
+    mounts.write_text(f"1 0 0:1 / / rw - ext4 ext4 rw\n"
+                      f"2 1 0:2 / {os.path.realpath(disk)} rw - ext4 ext4 rw\n"
+                      f"3 1 0:3 / {os.path.realpath(ram)} rw - tmpfs tmpfs rw\n")
+    where = temp.Places(platform="linux", disk_root=str(disk), ram_root=str(ram),
+                        system_temp=str(disk), mountinfo=str(mounts))
+    monkeypatch.setattr(temp, "_PLACES", where)
+    return where
+
+
+def _suite_envs(runs):
+    return [env for cmd, _, env in runs.calls if "pytest" in cmd]
+
+
+def test_a_check_moves_ram_to_disk_for_its_suites(repo, fake_temp):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    result = run_check(repo, runs, env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "ram"})
+    envs = _suite_envs(runs)
+    assert envs and all(env["MOXI_TEST_TEMP"] == "disk" for env in envs)
+    assert "| temp disk (ram asked; a check keeps its temp on disk) |" in result.line()
+    assert LINE.match(result.line()), result.line()
+
+
+def test_a_check_leaves_ram_to_the_suites_off_linux(repo, fake_temp, monkeypatch):
+    monkeypatch.setattr(temp, "_PLACES", dataclasses.replace(fake_temp, platform="darwin"))
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    result = run_check(repo, runs, env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "ram"})
+    assert all(env["MOXI_TEST_TEMP"] == "ram" for env in _suite_envs(runs))
+    assert "| temp disk (ram asked; no RAM filesystem on this system) |" in result.line()
+
+
+def test_a_check_moves_a_temproot_in_memory_to_disk(repo, fake_temp):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs()
+    given = {"PATH": "/usr/bin", "PYTEST_DEBUG_TEMPROOT": fake_temp.ram_root}
+    result = run_check(repo, runs, env=given)
+    for env in _suite_envs(runs):
+        assert env["MOXI_TEST_TEMP"] == "disk"
+        assert env["PYTEST_DEBUG_TEMPROOT"] == fake_temp.ram_root
+    assert (f"| temp disk (PYTEST_DEBUG_TEMPROOT={fake_temp.ram_root} is in memory; a "
+            "check keeps its temp on disk) |") in result.line()
+
+
+def test_a_check_passes_a_disk_choice_through(repo, fake_temp, tmp_path):
+    commit_file(repo, "packages/sessions/x.py")
+    scratch = fake_temp.disk_root + "/scratch"
+    os.mkdir(scratch)
+    for given, field in (({}, "temp disk"),
+                         ({"PYTEST_DEBUG_TEMPROOT": fake_temp.disk_root}, "temp disk"),
+                         ({"PYTEST_DEBUG_TEMPROOT": scratch}, "temp PYTEST_DEBUG_TEMPROOT"),
+                         ({"MOXI_TEST_TEMP": "disk"}, "temp disk")):
+        runs = Runs()
+        result = run_check(repo, runs, env={"PATH": "/usr/bin", **given})
+        for env in _suite_envs(runs):
+            assert env.get("MOXI_TEST_TEMP") == given.get("MOXI_TEST_TEMP")
+            assert env.get("PYTEST_DEBUG_TEMPROOT") == given.get("PYTEST_DEBUG_TEMPROOT")
+            assert not any(arg.startswith("--basetemp") for arg in runs.calls[0][0])
+        assert f"| {field} |" in result.line()
+
+
+def test_a_bad_setting_stops_the_check_and_still_sweeps(repo, fake_temp, capsys):
+    swept = []
+    result = run_check(repo, Runs(), env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "RAM"},
+                       sweep=lambda: swept.append(1) or temp.Swept())
+    assert result.code == 2 and result.lock == "not run"
+    assert "MOXI_TEST_TEMP must be disk or ram; it is 'RAM'" in capsys.readouterr().err
+    assert swept == [1]                                 # the end's sweep, by any path
+
+
+def test_static_reads_no_temp_setting_and_sweeps_nothing(repo, fake_temp):
+    def sweep():
+        pytest.fail("a run that starts no test swept")
+
+    result = run_check(repo, Runs(), static=True, sweep=sweep,
+                       env={"PATH": "/usr/bin", "MOXI_TEST_TEMP": "RAM"})
+    assert result.code == 0, "a bad MOXI_TEST_TEMP doesn't stop a run that makes no temp"
+    assert "| temp not run |" in result.line()
+
+
+def test_the_check_sweeps_at_its_start_after_each_suite_and_at_its_end(repo, capsys):
+    commit_file(repo, "packages/sessions/x.py")
+    runs = Runs({lambda cmd, cwd: "pytest" in cmd and cwd.name == "cache": -9})
+
+    def sweep():
+        runs.calls.append((["sweep"], Path("."), {}))
+        first = len([c for c in runs.calls if c[0] == ["sweep"]]) == 1
+        return temp.Swept(count=2, size=3 * 1024 ** 3) if first else temp.Swept()
+
+    result = run_check(repo, runs, sweep=sweep)
+    order = ["sweep" if cmd == ["sweep"] else cwd.name
+             for cmd, cwd, _ in runs.calls if cmd == ["sweep"] or "pytest" in cmd]
+    assert order == ["sweep", "sessions", "sweep", "cache", "sweep", "comms", "sweep",
+                     "sweep"]
+    assert result.code == 1                              # cache's suite died by a signal
+    assert ("moxi-dev check: removed 2 test temp dirs (3.0 GiB) left by runs that ended "
+            "without cleaning up") in capsys.readouterr().out
+
+
+def test_a_suite_in_memory_after_all_is_named_in_the_summary(repo):
+    commit_file(repo, "packages/sessions/x.py")
+
+    class Writing(Runs):
+        def __call__(self, cmd, cwd, env, /, *, timeout_s=None):
+            if "pytest" in cmd and cwd.name in ("sessions", "cache"):
+                chosen = {"mode": "disk", "root": "/tmp", "is_in_memory": True,
+                          "why": "/var/tmp is not writable"}
+                Path(env[testing.DURATIONS_ENV]).write_text(
+                    json.dumps({"format": 1, "tests": {}, "temp": chosen}))
+            return super().__call__(cmd, cwd, env, timeout_s=timeout_s)
+
+    result = run_check(repo, Writing())
+    assert ("| temp disk (2 suites in memory at /tmp: /var/tmp is not writable) |"
+            in result.line())

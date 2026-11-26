@@ -10,12 +10,28 @@ that holds the act is a word, and the words come in this order:
 | `turn` | `facts().turn_open` | a turn is open |
 | `subagents` | `agents()`: `subagent` or `teammate` entries not final, in `pending`, `running`, `waiting` or `unknown` | any, or the list is incomplete |
 | `draft` | `facts().draft` | a draft is in the prompt box |
-| `person` | slot: `pane_use` (copy mode, or a client or the pane active within `person_s`); every target: a turn no delivery opened, started within `person_s` | either |
+| `person` | slot: `pane_use` (copy mode, or an attached client active within `person_s`); every target: a turn no delivery opened, started within `person_s` | either |
 | `unreadable` | any read failed, or `facts().stale` | always |
 
-**A `shell` entry never counts as live work**, whichever harness reports it: background
-shells stop at Claude's exit dialog, or with a clear or compact's stop, so they hold
-nothing.
+**The `subagents` words name each live entry**: its description (else its id), kind and
+state, and, where turns' stale judgment read one (`last_write_at`), how long ago it last
+wrote and when it would read stale (that time plus turns' `STALE_AFTER_S`). They then say
+that messaging the session or ending its shells would wake it, and, where the caller
+says whether keep-warm is on for the session (`keep_warm`), that keep-warm should have
+kept it warm, or that keep-warm is off for it.
+
+**A `shell` entry never counts as live work** in this read, whichever harness reports
+it: background shells stop at Claude's exit dialog, or with a clear or compact's stop.
+Exit-session reads them itself after this read (`exits.background_shells`), and holds
+for them until the session has been idle an hour; park's exit doesn't read them.
+
+**The pane's own output never holds.** `pane_use` also gives the pane's activity, which
+any output moves: Claude Code redrawing its spinner and status line, or its exit dialog
+drawing itself. It says nothing of a person, so the read takes no account of it.
+
+A caller may leave out the client's activity (`count_activity=False`): park does, since
+the person who parks is the one at the panes. Copy mode still holds then, and so does a
+turn no delivery opened.
 
 **A turn no delivery opened holds as a person's, whatever way it came.** turns marks such
 a turn with `opening` and `command` both None, in `facts().turn` and as a `turn.started`
@@ -36,7 +52,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,6 +68,8 @@ LIVE_KINDS = ("subagent", "teammate")
 LIVE_STATES = ("pending", "running", "waiting", "unknown")
 #: How recent a person's sign must be to hold, in seconds, unless the caller says.
 PERSON_S = 120.0
+#: Stands for a value `judge` looks up itself.
+LOOK: Any = object()
 
 
 @dataclass(frozen=True)
@@ -129,20 +147,24 @@ def live_agents(agents: Any) -> list[Any]:
 
 def read(session: Any, *, slot: str | int | None = None, slots_api: Any | None = None,
          person_s: float = PERSON_S, person_turn_at: float | None = None,
-         clock: Callable[[], float] = time.time) -> Reading:
+         clock: Callable[[], float] = time.time, count_activity: bool = True,
+         keep_warm: bool | None = None) -> Reading:
     """Take the whole quiet read of `session` (turns' `Session`) now.
 
     `slot` is the launch's slot, whose run pane `pane_use` reads (`slots_api` stands in
     for slots' API; with slots not installed the pane read fails and holds `unreadable`).
     `person_turn_at` is the start of the latest turn no delivery opened that the caller's
-    watch saw. A read that fails holds `unreadable`; it never raises.
+    watch saw. With `count_activity` false a client's activity holds nothing. `keep_warm`
+    says whether keep-warm is on for the session, for the `subagents` words (None: not
+    said). A read that fails holds `unreadable`; it never raises.
     """
     failures: dict[str, str] = {}
     facts = _try(failures, "facts", session.facts)
     agents = _try(failures, "agents", session.agents)
     pane = _pane(failures, slot, slots_api)
     return judge(facts, agents, pane, failures=failures, person_turn_at=person_turn_at,
-                 now=clock(), person_s=person_s)
+                 now=clock(), person_s=person_s, count_activity=count_activity,
+                 keep_warm=keep_warm)
 
 
 def reread_person(last: Reading, *, slot: str | int | None = None,
@@ -160,15 +182,12 @@ def reread_person(last: Reading, *, slot: str | int | None = None,
 
 def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
           failures: Mapping[str, str] | None = None, person_turn_at: float | None = None,
-          now: float, person_s: float = PERSON_S,
-          own_output_from: float | None = None) -> Reading:
+          now: float, person_s: float = PERSON_S, count_activity: bool = True,
+          keep_warm: bool | None = None, stale_after_s: Any = LOOK) -> Reading:
     """What holds, from what was read: the words in `WORDS` order, each with its words for
-    a person.
-
-    `own_output_from` is the time from which the pane's output is the harness's own and
-    never a person's (at the exit dialog, the second the exit command was sent: the
-    dialog drawing itself is pane output). Copy mode and a client's activity hold
-    whenever they come."""
+    a person. With `count_activity` false a client's activity does not hold; copy mode
+    still does. `keep_warm` and `stale_after_s` (turns' `STALE_AFTER_S`, looked up when
+    not given; None: not known) are for the `subagents` words (`agents_words`)."""
     failures = dict(failures or {})
     holds: list[Hold] = []
     if facts is not None and facts.turn_open:
@@ -181,13 +200,14 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
         if not agents.complete:
             holds.append(Hold("subagents", "the agent list could not be read whole"))
         elif live := live_agents(agents):
-            holds.append(Hold("subagents", f"{len(live)} still working "
-                                           f"({', '.join(sorted({a.kind for a in live}))})"))
+            holds.append(Hold("subagents", agents_words(
+                live, now=now, keep_warm=keep_warm, stale_after_s=stale_after_s)))
     if facts is not None and facts.draft:
         holds.append(Hold("draft", "a draft is in the prompt box"))
     if facts is not None and person_turn(facts.turn):
         person_turn_at = _latest(person_turn_at, facts.turn.started_at)
-    if person := _person(pane, person_turn_at, now, person_s, own_output_from):
+    if person := _person(pane, person_turn_at, now, person_s,
+                         count_activity=count_activity):
         holds.append(Hold("person", person))
     if facts is not None and facts.stale:
         failures.setdefault("facts", "the facts moved while they were read (stale)")
@@ -196,18 +216,79 @@ def judge(facts: Any | None, agents: Any | None, pane: Any | None, *,
     return Reading(tuple(holds), facts, agents, pane, failures, person_turn_at, now)
 
 
-def _person(pane: Any | None, turn_at: float | None, now: float, person_s: float,
-            own_output_from: float | None = None) -> str | None:
+def agents_words(live: Sequence[Any], *, now: float, keep_warm: bool | None = None,
+                 stale_after_s: Any = LOOK) -> str:
+    """The `subagents` words for the live entries `live`: how many, then each by its
+    description (else its id), kind and state, with the age of its last write and the
+    time it would read stale where turns' judgment read a write; then that a message or
+    ending its shells would wake the session, and what `keep_warm` says (None: nothing).
+    `stale_after_s` is turns' `STALE_AFTER_S`, looked up when not given; None leaves the
+    stale time out."""
+    if stale_after_s is LOOK:
+        stale_after_s = (turns_stale_after_s()
+                         if any(_last_write(a) is not None for a in live) else None)
+    named = "; ".join(_entry_words(a, now, stale_after_s) for a in live)
+    said = (f"{len(live)} still working: {named}. Messaging the session or ending its "
+            "shells would wake it")
+    if keep_warm is True:
+        said += ", and keep-warm should have kept it warm"
+    elif keep_warm is False:
+        said += "; keep-warm is off for this session, so nothing kept it warm"
+    return said
+
+
+def _entry_words(entry: Any, now: float, stale_after_s: float | None) -> str:
+    name = getattr(entry, "description", None) or getattr(entry, "id", None) or "(unnamed)"
+    said = f'"{name}" ({entry.kind}, {entry.state}'
+    wrote = _last_write(entry)
+    if wrote is not None:
+        said += f", last wrote {_span(now - wrote)} ago"
+        if stale_after_s is not None:
+            said += f", reads stale at {_utc(wrote + float(stale_after_s))}"
+    return said + ")"
+
+
+def _last_write(entry: Any) -> float | None:
+    wrote = getattr(entry, "last_write_at", None)
+    if isinstance(wrote, bool) or not isinstance(wrote, (int, float)):
+        return None
+    return float(wrote)
+
+
+def turns_stale_after_s() -> float | None:
+    """turns' `STALE_AFTER_S`, or None when turns can't be loaded or doesn't export it."""
+    from . import first
+
+    try:
+        found = getattr(first.turns_api(quiet=True), "STALE_AFTER_S", None)
+    except Exception:  # noqa: BLE001  (a turns that can't be read leaves the time out)
+        return None
+    return float(found) if isinstance(found, (int, float)) else None
+
+
+def _span(seconds: float) -> str:
+    """An age in words: seconds under two minutes, minutes under two hours, else hours
+    and minutes."""
+    seconds = max(0, int(seconds))
+    if seconds < 120:
+        return f"{seconds} s"
+    if seconds < 7200:
+        return f"{seconds // 60} min"
+    return f"{seconds // 3600} h {seconds % 3600 // 60} min"
+
+
+def _utc(at: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(at))
+
+
+def _person(pane: Any | None, turn_at: float | None, now: float, person_s: float, *,
+            count_activity: bool = True) -> str | None:
     if pane is not None and getattr(pane, "pane_id", None) is not None:
         if pane.pane_in_mode:
             return "the pane is in copy mode"
-        if pane.client_activity is not None and now - pane.client_activity < person_s:
+        if (count_activity and pane.client_activity is not None
+                and now - pane.client_activity < person_s):
             return f"a client was active {_ago(now, pane.client_activity)} ago"
-        output = pane.pane_activity
-        if own_output_from is not None and output is not None and output >= own_output_from:
-            output = None
-        if output is not None and now - output < person_s:
-            return f"the pane was active {_ago(now, output)} ago"
     if turn_at is not None and now - turn_at < person_s:
         return f"a turn no delivery opened, {_ago(now, turn_at)} ago"
     return None
@@ -333,5 +414,6 @@ class Watch:
         self._thread.join(timeout=2)
 
 
-__all__ = ["LIVE_KINDS", "LIVE_STATES", "PERSON_S", "WORDS", "Hold", "Reading", "Watch",
-           "judge", "live_agents", "person_started", "person_turn", "read", "reread_person"]
+__all__ = ["LIVE_KINDS", "LIVE_STATES", "LOOK", "PERSON_S", "WORDS", "Hold", "Reading",
+           "Watch", "agents_words", "judge", "live_agents", "person_started", "person_turn",
+           "read", "reread_person", "turns_stale_after_s"]

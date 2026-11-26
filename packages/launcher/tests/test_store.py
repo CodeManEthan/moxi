@@ -52,19 +52,19 @@ def count(conn, table):
 # -- schema ------------------------------------------------------------------------------
 
 
-def test_a_new_store_is_version_two_in_wal_and_private(tmp_path):
+def test_a_new_store_is_version_four_in_wal_and_private(tmp_path):
     db = tmp_path / "state" / "launcher.db"
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         tables = {name for (name,) in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert tables == {"launches", "session_ids", "events", "picks", "runs", "run_events",
-                          "pending_compacts", "warm_holds", "exits"}
+                          "pending_compacts", "warm_holds", "exits", "park_entries"}
         indexes = {name for (name,) in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL")}
-        assert len(indexes) == 14
+        assert len(indexes) == 18
     finally:
         conn.close()
     if os.name == "posix":
@@ -74,7 +74,7 @@ def test_a_new_store_is_version_two_in_wal_and_private(tmp_path):
 def test_the_launches_columns_are_the_ones_part_two_reads(conn):
     columns = [row[1] for row in conn.execute("PRAGMA table_info(launches)")]
     assert columns == list(store.COLUMNS)
-    assert columns[0] == "request_id" and columns[-1] == "base_env_json"
+    assert columns[0] == "request_id" and columns[-2:] == ["base_env_json", "fork_of"]
 
 
 def test_opening_again_runs_no_step(tmp_path):
@@ -82,7 +82,7 @@ def test_opening_again_runs_no_step(tmp_path):
     store.connect(db).close()
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     finally:
         conn.close()
 
@@ -91,7 +91,7 @@ def test_a_store_from_a_newer_launcher_is_refused(tmp_path):
     db = tmp_path / "launcher.db"
     store.connect(db).close()
     conn = sqlite3.connect(db)
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute(f"PRAGMA user_version = {len(store.STEPS) + 1}")
     conn.close()
     with pytest.raises(core_store.StoreTooNew) as caught:
         store.connect(db)

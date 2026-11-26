@@ -1,6 +1,6 @@
 ---
 name: moxi-handoff
-description: Write a handoff, the short file the next session of your seat reads first. Use when you are asked to write a handoff or hand off, when you stop with work left for the next session of the same seat, when the context notice says this launch recycles at its limit, and when your posture reads relaunched.
+description: Write a handoff, the short file the next session of your seat reads first. Use when you are asked to write a handoff or hand off, when you stop with work left for the next session of the same seat, when the context warning says this launch lets you recycle yourself and you are mid-work, and when your posture reads relaunched.
 ---
 
 # Handoff
@@ -28,8 +28,14 @@ Find your handoff folder:
 2. Else run `moxi launcher handoff dir` in your session's shell. It prints the folder,
    or says your session has no handoff folder.
 
-If neither gives a folder, your session has no key (no comms name, seat or project), and
-a handoff written anywhere would not be shown to your next session. Say so and stop.
+If neither gives a folder, your session has none, and a handoff written anywhere would
+not be shown to your next session. `moxi launcher handoff dir` says which reason holds:
+
+- the session has no key (no comms name, seat or project);
+- or notes is installed and gives the launch no notes directory (no `notes_dir` is set,
+  and notes keeps none for the folder it works in).
+
+Say so and stop.
 
 ## The file name
 
@@ -47,14 +53,19 @@ handoff never overwrites an old one.
 
 ## Recycling yourself
 
-Recycle only when the context notice says this launch recycles at its limit and you are
-mid-work with more to do. Otherwise finish and stop as usual.
+Recycle only when the context warning has said this launch lets you recycle yourself,
+and only when you are mid-work with more to do. If the work is nearly done, finish it and
+stop as usual; don't recycle at the end of a task.
 
-1. Reach a pause point, and let your subagents finish.
+1. Reach a pause point, let your subagents finish, and start nothing new.
 2. Write the handoff, as above.
-3. Run `moxi launcher relaunch --self --handoff <file>` in your session's shell.
-4. End the turn. The launcher exits the session once it is idle and starts it again in
-   the same place, with your handoff as its first turn.
+3. Stop your background shells.
+4. Run `moxi launcher relaunch --self --handoff <file>` in your session's shell.
+5. End your turn and make no further tool call. The launcher exits the session once it is
+   idle and starts it again in the same place, with your handoff as its first turn.
+
+If the verb refuses `no-self-recycle`, your launch doesn't let you recycle: carry on with
+the work.
 
 If a turn comes before the exit, answer only what can't wait and end the turn again. If a
 note from the launcher says the relaunch did not run, carry on with your work.

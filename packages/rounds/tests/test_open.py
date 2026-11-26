@@ -220,7 +220,7 @@ def test_a_go_pointer_of_any_known_shape_is_kept(rounds, pointer):
     assert log.read(log.round_log(rounds / "a-round"))[0]["record"] == pointer
 
 
-@pytest.mark.parametrize("pointer", ["he said go", "comms:twelve",
+@pytest.mark.parametrize("pointer", ["the operator said go", "comms:twelve",
                                      "http://example.com/pages/7"])
 def test_a_go_pointer_of_no_known_shape_is_refused_and_no_dir_is_made(
         rounds, capsys, pointer):
@@ -231,6 +231,32 @@ def test_a_go_pointer_of_no_known_shape_is_refused_and_no_dir_is_made(
     assert repr(pointer) in err and "comms:<digits>" in err
     assert "run: moxi rounds open proj-a/a-round --description TEXT --record PTR" in err
     assert not rounds.exists()
+
+
+# -- the lead ----------------------------------------------------------------------------
+
+def test_a_round_opened_with_a_lead_keeps_it_in_its_opening(rounds, capsys):
+    assert run("proj-a/a-round", "--lead", "atlas-lead@kestrel") == 0
+    assert run("proj-a/b-round") == 0
+
+    assert log.read(log.round_log(rounds / "a-round"))[0]["lead"] == "atlas-lead@kestrel"
+    assert "lead" not in log.read(log.round_log(rounds / "b-round"))[0]
+    assert folded(rounds / "a-round").lead == "atlas-lead@kestrel"
+    assert "lead: atlas-lead@kestrel\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("lead", ["x y", "a@b@c", "a/b", ""])
+def test_a_lead_of_no_names_shape_is_refused_before_anything_is_made(
+        rounds, capsys, lead):
+    assert run("proj-a/a-round", "--lead", lead) == 2
+
+    out, err = capsys.readouterr()
+    assert out == "" and f"{lead!r} is not a lead's name" in err
+    assert "moxi rounds open proj-a/a-round --description TEXT --lead NAME" in err
+    assert not rounds.exists() and not paths.locks_dir().exists()
+    with pytest.raises(BadArgument):
+        opening.open_round("proj-a/a-round", description="a round", by="planner",
+                           lead=lead)
 
 
 # -- what is refused ---------------------------------------------------------------------

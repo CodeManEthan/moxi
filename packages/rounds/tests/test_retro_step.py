@@ -4,6 +4,7 @@ retro report is recorded, and the round closing on that record."""
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -15,6 +16,7 @@ ROUND = "proj-a/a-round"
 PTR = "comms:1234567"
 BASE = "0" * 40
 TIP = "1" * 40
+STAMP = "%Y-%m-%dT%H:%M:%SZ"
 
 FLOWS = """\
 [flows.built]
@@ -169,7 +171,42 @@ def test_next_gives_the_retro_its_reads_its_block_its_verdict_and_the_numbers(
     assert group["then"] == [f"moxi rounds verdict {ROUND} <your report>"]
     assert group["numbers"]["design_passes"] == 0
     assert "\nnumbers:\n  design: passes 0, " in text
-    assert "\n  time in steps: " in text
+    assert "\n  time in steps, overlapping (steps due side by side each count the same time): " in text
+
+
+def test_the_retro_s_numbers_run_to_now(round_dir, capsys, monkeypatch):
+    from moxi_rounds import numbers as counted
+
+    built(round_dir)
+    found = folded(round_dir)
+    # An hour after the log's last event, so a count that stops there differs.
+    last = datetime.strptime(found.history[-1]["at"], STAMP).replace(tzinfo=timezone.utc)
+    later = log.stamp((last + timedelta(hours=1)).timestamp())
+    monkeypatch.setattr(log, "stamp", lambda *_a, **_k: later)
+
+    assert main(["next", ROUND, "--json"]) == 0
+    [group] = json.loads(capsys.readouterr().out)["groups"]
+
+    to_now = counted.of(found, now=later)["round_time_s"]
+    assert group["numbers"]["round_time_s"] == to_now
+    assert to_now >= counted.of(found)["round_time_s"] + 3600
+
+
+def test_the_retro_s_group_left_uncounted_has_its_lines_and_no_numbers(
+        round_dir, monkeypatch):
+    from moxi_rounds import next_step, showing
+    from moxi_rounds import numbers as counted
+
+    built(round_dir)
+    found = showing.show(ROUND, refresh=False)
+    step = retro(round_dir)
+    monkeypatch.setattr(counted, "of", lambda *_a, **_k: pytest.fail("counted"))
+
+    group = next_step.group(found, step, {}, count_numbers=False)
+
+    assert "numbers" not in group
+    assert group["then"] == [f"moxi rounds verdict {ROUND} <your report>"]
+    assert group["reads"][0] == "the numbers below"
 
 
 def test_a_skip_of_retro_lets_the_round_close(round_dir):

@@ -21,6 +21,7 @@ from conftest import Raw, ServerThread
 import moxi.ipc as ipc
 from moxi import files, proc
 from moxi.ipc import _server
+from moxi_dev.testing import PROC_WAIT_S
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32",
                                 reason="Unix sockets; the Windows pipe server is built apart")
@@ -52,7 +53,7 @@ async def echo(conn, method, params):
     return {"method": method, "params": params}
 
 
-def wait_for(predicate, timeout: float = 10.0, what: str = "the condition"):
+def wait_for(predicate, timeout: float = PROC_WAIT_S, what: str = "the condition"):
     deadline = time.monotonic() + timeout
     while True:
         value = predicate()

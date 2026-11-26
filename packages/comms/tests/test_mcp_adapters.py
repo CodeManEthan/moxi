@@ -29,6 +29,7 @@ from moxi_comms.client import DaemonError, DaemonOffline
 from moxi_comms.config import ConfigError
 from moxi_comms.mcp import tokens
 from moxi_comms.mcp.additions import SHELL_REACH_ENV, SHELL_REACH_OFF, TOKEN_ENV, URL_ENV
+from moxi_dev.testing import PROC_WAIT_S
 
 PLANNER = "planner@proj-a"
 REVIEWER = "reviewer@proj-a"
@@ -190,6 +191,30 @@ def test_the_claude_adapter_registers_before_it_says_bound(rig, monkeypatch):
     assert shim.layer_form == context.TOOLS
 
 
+def test_a_claude_adapter_that_fails_while_claude_runs_keeps_its_claim_file(
+        rig, monkeypatch):
+    """The claim file is what tells the session and doctor that mail has stopped, so an
+    adapter whose watch on `claude` fails leaves it; one whose `claude` ended removes
+    it."""
+    from moxi_comms import claimfile
+
+    shim = rig.shim(name="reviewer", scope="proj-a", start=False)
+    r, w = os.pipe()
+
+    def broken_watch(fd):
+        raise OSError("the watch on claude failed")
+
+    monkeypatch.setattr(claude_adapter, "wait_for_exit", broken_watch)
+    turns = SimpleNamespace(find=lambda pid: None, TurnsError=RuntimeError)
+    try:
+        with pytest.raises(OSError):
+            claude_adapter.serve(shim, os.getpid(), r, turns=turns)
+    finally:
+        os.close(r)
+        os.close(w)
+    assert claimfile.read(shim.claims.key) is not None
+
+
 def test_the_codex_adapter_registers_before_it_says_bound(rig, launch):
     seen = []
     adapter = launch(start=False, on_bound=lambda: seen.append(row_of(rig)))
@@ -226,7 +251,7 @@ def test_a_shim_started_while_the_daemon_is_down_registers_at_its_first_bind(rig
     daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False)
     rig.daemon = daemon
     daemon.start()
-    assert wait_until(lambda: not s.offline, 10)
+    assert wait_until(lambda: not s.offline, PROC_WAIT_S)
     row = wait_until(lambda: row_of(rig))
     assert row.identity == REVIEWER and row.bound
 
@@ -328,7 +353,7 @@ def test_a_rebind_after_a_daemon_restart_registers_and_reloads(rig, launch):
                     serve_tools=True, mcp_port=0)
     rig.daemon = daemon
     daemon.start()
-    assert wait_until(lambda: not adapter.offline, 10)
+    assert wait_until(lambda: not adapter.offline, PROC_WAIT_S)
     assert wait_until(lambda: row_of(rig) is not None and row_of(rig).bound)
     assert wait_until(lambda: len(adapter.fake.reload_calls) == 2)
 

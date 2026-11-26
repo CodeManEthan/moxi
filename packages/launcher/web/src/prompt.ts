@@ -5,19 +5,23 @@
 // Home places it in its spot and expects no report from it: a main piece is shown as it
 // is. The caret is in the box as soon as the piece is drawn.
 //
-// The line above the box reads `Project <key>` or `Folder <path>`. When the piece connects
-// it reads `/api/places` and works out once whether projects is there (the page server
-// takes a project, and the shell lists projects' picker); the line opens on the newest
-// place, or, on a Home that never launched, on the one project, on `Project choose` with
-// several, else on the home folder. Its menu takes a typed folder path, lists the places
-// (read again each time it opens) and, with projects, places projects' picker under them.
+// The line above the box reads `Project <key>`, `Folder <path>` or `Scratch a throwaway
+// folder`. When the piece connects it reads `/api/places` and works out once whether
+// projects is there (the page server takes a project, and the shell lists projects'
+// picker); the line opens on the newest place, or, on a Home that never launched, on the
+// one project, on `Project choose` with several, else on the home folder. Its menu takes a
+// typed folder path, lists the places (read again each time it opens), offers `Scratch`
+// where the form has the row, and, with projects, places projects' picker under them. A
+// launch names the one place the line names: Scratch sends `scratch` and neither a folder
+// nor a project, and a folder or a project sends `scratch` off.
 //
 // The chip reads `/api/catalog` and `/api/form`: its face is the harness, the model and
 // the effort the form is filled with, until one is set in its menu. A read of either that
 // failed is made again when the tab is shown again and when the button's menu opens. The menu is three
 // lists side by side, the harness first; `older…` opens a field for a model's full name.
 // Another harness reads `/api/form` again for it and lets go of the model and the effort
-// set here, which are the first harness's own.
+// set here and of the values filled from the last launch, which are the first harness's
+// own; the comms identity for the harness picked fills, unless one was set here.
 //
 // `Preset` beside the place, once `/api/presets` lists any, names the one preset the launch
 // starts from, `none` dim while none is applied. Its menu takes it off, or applies one of
@@ -73,15 +77,18 @@
 // it. A launch whose permission rows are not all at the user's usual values says so in its
 // request, and each such row is one of those the lines under and above the box name.
 //
-// The piece reads `/api/last` when it connects and whenever what the line above the box names
-// changes (a place picked, a seat applied or taken off), never on a launch, so nothing fills
-// under the user's hands; an answer for a key the line no longer names fills nothing. The
-// values that launch gave fill the rows the form leaves at their shipped defaults, the
-// harness first, and `From last launch` on the line above the box names them, with `Clear`
-// for each in its list and under its row in the panel. A filled value is not a change; one
-// the user edits becomes his, and leaves the item. A filled value that can do harm asks
-// nothing and stays after a launch. The button is off until the fill is read and made, and
-// the request names each filled row.
+// The piece reads `/api/last` when it connects and whenever what the line above the box
+// names changes (a place picked, a seat applied or taken off), never on a launch, so
+// nothing fills under the user's hands; an answer for a key the line no longer names fills
+// nothing. The values that launch gave fill the rows the form leaves at their shipped
+// defaults, the harness first, and `From last launch` on the line above the box names them,
+// with `Clear` for each in its list and under its row in the panel. A filled value is not a
+// change; one the user edits becomes one, and leaves the item. A filled value that can do
+// harm asks nothing and stays after a launch. A filled comms identity comms refuses a
+// launch under (held, reserved, retired) shows comms' refusal beside it, in the list and
+// under its row, and so does the note when a live session holds the same name in a project
+// scope. The button is off until the fill is read and made, and the request names
+// each filled row.
 //
 // `Run again` under the box lists the recent launches of what the line names, read when the
 // piece connects, when what the line names changes, and on every event of the topic
@@ -104,12 +111,23 @@
 // A dim `+` at the left of the chip opens a menu drawn like the chip's. `Brief from a file`
 // opens a field for a path: while one is set the box is off, a dim line under the box names
 // the file with `Clear`, and the launch's first turn is that file, not the box's text. A
-// launch that starts with it lets go of it, as it empties the box. `Continue the last
-// session` is offered when the menu's read of `/api/sessions`, made each time it opens, holds
-// a session of the line's place that he made and can resume now; its dim line says whether
-// it resumes in a slot or copies the resume command. A click resumes it at once through
-// `/api/resume`, with the lines under the box a launch has, in a resume's words; the box
-// keeps its text.
+// launch that starts with it lets go of it, as it empties the box. `Handoff from a file`,
+// where the form has the row, opens a field for a handoff's path. The handoff the launch
+// sends, whether set there or filled by the user's defaults or the applied preset, is named
+// on a dim line under the box, home written `~`, with `Clear`, which sends none with the next
+// launch from the box; once that launch starts or its command is copied, or a preset is
+// picked or applied, the preset's or the defaults' handoff shows again and is sent. The box
+// stays on, since a launch's first turn may hold a brief and a handoff. A launch that starts
+// with a handoff set there lets go of it, so the form's own shows again; a copied command
+// and a preset leave it set, as they leave a brief file. `Continue the last session` is
+// offered when the menu's read of `/api/sessions`, made each time it opens, holds a session
+// of the line's place the user made and can resume now; its dim line says whether it resumes
+// in a slot or copies the resume command. A click resumes it at once through `/api/resume`,
+// with the lines under the box a launch has, in a resume's words. The box's text goes as the
+// resume's brief, or the brief file in its place while one is set, and a resume that starts
+// empties the box and lets go of the file as a launch does; an empty box sends none, and
+// the session resumes with no first turn, a `go` session too. With Scratch on the line the entry is drawn dim, not clickable, and says there is none to
+// continue.
 //
 // Every menu opens inside the page: after a render while one is open, and on a resize, the
 // piece measures it, and shifts it left by what it passes 16 px from the page's right edge,
@@ -132,8 +150,9 @@ import type {
 } from "./options-model.ts";
 
 import {
-  CLEAR, fillFace, fillIn, fillNote, fillOf, fillRows, FROM_LAST, fromLast, HARNESS_ROW, harnessStep, keptFill,
-  lastKey, lastWhen, parseLast, withoutFill,
+  BY_DEFAULT, CLEAR, filledAt, filledNote, filledRefusal, fillFace, fillIn, fillNote, fillOf, fillRows, fills, FROM_LAST, fromLast,
+  HARNESS_ROW, harnessStep, keptFill, keptForPick, lastKey, lastWhen, parseLast, pickedHarnessFill, refusalNote,
+  withoutFill,
 } from "./fill-model.ts";
 import type { Last, LastKey } from "./fill-model.ts";
 import {
@@ -145,14 +164,16 @@ import {
   afterPick, atLoad, lastQuery, NO_PRESET_ROW, PRESET, presetFace, presetMenu, presetOff, presetPlace, sameChoice,
 } from "./preset-model.ts";
 import {
-  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, hasEffort, IDLE,
+  afterNoAnswer, aroundPage, buttonWords, chipFace, chipMenu, copied, dangerSentences, edited, followed, following, handoffAtCopy,
+  handoffAtLaunch, handoffAtPreset, handoffOf, hasEffort, IDLE,
   inFlight, launched,
   LAUNCHER_PAGE, launchRequest, openWhere, parsePlaces, parseTargets, pickValues, placed, placeRows, PRESSED, previewed, runMenu,
-  placeTime, resumeSent, runOf, SLOTS_UNREAD, STARTING, stopped, TARGETS_FRESH_MS, typedFolder, valueOf, whereFace,
+  placeTime, resumeSent, runOf, SCRATCH, SCRATCH_PICK, SCRATCH_SAYS, SLOTS_UNREAD, STARTING, stopped, takesScratch,
+  TARGETS_FRESH_MS, tilde, typedFolder, valueOf, whereFace,
 } from "./prompt-model.ts";
 import {
-  BRIEF_FILE_FIELD, BRIEF_FROM_FILE, CLEAR_FILE, CONTINUE_LAST, continueWords, lastSession, PLUS_LABEL, resumeBody,
-  SESSIONS_READ, takesBriefFile,
+  BRIEF_FILE_FIELD, BRIEF_FROM_FILE, CLEAR_FILE, CONTINUE_LAST, continueWords, HANDOFF_FILE_FIELD, HANDOFF_FROM_FILE,
+  lastSession, NONE_TO_CONTINUE, noneToContinue, PLUS_LABEL, resumeBody, SESSIONS_READ, takesBriefFile, takesHandoff,
 } from "./plus-model.ts";
 import type { ChipItem, Flight, Line, Pick, Place, PlaceRow, Run, RunRow, Targets } from "./prompt-model.ts";
 import {
@@ -204,7 +225,7 @@ const STYLES = css`
           outline: 0; background: none; color: var(--moxi-text); font: inherit; }
   .find::placeholder { color: var(--moxi-text-dim); opacity: 1; }
   .hint { margin: 0; padding: 7px 14px 0; color: var(--moxi-text-dim); }
-  .places { display: grid; margin-top: 6px; }
+  .places, .others { display: grid; margin-top: 6px; }
   .row { display: grid; grid-template-columns: 20px 1fr auto; align-items: baseline; width: 100%; padding: 7px 14px;
          border: 0; background: none; color: var(--moxi-text); font: inherit; text-align: left; }
   .row:hover { background: var(--moxi-bg-hover); }
@@ -283,6 +304,8 @@ const STYLES = css`
   .menu.plusm { top: calc(100% + 6px); width: 320px; padding: 6px 0 4px; }
   .plusm .row { grid-template-columns: 20px 1fr; padding: 7px 14px; }
   .plusm .row .d { display: block; color: var(--moxi-text-dim); font-size: 13px; line-height: 18px; }
+  .plusm .row.none { color: var(--moxi-text-dim); cursor: default; }
+  .plusm .row.none:hover { background: none; }
   .plusm .find { margin-top: 4px; border-top: 1px solid var(--moxi-border); border-bottom: 0; }
   textarea:disabled { color: var(--moxi-text-dim); cursor: default; }
   .changed .file { min-width: 0; overflow-wrap: anywhere; font-family: var(--moxi-font-mono); font-size: 13px; }
@@ -301,6 +324,7 @@ const STYLES = css`
   .fr .d { min-width: 0; color: var(--moxi-text-dim); overflow-wrap: anywhere; }
   .fr.dg .d, .fr.dg > span { color: var(--moxi-danger); }
   .fr button, .came button { padding: 0; border: 0; background: none; color: var(--moxi-text); font: inherit; }
+  .fr .nref { grid-column: 1 / -1; margin: 2px 0 0; }
   .fnote { margin: 6px 0 0; padding: 9px 14px 10px; border-top: 1px solid var(--moxi-border); color: var(--moxi-text-dim);
            font-size: 13px; line-height: 18px; }
   .came { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; color: var(--moxi-text-dim);
@@ -448,6 +472,7 @@ export class LauncherPrompt extends LitElement {
     nameSaid: { state: true },
     saving: { state: true },
     briefFile: { state: true },
+    handoff: { state: true },
     fileField: { state: true },
     pasts: { state: true },
   };
@@ -497,7 +522,8 @@ export class LauncherPrompt extends LitElement {
   /** The values filled from the last launch and left as they were, by row; `harness` when the
    * harness was filled too. */
   filled: Record<string, FormValue> = {};
-  /** The last launch the fill was made from, with the key it was read for; null with none. */
+  /** The last launch the fill was made from, with the key it was read for; with nothing
+   * filled, the answer whose comms identities a harness picked by hand fills; null with none. */
   last: (Last & { key: LastKey }) | null = null;
   /** The earlier launches `Run again` lists, newest first; empty until read. */
   recents: Recent[] = [];
@@ -515,8 +541,11 @@ export class LauncherPrompt extends LitElement {
   saving = false;
   /** The brief file set through the `+`; "" for none, when the box's text is the first turn. */
   briefFile = "";
-  /** The `+` menu's field for a brief file's path is open. */
-  fileField = false;
+  /** The handoff set through the `+`: a path, "" for one cleared, null to send the one the
+   * form is filled with. */
+  handoff: string | null = null;
+  /** Which of the `+` menu's path fields is open: the brief file's, the handoff's, or none. */
+  fileField: "" | "brief" | "handoff" = "";
   /** The past sessions the `+` menu read when it opened; null until that read answers. */
   pasts: Past[] | null = null;
   #pastsAsked = 0;
@@ -524,6 +553,9 @@ export class LauncherPrompt extends LitElement {
   #actor = "";
   /** The brief file sent with the press; null when none was. */
   #sentFile: string | null = null;
+  /** The handoff the piece held at the press: one set through the `+`, or "" for one cleared;
+   * null when it followed the form's fill. */
+  #sentHandoff: string | null = null;
   #nameAsked = 0;
   /** The query the latest read of the name was for; null to read it again at the next update. */
   #nameKey: string | null = null;
@@ -549,8 +581,8 @@ export class LauncherPrompt extends LitElement {
   #targetsRead: Promise<void> = Promise.resolve();
   /** Counts presses, so an answer for an earlier launch is dropped. */
   #pressed = 0;
-  /** The box's text when the button was pressed; null for a recent run again, a resume, or a
-   * launch with a brief file, which send none of it. */
+  /** The box's text when the button or `Continue the last session` was pressed; null for a
+   * recent run again, or a launch or resume with a brief file, which send none of it. */
   #sent: string | null = "";
   /** The values that can do harm turned on when the button was pressed, by row. */
   #sentOn: Record<string, string> = {};
@@ -724,12 +756,13 @@ export class LauncherPrompt extends LitElement {
     return this.#form?.harness ?? "";
   }
 
-  /** The rows this piece sets, over what `/api/form` fills: the brief, a brief file, the place, the
+  /** The rows this piece sets, over what `/api/form` fills: the brief, a brief file, a handoff, the place, the
    * model and the effort once the chip's menu set them, each value set in the panel, and
    * under those the values filled from the last launch. */
   get set(): Record<string, FormValue> {
     return { ...this.#fill, ...this.options, ...this.chosen, brief: this.brief === "" ? null : this.brief,
              ...(this.briefFile === "" ? {} : { brief_file: this.briefFile }),
+             ...(this.handoff === null ? {} : { handoff: this.handoff }),
              ...(this.pick === null ? {} : pickValues(this.pick)) };
   }
 
@@ -757,12 +790,13 @@ export class LauncherPrompt extends LitElement {
    * preset applied reads it again with none for the same harness. An answer that can't be
    * read leaves the form as it was. A read the fill asks for (`fill`) takes no form that is
    * refused; another harness read for any other reason lets go of the filled values, which
-   * are the first harness's own. */
-  async #readForm(harness: string, fill = false): Promise<void> {
+   * are the first harness's own. A harness the user picked (`picked`) then fills the comms
+   * identity the last launch gives it, unless the user set the identity here. */
+  async #readForm(harness: string, fill = false, picked = false): Promise<void> {
     const asked = (this.#asked += 1);
     this.#formIn = true;
     try {
-      await this.#formRead(asked, harness, fill);
+      await this.#formRead(asked, harness, fill, picked);
     } finally {
       // The fill waits for the latest read of the form, however it ended.
       if (asked === this.#asked) {
@@ -772,7 +806,7 @@ export class LauncherPrompt extends LitElement {
     }
   }
 
-  async #formRead(asked: number, harness: string, fill: boolean): Promise<void> {
+  async #formRead(asked: number, harness: string, fill: boolean, picked: boolean): Promise<void> {
     const identity = this.fields.length === 0 ? "" : this.#identity;
     this.#identityAsked = identity;
     const choice = this.preset;
@@ -804,6 +838,9 @@ export class LauncherPrompt extends LitElement {
     if (other && this.fields.length > 0) {
       this.options = keptOptions(this.options, this.fields);
       this.pending = null;
+    }
+    if (other && picked && this.last !== null && this.fields.length > 0) {
+      this.filled = pickedHarnessFill(this.last, this.fields as PanelField[], form, this.#held());
     }
   }
 
@@ -843,7 +880,7 @@ export class LauncherPrompt extends LitElement {
       if (asked !== this.#lastAsked) return;
       const read = answer.status === 200 ? parseLast(answer.data) : null;
       this.#lastRead = true;
-      if (read !== null && read.state === "up" && read.at !== null) this.#waiting = { ...read, key };
+      if (read !== null && read.state === "up" && fills(read)) this.#waiting = { ...read, key };
       this.#settle();
       this.requestUpdate();
     });
@@ -861,25 +898,32 @@ export class LauncherPrompt extends LitElement {
       return;
     }
     const step = harnessStep(last, form);
-    if (step === "none" || (step === "read" && this.#fillHarness === last.harness)) {
-      this.#filledNothing();
-      return;
-    }
-    if (step === "read") {
+    if (step === "read" && this.#fillHarness !== last.harness) {
       this.#fillHarness = last.harness as string;
       void this.#readForm(this.#fillHarness, true);
       return;
     }
-    const held = new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
-    const values = fillOf(last, this.fields as PanelField[], form, held);
+    // Off the launch's harness only the comms identity for the form's own harness fills.
+    const values = fillOf(last, this.fields as PanelField[], form, this.#held());
+    if (step !== "same" && Object.keys(values).length === 0) {
+      this.#filledNothing();
+      return;
+    }
     this.filled = this.#fillHarness === form.harness ? { [HARNESS_ROW]: form.harness, ...values } : values;
     this.last = last;
     this.#waiting = null;
     this.#fillHarness = "";
   }
 
-  /** The last launch waiting fills nothing. */
+  /** The rows the user set here, which nothing fills over. */
+  #held(): Set<string> {
+    return new Set([...Object.keys(this.options), ...Object.keys(this.chosen), this.pending?.name ?? ""]);
+  }
+
+  /** The last launch waiting fills nothing; its comms identities stay for a harness picked
+   * by hand. */
   #filledNothing(): void {
+    this.last = keptForPick(this.#waiting);
     this.#waiting = null;
     this.#fillHarness = "";
     this.requestUpdate();
@@ -899,7 +943,7 @@ export class LauncherPrompt extends LitElement {
     void this.updateComplete.then(() => this.#box()?.focus());
   }
 
-  /** A filled row the user edits is his change from now on, no longer filled. */
+  /** A filled row the user edits is the user's change from now on, no longer filled. */
   #edited(...names: string[]): void {
     if (names.some((name) => Object.hasOwn(this.filled, name))) this.filled = withoutFill(this.filled, ...names);
   }
@@ -920,11 +964,13 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Applies a preset, or none, and reads the form for it. The chip's choices go, since the
-   * preset gives the model and the effort; values set in the panel stay. */
+   * preset gives the model and the effort, and so does a cleared handoff, so the preset's or
+   * the defaults' shows; values set in the panel stay. */
   #apply(choice: Choice): void {
     if (sameChoice(choice, this.preset)) return;
     this.preset = choice;
     this.chosen = {};
+    this.handoff = handoffAtPreset(this.handoff);
     this.pending = null;
     void this.#readForm(this.#presetOf(choice)?.harness ? "" : this.harness);
   }
@@ -939,7 +985,7 @@ export class LauncherPrompt extends LitElement {
     this.#home = where.home;
     this.#actor = where.actor;
     this.places = where.places;
-    // A place he picked while the read was under way stands; the one opened on counts as
+    // A place the user picked while the read was under way stands; the one opened on counts as
     // picked, so a project's own preset is applied.
     if (this.pick !== null) return;
     this.pick = where.pick;
@@ -960,7 +1006,7 @@ export class LauncherPrompt extends LitElement {
 
   #setHarness(value: string): void {
     this.older = false;
-    if (value !== this.harness) void this.#readForm(value);
+    if (value !== this.harness) void this.#readForm(value, false, true);
   }
 
   #openOlder(): void {
@@ -1010,9 +1056,11 @@ export class LauncherPrompt extends LitElement {
     if (this.menu === "preset") void this.#readPresets();
   }
 
-  /** Applies a preset picked in the menu, or none, and moves the line to the place it names. */
+  /** Applies a preset picked in the menu, or none, and moves the line to the place it names.
+   * The one already applied, picked again, lets go of a cleared handoff too. */
   #pickPreset(choice: Choice): void {
     this.menu = "";
+    this.handoff = handoffAtPreset(this.handoff);
     const preset = this.#presetOf(choice);
     const place = preset === null ? null : presetPlace(preset, this.#withProjects);
     if (place !== null) this.pick = place;
@@ -1051,6 +1099,7 @@ export class LauncherPrompt extends LitElement {
         <div class="boxrow"><div class="left">${this.#plus()}${this.#chip()}${this.#optionsWord()}</div>${this.#button()}</div>
       </div>
       ${this.#fileLine()}
+      ${this.#handoffLine()}
       ${this.#changed()}
       ${this.#presetLine()}
       ${this.#said()}
@@ -1069,26 +1118,44 @@ export class LauncherPrompt extends LitElement {
         this.presets.length > 0 ? this.#presetItem() : nothing}${this.#fillItem()}</div>`;
   }
 
-  /** When the last launch the fill came from was made, as the page says it. */
-  get #lastWhen(): string {
-    return this.last === null ? "" : lastWhen(this.last.at ?? "", new Date());
+  /** comms' refusal of the filled identity and the note of a live namesake in a project scope,
+   * under the row `name` names when it is the identity; nothing when there is neither. */
+  #refusedBeside(name: string) {
+    if (name !== "identity" || this.last === null) return nothing;
+    const harness = this.#form?.harness ?? "";
+    const found = filledRefusal(this.last, this.#fill, harness);
+    const note = filledNote(this.last, this.#fill, harness);
+    return html`${found === null ? nothing : html`<p class="nref" data-refused=${found.code}>${refusalNote(found)}</p>`}${
+      note === null ? nothing : html`<p class="nref" data-namesake>${note}.</p>`}`;
   }
 
-  /** `· From last launch <label>` on the line, once a value is filled, and its list while
-   * it is open: each value with `Clear`, then where the values came from. */
+  /** When the launch the fill came from was made; null for a default identity. */
+  get #fillAt(): string | null {
+    return this.last === null ? null : filledAt(this.last, this.#fill, this.#form?.harness ?? "");
+  }
+
+  /** When the launch the fill came from was made, as the page says it. */
+  get #lastWhen(): string {
+    return this.last === null ? "" : lastWhen(this.#fillAt ?? "", new Date());
+  }
+
+  /** `· From last launch <label>` on the line, once a value is filled, or `· Default <label>`
+   * for the default filled with no launch, and its list while it is open: each value with
+   * `Clear`, then where the values came from. */
   #fillItem() {
     const rows = fillRows(this.#fill, this.fields as PanelField[], this.#home);
     const face = fillFace(rows);
     if (face === null || this.last === null) return nothing;
     const open = this.menu === "fill";
-    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${FROM_LAST}</span><span
+    const from = this.#fillAt === null ? BY_DEFAULT : FROM_LAST;
+    return html`<span class="sep" aria-hidden="true">·</span><span class="k">${from}</span><span
       class=${open ? "anchor open" : "anchor"} data-item="fill"><button type="button" class="pre" aria-haspopup="true"
-        aria-expanded=${open ? "true" : "false"} aria-label=${`${FROM_LAST} ${face.text}`}
+        aria-expanded=${open ? "true" : "false"} aria-label=${`${from} ${face.text}`}
         @click=${() => { this.menu = open ? "" : "fill"; }}><span class=${face.danger ? "dg" : ""}>${face.text}</span><span
         class="v" aria-hidden="true">▾</span></button>${open ? html`<div class="menu fill" data-menu="fill">
         ${rows.map((row) => html`<div class=${row.danger ? "fr dg" : "fr"} data-fill=${row.name}><span>${row.label}</span><span
           class="d">${row.text}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
-          @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`)}
+          @click=${() => this.#clear(row.name)}>${CLEAR}</button>${this.#refusedBeside(row.name)}</div>`)}
         <p class="fnote">${fillNote(this.last.key, this.#lastWhen, rows.length)}</p></div>` : nothing}</span>`;
   }
 
@@ -1133,6 +1200,7 @@ export class LauncherPrompt extends LitElement {
       ${this.typed === "" ? nothing
         : html`<p class="hint" role="status">Give an absolute path, or one starting with ~</p>`}
       <div class="places">${rows.map((row) => this.#placeRow(row))}</div>
+      ${takesScratch(this.fields) ? html`<div class="others">${this.#scratchRow(pick.kind === "scratch")}</div>` : nothing}
       ${this.#withProjects ? html`<p class="all">All projects</p>${this.#picker}` : nothing}
     </div>`;
   }
@@ -1141,6 +1209,13 @@ export class LauncherPrompt extends LitElement {
     return html`<button type="button" class="row" data-current=${row.current ? "true" : "false"}
       @click=${() => this.#choose(row.pick)}><span aria-hidden="true">${row.current ? "✓" : ""}</span><span
       class="name">${this.#folder(row.dim, row.name)}</span><span class="t">${row.time}</span></button>`;
+  }
+
+  /** The menu's `Scratch` row: a throwaway folder as the launch's one place. */
+  #scratchRow(current: boolean) {
+    return html`<button type="button" class="row" data-place="scratch" data-current=${current ? "true" : "false"}
+      @click=${() => this.#choose(SCRATCH_PICK)}><span aria-hidden="true">${current ? "✓" : ""}</span><span
+      class="name">${SCRATCH}</span><span class="t">${SCRATCH_SAYS}</span></button>`;
   }
 
   #chip() {
@@ -1191,7 +1266,7 @@ export class LauncherPrompt extends LitElement {
   /** Opens or closes the `+` menu; each open reads the past sessions again. */
   #togglePlus(): void {
     this.menu = this.menu === "plus" ? "" : "plus";
-    this.fileField = false;
+    this.fileField = "";
     if (this.menu === "plus") void this.#readPasts();
   }
 
@@ -1207,22 +1282,31 @@ export class LauncherPrompt extends LitElement {
   #plusMenu() {
     const last = lastSession(this.pasts ?? [], this.pick, this.#actor, this.#home);
     const file = takesBriefFile(this.fields);
+    const handoff = takesHandoff(this.fields) ? handoffOf(this.fields, this.set) : undefined;
     return html`<div class="menu plusm" data-menu="plus">
       ${file ? html`<button type="button" class="row" data-plus="brief-file"
-        data-current=${this.briefFile === "" ? "false" : "true"} @click=${this.#openFileField}><span
+        data-current=${this.briefFile === "" ? "false" : "true"} @click=${() => this.#openFileField("brief")}><span
         aria-hidden="true">${this.briefFile === "" ? "" : "✓"}</span><span class="name">${BRIEF_FROM_FILE}</span></button>`
         : nothing}
-      ${last === null ? nothing : html`<button type="button" class="row" data-plus="continue"
+      ${handoff === undefined ? nothing : html`<button type="button" class="row" data-plus="handoff"
+        data-current=${handoff === null ? "false" : "true"} @click=${() => this.#openFileField("handoff")}><span
+        aria-hidden="true">${handoff === null ? "" : "✓"}</span><span class="name">${HANDOFF_FROM_FILE}</span></button>`}
+      ${noneToContinue(this.pick) ? html`<div class="row none" data-plus="continue" aria-disabled="true"><span
+        aria-hidden="true"></span><span class="name">${CONTINUE_LAST}<span class="d">${NONE_TO_CONTINUE}</span></span></div>`
+        : last === null ? nothing : html`<button type="button" class="row" data-plus="continue"
         @click=${() => void this.#continue(last)}><span aria-hidden="true"></span><span class="name">${CONTINUE_LAST}<span
         class="d">${continueWords(last)}</span></span></button>`}
-      ${this.fileField ? html`<input class="find" type="text" aria-label=${BRIEF_FILE_FIELD}
+      ${this.fileField === "brief" ? html`<input class="find" type="text" aria-label=${BRIEF_FILE_FIELD}
         placeholder=${BRIEF_FILE_FIELD} autocomplete="off" spellcheck="false" .value=${this.briefFile}
         @keydown=${this.#fileKey}>` : nothing}
+      ${this.fileField === "handoff" ? html`<input class="find" type="text" aria-label=${HANDOFF_FILE_FIELD}
+        placeholder=${HANDOFF_FILE_FIELD} autocomplete="off" spellcheck="false" .value=${handoff ?? ""}
+        @keydown=${this.#handoffKey}>` : nothing}
     </div>`;
   }
 
-  #openFileField(): void {
-    this.fileField = true;
+  #openFileField(which: "brief" | "handoff"): void {
+    this.fileField = which;
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLInputElement>(".plusm .find")?.focus());
   }
 
@@ -1232,9 +1316,46 @@ export class LauncherPrompt extends LitElement {
     event.preventDefault();
     this.#setFile((event.target as HTMLInputElement).value.trim());
     this.menu = "";
-    this.fileField = false;
+    this.fileField = "";
     void this.updateComplete.then(() => (this.renderRoot.querySelector<HTMLElement>(this.briefFile === "" ? "textarea" : ".go"))
       ?.focus());
+  }
+
+  /** Enter in the handoff's path field sets the handoff, or clears it when the field is
+   * empty. The box keeps its text and the caret goes back to it. */
+  #handoffKey(event: KeyboardEvent): void {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    this.#setHandoff((event.target as HTMLInputElement).value.trim());
+    this.menu = "";
+    this.fileField = "";
+    void this.updateComplete.then(() => (this.briefFile === "" ? this.#box() : this.renderRoot.querySelector<HTMLElement>(".go"))
+      ?.focus());
+  }
+
+  /** Sets the handoff, "" to clear it. The lines of a launch that has ended go, as at an edit
+   * of the box. */
+  #setHandoff(path: string): void {
+    this.handoff = path;
+    const next = edited(this.flight);
+    if (next !== this.flight) {
+      this.flight = next;
+      this.#stopFollow();
+      this.#pressed += 1;
+    }
+  }
+
+  /** The dim line under the box while a handoff is sent, whether set through the `+` or
+   * filled by the user's defaults or the preset: its path, home written `~`, and `Clear`. */
+  #handoffLine() {
+    const path = takesHandoff(this.fields) ? handoffOf(this.fields, this.set) : null;
+    if (path === null) return nothing;
+    return html`<div class="changed" data-handoff><span><span class="k">${HANDOFF_FROM_FILE}</span><b
+      class="file">${tilde(path, this.#home)}</b></span><button type="button" aria-label=${`${CLEAR_FILE} the handoff`}
+      @click=${() => {
+        this.#setHandoff("");
+        void this.updateComplete.then(() => this.#box()?.focus());
+      }}>${CLEAR_FILE}</button></div>`;
   }
 
   /** Sets the brief file, "" for none. The lines of a launch that has ended go, as at an edit
@@ -1260,18 +1381,22 @@ export class LauncherPrompt extends LitElement {
       }}>${CLEAR_FILE}</button></div>`;
   }
 
-  /** A click on `Continue the last session`: the session resumed at once, its lines under the
-   * box, or its command copied. The box, the panel and the fill stay as they are. */
+  /** A click on `Continue the last session`: the session resumed at once with the box's text
+   * as its brief, or the brief file while one is set, its lines under the box, or its command
+   * copied. A resume that starts lets go of the box's text or the file as a launch does; the
+   * panel and the fill stay as they are. */
   async #continue(past: Past): Promise<void> {
     if (inFlight(this.flight)) return;
     const mine = (this.#pressed += 1);
     this.#stopFollow();
-    this.#sent = null;
+    const body = resumeBody(past, this.brief, this.briefFile);
+    this.#sentFile = this.briefFile === "" ? null : this.briefFile;
+    this.#sent = this.#sentFile === null ? this.brief : null;
     this.#sentOn = {};
-    this.#sentFile = null;
+    this.#sentHandoff = null;
     this.menu = "";
     this.flight = PRESSED;
-    const sent = resumeSent(await api("launcher", "api/resume", resumeBody(past)));
+    const sent = resumeSent(await api("launcher", "api/resume", body));
     if (mine !== this.#pressed) return;
     if (sent.copy !== null) {
       await this.#copy(mine, sent.copy, []);
@@ -1486,13 +1611,14 @@ export class LauncherPrompt extends LitElement {
   }
 
   /** Under a value filled from the last launch: when that launch was made, and `Clear`; in
-   * the warning colour for a value that can do harm. */
+   * the warning colour for a value that can do harm. Under a filled identity comms refuses a
+   * launch under, comms' refusal. */
   #fromLast(row: PanelRow) {
     const fill = this.#fill;
     if (!Object.hasOwn(fill, row.name) || this.last === null) return nothing;
     return html`<div class=${isDanger(row.field, fill[row.name]) ? "came dg" : "came"} data-from=${row.name}><span>${
       fromLast(this.#lastWhen)}</span><button type="button" aria-label=${`${CLEAR} ${row.label}`}
-      @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>`;
+      @click=${() => this.#clear(row.name)}>${CLEAR}</button></div>${this.#refusedBeside(row.name)}`;
   }
 
   /** Under a value that can do harm: what it does and that it holds for this launch only.
@@ -1748,6 +1874,7 @@ export class LauncherPrompt extends LitElement {
     this.#sent = null;
     this.#sentOn = {};
     this.#sentFile = null;
+    this.#sentHandoff = null;
     this.menu = "";
     this.flight = PRESSED;
     await this.#send(mine, recentBody(card.answer.request), againRun(card.run));
@@ -1850,6 +1977,7 @@ export class LauncherPrompt extends LitElement {
     // A brief file is the first turn in place of the box's text, which then stays.
     this.#sentFile = this.briefFile === "" ? null : this.briefFile;
     this.#sent = this.#sentFile === null ? this.brief : null;
+    this.#sentHandoff = this.handoff;
     this.#sentOn = turnedOn(this.fields as PanelField[], this.options);
     this.menu = "";
     this.flight = PRESSED;
@@ -1890,7 +2018,8 @@ export class LauncherPrompt extends LitElement {
 
   /** Copies a terminal launch's command, or shows it to copy by hand. Either way the
    * command is the launch: each value that can do harm it was built with is let go of, as
-   * a launch that started lets go of it. */
+   * a launch that started lets go of it, and so is a Clear of the handoff made for it, so
+   * the form's handoff shows again. */
   async #copy(mine: number, command: string, notes: Line[]): Promise<void> {
     let done = true;
     try {
@@ -1902,6 +2031,8 @@ export class LauncherPrompt extends LitElement {
     this.flight = copied(command, done, notes);
     this.options = afterLaunch(this.options, this.#sentOn);
     this.#sentOn = {};
+    this.handoff = handoffAtCopy(this.handoff, this.#sentHandoff);
+    this.#sentHandoff = null;
   }
 
   /** Reads the launch's status path now and then on a timer, until it ends. */
@@ -1921,10 +2052,11 @@ export class LauncherPrompt extends LitElement {
     if (mine === this.#pressed) this.#landed(followed(this.flight, answer));
   }
 
-  /** Takes the followed launch's next state. A launch that started empties the box, unless
-   * its text was changed since the press, lets go of the brief file it was launched with,
-   * unless it was changed since, and lets go of each value that can do harm it was
-   * launched with, unless its row was changed since the press. */
+  /** Takes the followed launch's or resume's next state. One that started empties the box,
+   * unless its text was changed since the press, lets go of the brief file and of the handoff
+   * set or cleared it was launched with, unless one was changed since, so the form's handoff
+   * shows again, and lets go of each value that can do harm it was launched with, unless its
+   * row was changed since the press. */
   #landed(next: Flight): void {
     if (next === this.flight) return;
     this.flight = next;
@@ -1933,6 +2065,8 @@ export class LauncherPrompt extends LitElement {
     if (this.#sent !== null && this.brief === this.#sent) this.brief = "";
     if (this.#sentFile !== null && this.briefFile === this.#sentFile) this.briefFile = "";
     this.#sentFile = null;
+    this.handoff = handoffAtLaunch(this.handoff, this.#sentHandoff);
+    this.#sentHandoff = null;
     this.options = afterLaunch(this.options, this.#sentOn);
     this.#sentOn = {};
   }

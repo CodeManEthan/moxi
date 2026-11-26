@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 from moxi import files, modules
 from moxi.paths import Layout
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_ui.loopback.api import call, read_runtime, write_runtime
 
 from moxi_ui import health, listen
@@ -90,6 +91,18 @@ def test_a_page_keeps_its_group_and_order_and_a_wrong_one_reads_as_the_default()
         assert page(group="daily", order=order)["order"] == 500
 
 
+def test_a_page_keeps_the_modules_that_take_it_out_of_the_band_and_a_wrong_value_reads_as_none():
+    def page(**extra):
+        return _one(_ok(script="page.js", place="page", **extra), name="page")
+
+    assert page(band_unless=["sessions"])["band_unless"] == ["sessions"]
+    assert page(band_unless=("sessions", "memory", "sessions"))["band_unless"] == ["sessions", "memory"]
+    assert page()["band_unless"] == []
+    for wrong in ("sessions", ["Sessions"], ["sessions", 3], [""], {"sessions": True}, True, None):
+        assert page(band_unless=wrong)["band_unless"] == []
+    assert _one(_ok(home=True, band_unless=["sessions"]))["band_unless"] is None
+
+
 @pytest.mark.parametrize("home_as", ["main", "row"])
 def test_a_home_block_keeps_its_home_as_and_order(home_as):
     kept = _one(_ok(home=True, home_as=home_as, order=10))
@@ -117,12 +130,12 @@ def test_a_home_as_that_does_not_fit_refuses_the_component(decl, reason):
     assert placed == [] and reason in refused[0]["reason"]
 
 
-def test_the_modules_shape_sends_the_three_fields():
+def test_the_modules_shape_sends_the_four_fields():
     from moxi_ui.page import _COMPONENT
 
     row = _one(_ok(home=True, home_as="row", order=900))
     assert set(row) == set(_COMPONENT.items)
-    assert {"home_as", "group", "order"} <= set(_COMPONENT.items)
+    assert {"home_as", "group", "order", "band_unless"} <= set(_COMPONENT.items)
 
 
 def _fake_run(listing, exports, calls):
@@ -241,7 +254,7 @@ def _serve(**kwargs):
     shell.start()
     thread = threading.Thread(target=lambda: asyncio.run(shell.run()), daemon=True)
     thread.start()
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while shell._should_exit is None and time.monotonic() < deadline:
         time.sleep(0.01)
     return shell, thread
@@ -272,7 +285,7 @@ def test_the_shell_mounts_a_new_module_without_a_restart_and_serves_its_own_rout
         assert _get(port, "/m/sntwo/api/echo?n=2", browser)[0] == 404
         _module(site, "sntwo")
         os.utime(site)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + PROC_WAIT_S
         while time.monotonic() < deadline:
             if _get(port, "/m/sntwo/api/echo?n=2", browser) == (200, b'{"n":2}'):
                 break
@@ -448,6 +461,13 @@ def test_a_sample_over_the_budget_is_named():
     assert health.over_budget({"rss": 90 * 1024**2, "fds": 65}, health.SHELL_BUDGET) == [
         "RSS 90 MB over its 80M", "65 open fds over its 64"]
     assert health.over_budget({"rss": 10, "fds": 1}, {"rss": "120M", "fds": 64}) == []
+
+
+def test_handles_in_a_windows_sample_are_never_compared_with_the_fds_budget():
+    handles = {"pid": 1, "rss": 30 * 1024**2, "cpu_s": 1.0, "handles": 232}
+    assert health.over_budget(handles, health.SHELL_BUDGET) == []
+    assert health.over_budget({**handles, "rss": 90 * 1024**2}, health.SHELL_BUDGET) == [
+        "RSS 90 MB over its 80M"]
 
 
 # --- the announcement ---------------------------------------------------------------------

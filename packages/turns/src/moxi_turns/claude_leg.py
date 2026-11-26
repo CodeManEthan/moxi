@@ -18,10 +18,15 @@ Lines (endpoint to runner)
 
 The first line, always first, before the runner sends anything:
 
-    {"op": "hello", "leg": 4, "mod_sock": "<absolute path>", "stop_wait_ms": n,
-     "listen_wait_ms": n, "endpoint_version": "…", "pid": <endpoint pid>,
-     "stop_after_clear": bool, "guards": [<entry>, ...], "after_tool_wait_ms": n,
-     "floors": {"<row id>": n, ...}}
+    {"op": "hello", "leg": 5, "mod_sock": "<absolute path>", "stop_wait_ms": n,
+     "listen_wait_ms": n, "prompt_wait_ms": n, "endpoint_version": "…",
+     "pid": <endpoint pid>, "stop_after_clear": bool, "guards": [<entry>, ...],
+     "after_tool_wait_ms": n, "floors": {"<row id>": n, ...}}
+
+`prompt_wait_ms` is the session's prompt bound, decided at the endpoint's start: the
+longest of `listen_wait_ms` and the `prompt` rows' own waits for this session. The runner
+waits that plus its margin for a prompt's context; a runner that finds no
+`prompt_wait_ms` waits `listen_wait_ms`.
 
 `stop_after_clear` says whether the runner stops a `clear`'s shells through `TaskStop`
 after the clear (`STOP_AFTER_CLEAR`); false, it stops none after a clear and reports
@@ -55,20 +60,41 @@ or a context not known yet (none since the last SessionStart), skips none.
 
 or, when the endpoint cannot start (its config is broken), its only line:
 
-    {"op": "failed", "leg": 4, "error": "<words>"}
+    {"op": "failed", "leg": 5, "error": "<words>"}
 
 Then, in any order:
 
     {"op": "submit", "delivery": id, "kind": "start" | "deliver", "text": "…",
-     "nonce": "<the window nonce>"}
+     "nonce": "<the window nonce>", "note"?: "…"}
         `$.prompt.submit` the text, framed under the plugin's name, with the line
         `NONCE_LINE + nonce` first (entry, below). The window nonce is random, 128 bits,
         minted per window, so no other window of this endpoint or any earlier one names
         it. The endpoint sends the next `submit` only once this one's window has closed.
+        `note` comes only on a held steer's submit (`append.held`, below): the steer's
+        text, which Claude Code holds as a plugin note, while `text` is a prompt that
+        points at it. The runner first reads `$.session.messages({as: "api"})`. When a
+        request has carried the note already (it sits in a user message before the last
+        assistant message), or a main-loop turn is open whose requests carry it, the
+        runner submits nothing and reports `submit.close` with `end` `carried`. When no
+        user message holds the note (a /clear or a compaction dropped it), or the
+        messages cannot be read, it submits `note` in place of `text`, so the steer's
+        text still reaches the model. When it submitted `text`, it reads the messages
+        again at the `turn.complete` of the main-loop turn that started next, and
+        reports `append.held` for the delivery, ahead of that `turn.complete`, when the
+        note sits in no user message before the last assistant message: no request of
+        that turn carried it (a compaction inside the turn's first request dropped it).
+        A read that fails there reports nothing.
     {"op": "append", "delivery": id, "text": "…"}
         `$.session.append` a user-role row into the running turn (a steer). The runner
-        reports `append.done` when the call resolves without a deny, else
-        `append.failed`.
+        reports `append.done` when the call resolves without a deny while a main-loop
+        turn is open, `append.held` when it resolves with none open, else
+        `append.failed`. Claude Code sends the row as a plugin note with the turn's next
+        request; a turn that makes no further request ends with the note unsent, and
+        Claude Code holds it for the session's next request. At each main-loop
+        `turn.complete` the runner reads `$.session.messages({as: "api"})`, the messages
+        the next request is built from, and reports `append.held`, ahead of the
+        `turn.complete`, for each steer of that turn whose text is in a user message
+        after the last assistant message. A read that fails reports none held.
     {"op": "command", "request": id, "name": "clear" | "exit" | "compact",
      "stop_shells": bool}
         `$.command.run` the command; the gate re-checks it (`/gate/command`). With
@@ -88,6 +114,50 @@ Then, in any order:
         Every after-tool row's floor, sent each time one changes: at a `ready` (before
         its `/ask/context` answer) or after a call of the row's listener. It replaces the
         map the runner holds.
+    {"op": "fork", "delivery": id, "text": "…", "round_timeout_ms"?: n}
+        Start a fork of the main loop with `text` as its task (the `fork` request). The
+        runner spawns it with `$.agent.spawn({subagentType: "fork", prompt: <warm-up>,
+        description: "subconscious"})`, where the warm-up is the runner's own one-line
+        task asking for one word and saying the task follows, so that the task runs as
+        the fork's first resumed round: Claude Code announces a resumed round's answer to
+        the main loop and not the first answer of a fork a plugin spawned. A spawn
+        answered `{deny}`, or one that throws or names no agent, reports `fork.lost`
+        `denied: …`. Else the runner holds the fork's agent id, reports `fork.started`,
+        and waits for the fork's first `turn.complete`, at most `WARM_UP_WAIT_MS`
+        (30 s); it reports nothing of the warm-up's answer. A warm-up that does not
+        complete in that time, or ends other than `answer`, reports `fork.lost`
+        `gone: …`. Then it sends `text` with `$.session.send({to: {agentId}, text})`; a
+        send that throws or is not delivered reports `fork.lost` `gone: …`. The round's
+        `turn.complete`, within `round_timeout_ms` (the asker's bound, a positive number;
+        absent, `ROUND_WAIT_MS`, 120 s), reports `fork.done`; none in that time reports
+        `fork.lost` `gone: …`.
+
+    {"op": "fork.continue", "delivery": id, "agent_id": "…", "text": "…",
+     "round_timeout_ms"?: n}
+        Give the fork `agent_id`, which has answered, `text` as its next round (the
+        `fork.continue` request), a delivery of its own. A fork the runner still holds
+        (a round of it is open) reports `fork.lost` `denied: …` and nothing is sent.
+        Else the runner holds the id again for this delivery and sends `text` with
+        `$.session.send({to: {agentId}, text})`, which resumes the finished fork; a send
+        that throws or is not delivered reports `fork.lost` `gone: …`. A delivered send
+        reports `fork.started`, and the round's `turn.complete`, within
+        `round_timeout_ms` as on a `fork` line, `fork.done`; none in that time reports
+        `fork.lost` `gone: …`.
+
+        The runner holds a fork's agent id from its spawn, and from a further round's
+        line, until the fork's own `turn.complete` for that round; a /clear, a
+        compaction or a resume lets go of nothing, and only the end of the process that
+        holds it drops it. A warm-up or round past its bound reports `fork.lost` `gone: …`
+        at once, but the fork may still be running, so the id stays held until that late
+        `turn.complete`, which lets it go and reports nothing; a `fork.continue` line for
+        it meanwhile reports `fork.lost` `denied: …`. A warm-up that ends other than
+        `answer` and a send that fails let the id go at once. While it holds the id,
+        each tool call carrying it is the fork's: the guards judge it as any call, at
+        the call step and the ask step, and the runner makes no after-tool ask for it. A call
+        counts as the runner's own, judged by no guard, only when it carries no
+        `agentId` at all; a call with an id the runner does not hold is judged and asked
+        after as any other. The runner leaves the engine's notice of a finished round as
+        the engine sends it.
 
 Requests (runner and gate to endpoint, `POST` on `mod.sock`)
 ------------------------------------------------------------
@@ -97,18 +167,38 @@ own count from 1 for this load, and `kind`:
 
     session        {session_id, mod_version}       the runner's `$.session.id()`
     turn.start     {turn_id}                        a main-loop `turn.start`
-    turn.complete  {turn_id, reason, is_aborted}    a main-loop `turn.complete`
+    turn.complete  {turn_id, reason, is_aborted, answer}
+                                                    a main-loop `turn.complete`; `answer`
+                                                    is its final visible text
     submit.close   {delivery, end, reason}          a submit settled: `end` is `resolve`,
                                                     `drop` or `fail` (it rejected); a
                                                     drop's `reason` is the gate's code read
                                                     from its line, else `dropped`. Sent
                                                     whenever it settles, after a bound's
-                                                    report too
+                                                    report too. `carried`: a held steer's
+                                                    submit was not made, since another
+                                                    request carried its note
     submit.bound   {delivery, reason}               the runner's bound: still unsettled
                                                     after 5 s with no main-loop turn open
     append.done    {delivery}                       a steer appended: `$.session.append`
                                                     resolved without a deny
     append.failed  {delivery, reason}               a steer the runner could not append
+    append.held    {delivery}                       a steer appended, which its turn
+                                                    ended without sending: Claude Code
+                                                    holds it for the next request; or a
+                                                    held steer whose own turn ended
+                                                    without sending its note
+    fork.started   {delivery, agent_id}             the fork's spawn resolved with its
+                                                    agent id, or a further round's task
+                                                    was delivered
+    fork.done      {delivery, answer, reason, is_aborted}
+                                                    the fork's task round completed:
+                                                    `answer` is its final text, `reason`
+                                                    and `is_aborted` the round's
+                                                    `turn.complete`'s
+    fork.lost      {delivery, reason}               the fork never answered its task:
+                                                    `reason` starts `denied` (the spawn
+                                                    was refused) or `gone`
     command.done   {request, state, reason, new_session_id, shells?}
                                                     `$.command.run` settled: `state` is
                                                     `ran`, `refused` or `failed`. With
@@ -118,7 +208,9 @@ own count from 1 for this load, and `kind`:
                                                     stop is done
 
 Reports are keyed by their window's delivery: an end for a window that is not the open
-one is logged and changes nothing. The bound is a report, not a close: the endpoint fails
+one is logged and changes nothing. A `fork.*` report names a delivery handed to the
+runner on a `fork` or `fork.continue` line; one naming any other delivery, or one already settled, is
+logged and changes nothing. The bound is a report, not a close: the endpoint fails
 the open window by it only while its prompt is not admitted (entry, below).
 
 A report is applied once, in `seq` order. One whose `seq` the endpoint has already
@@ -129,6 +221,9 @@ was lost: the endpoint fails the open submit window (its delivery reads `Lost`, 
 `{"ok": true}`.
 
 `/live` — `{ask, agents, draft}` (or `{ask, error}`), the answer to a `live` line.
+`agents` is `$.agent.list()` unmapped, each `{id, type, status, parentId?, teammateId?}`:
+the endpoint maps it, judges the `waiting` subagents (`claude_stale`) and counts the busy
+entries. An integer is an older runner's own count of busy entries, read unjudged.
 `agents` is null when `$.agent.list()` could not be read: unknown, which counts as busy
 and never as 0. An unreadable box is sent as `draft: true`. Answer `{"ok": true}`.
 
@@ -144,10 +239,12 @@ open (`block`), null lets it end. The endpoint answers within `stop_handler.wait
 `/ask/context` — `{event: "ready" | "prompt", source, session_id}` at
 `classic.SessionStart` (`ready`) and `classic.UserPromptSubmit` (`prompt`). A `ready` also
 carries `transcript_path`, the file Claude writes the session's records to (the hook
-input's); a `prompt` carries `text`, the prompt as the hook got it, and `origin`, its
+input's); a `prompt` carries `text`, the prompt as the hook got it, `origin`, its
 origin's kind as the runner's `prompt.submit` hook recorded it, or null when the runner
-can't tie the two. Answer `{"ok": true, "context": "<text>" | null}`, the event's
-`additionalContext`. The endpoint answers within `listen.wait_ms`.
+can't tie the two, and `opens`, true when no main-loop turn was open in the runner as the
+hook ran. Answer `{"ok": true, "context": "<text>" | null}`, the event's
+`additionalContext`. The endpoint answers a `ready` within `listen.wait_ms`, a `prompt` within
+`prompt_wait_ms`.
 
 `/ask/after-tool` — `{call: {tool, tool_use_id, agentId, is_error}, rows: [id, ...]}` after
 a tool call ran (`next(e)` resolved with a result or an error, not a deny), naming the
@@ -165,8 +262,9 @@ queue; the endpoint tells the `usage` rows with the time it arrived. Answer
 
 `/gate/entry` — `{nonce, draft, agents}` from the gate, for every runner prompt as it
 enters. `nonce` is the window nonce the gate read off the prompt's first
-line; `draft` (bool) and `agents` (int, or true when the list could not be read) are the
-gate's readings. The endpoint admits the prompt only if the nonce names the window now
+line; `draft` (bool) and `agents` are the gate's readings. `agents` is the list's
+entries, as `/live` sends them, which the endpoint judges and counts; an integer, an
+older gate's own count, is read unjudged; true is a list that could not be read. The endpoint admits the prompt only if the nonce names the window now
 open and that window has admitted nothing yet; for a start it then re-checks the ledger
 and the refusals the start asked for, with the readings. It records its answer before it
 sends it. Answer `{"ok": true, "verdict": "pass"}` (the gate takes the nonce line off and
@@ -221,7 +319,7 @@ from . import hooktimes
 log = logging.getLogger("moxi.turns.claude")
 
 #: This leg's version.
-LEG = 4
+LEG = 5
 
 #: Whether the runner stops a `clear`'s shells after the clear. Claude Code may no longer
 #: find a task through `TaskStop` once `/clear` has run; until a live session shows it
@@ -235,6 +333,7 @@ NOT_STOPPED_AFTER_CLEAR = "not-stopped-after-clear"
 LINE_HELLO, LINE_FAILED = "hello", "failed"
 LINE_SUBMIT, LINE_APPEND, LINE_COMMAND, LINE_LIVE = "submit", "append", "command", "live"
 LINE_AGENTS, LINE_GUARDS, LINE_FLOORS = "agents", "guards", "floors"
+LINE_FORK, LINE_FORK_CONTINUE = "fork", "fork.continue"
 
 #: The request paths on `mod.sock`.
 PATH_REPORT = "/report"
@@ -254,14 +353,16 @@ PATHS = (PATH_REPORT, PATH_LIVE, PATH_AGENTS, PATH_STOP, PATH_CONTEXT, PATH_GUAR
 #: The report kinds.
 R_SESSION, R_TURN_START, R_TURN_COMPLETE = "session", "turn.start", "turn.complete"
 R_SUBMIT_CLOSE, R_SUBMIT_BOUND = "submit.close", "submit.bound"
-R_APPEND_DONE, R_APPEND_FAILED = "append.done", "append.failed"
+R_APPEND_DONE, R_APPEND_FAILED, R_APPEND_HELD = "append.done", "append.failed", "append.held"
 R_COMMAND_DONE = "command.done"
+R_FORK_STARTED, R_FORK_DONE, R_FORK_LOST = "fork.started", "fork.done", "fork.lost"
 REPORTS = (R_SESSION, R_TURN_START, R_TURN_COMPLETE, R_SUBMIT_CLOSE, R_SUBMIT_BOUND,
-           R_APPEND_DONE, R_APPEND_FAILED, R_COMMAND_DONE)
+           R_APPEND_DONE, R_APPEND_FAILED, R_APPEND_HELD, R_COMMAND_DONE, R_FORK_STARTED,
+           R_FORK_DONE, R_FORK_LOST)
 
-#: A submit window's three ends.
-END_RESOLVE, END_DROP, END_FAIL = "resolve", "drop", "fail"
-ENDS = (END_RESOLVE, END_DROP, END_FAIL)
+#: A submit window's ends: the three of every submit, and a held steer's `carried`.
+END_RESOLVE, END_DROP, END_FAIL, END_CARRIED = "resolve", "drop", "fail", "carried"
+ENDS = (END_RESOLVE, END_DROP, END_FAIL, END_CARRIED)
 
 #: The refusal codes the plugins decide on their own, with no word from the endpoint: the
 #: gate's `gone` (no answer within its 1 s, no `mod.sock` path, a fault in its hook) and
@@ -426,12 +527,12 @@ def _handler_for(handle):
 
 
 __all__ = ["LEG", "STOP_AFTER_CLEAR", "NOT_STOPPED_AFTER_CLEAR", "LINE_HELLO", "LINE_FAILED", "LINE_SUBMIT", "LINE_APPEND", "LINE_COMMAND",
-           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "LINE_FLOORS", "PATH_REPORT",
+           "LINE_LIVE", "LINE_AGENTS", "LINE_GUARDS", "LINE_FLOORS", "LINE_FORK", "LINE_FORK_CONTINUE", "PATH_REPORT",
            "PATH_LIVE", "PATH_AGENTS", "PATH_STOP", "PATH_CONTEXT", "PATH_GUARD",
            "PATH_AFTER_TOOL", "PATH_USAGE",
            "PATH_GATE_ENTRY", "PATH_GATE_COMMAND", "PATH_HOOK_TIMES", "PATHS", "R_SESSION",
            "R_TURN_START", "R_TURN_COMPLETE", "R_SUBMIT_CLOSE", "R_SUBMIT_BOUND", "R_APPEND_DONE",
-           "R_APPEND_FAILED",
-           "R_COMMAND_DONE", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "ENDS",
+           "R_APPEND_FAILED", "R_APPEND_HELD",
+           "R_COMMAND_DONE", "R_FORK_STARTED", "R_FORK_DONE", "R_FORK_LOST", "REPORTS", "END_RESOLVE", "END_DROP", "END_FAIL", "END_CARRIED", "ENDS",
            "GATE_CODES", "NONCE_LINE", "LATE", "MAX_BODY",
            "BadRequest", "LineWriter", "LegServer"]

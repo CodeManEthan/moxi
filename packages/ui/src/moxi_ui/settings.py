@@ -22,6 +22,14 @@ same spelling back. A switch table carries one toggle per entry, each named
 `elsewhere`), its value and its default as JSON text (`json`, `default_json`), and
 `changed`: true when the value is not the default (a switch table: when any entry is on).
 
+A module may keep a table of rows in a file of its own (its `CONFIG_TABLES`), which `show
+--json` lists after its own keys, each named `<table>.<row>`. Such a key also carries
+`table_title`, `table_line` and `table_file` (the file, the home folder written `~`), and
+may carry `warning` and `refused` (the module's words for a value some or all of its uses
+refuse) and `clear_only` (true on a key the page can only remove). Its mark is the table's
+`applies` words. A table whose file can't be read is one item holding `table_error` and
+`table_fix` in place of its rows; it is no key, so it is not drawn or counted as one.
+
 The read answers `listed`, the core and every present module with settings, from the
 module snapshot alone. A section adds `file`, the module's config file with the home
 folder written `~`, and `count`, its drawn keys: every key but one whose `needs` module is
@@ -47,6 +55,12 @@ may not have written; every other result has `finished` true. A `failed` result 
 `warning` was written and applying the module's units failed (`lines` are theirs, `fix`
 is `moxi install <module>`); else `problem` says why nothing was written. When the schema
 read fails, every change is `failed` with its error and nothing runs.
+
+A failure reading one file never locks another file's keys: when the module's own config
+file can't be read, `show --json` still gives its tables' keys (the error object's
+`keys`). The section then holds the error, `readonly` for the module's own keys, and the
+table keys, which stay editable: a save or write of one runs, and of any other key is
+`failed` (a 422 on `set` and `unset`) with the error.
 
 On `set` and `unset`, a write that `moxi config` refuses (exit 2 or 3) is a 422 with the
 command's text and fix; a settings file that stays locked (exit 75) is a 409. Exit 1 means
@@ -175,6 +189,9 @@ KEY_SHAPE = Out("table", items={
     "terminal": Out("table", nullable=True, items={"on": Out("string"), "off": Out("string")}),
     "elsewhere": _STRING, "json": Out("string"), "default_json": Out("string"),
     "changed": Out("bool"),
+    "table_title": _STRING, "table_line": _STRING, "table_file": _STRING,
+    "warning": _STRING, "refused": _STRING, "clear_only": Out("bool"),
+    "table_error": _STRING, "table_fix": _STRING,
 })
 
 SECTION_SHAPE = Out("table", items={
@@ -313,7 +330,11 @@ def _login_mark(now: str | None, platform: str) -> str:
 
 
 def _mark(module: str, name: str, read: Any, switches: set[str], platform: str,
-          logins: Mapping[str, str | None] | None = None) -> str:
+          logins: Mapping[str, str | None] | None = None, applies: Any = None) -> str:
+    """When a change of key `name` applies, as a line to show: a table key's `applies`
+    words when it carries them."""
+    if isinstance(applies, str) and applies:
+        return applies
     if logins and name in logins:
         return _login_mark(logins[name], platform)
     if name in switches:
@@ -393,38 +414,54 @@ def _json_text(value: Any) -> str:
         return "null"
 
 
+#: The platform's path functions, which a `path` key's value and default are compared by.
+_paths = os.path
+
+
 def _path_default(default: Any, env: Mapping[str, str] | None) -> Any:
     """A `path` key's default as its value reads: none when empty, a leading `~` expanded
-    to the home folder `env` places."""
+    to the home folder `env` places, joined with the platform's separator."""
     if not isinstance(default, str) or default == "":
         return None
     if default == "~" or default.startswith("~/"):
         try:
-            return str(home(env)) + default[1:]
+            root = str(home(env))
         except LookupError:
             return default
+        return _paths.join(root, *default[2:].split("/")) if default != "~" else root
     return default
+
+
+def _same_path(value: Any, default: Any) -> bool:
+    """Whether a `path` key's `value` is its `default`: compared as paths, normalised and,
+    on a platform whose paths ignore case, case-folded; anything but two non-empty
+    strings by equality."""
+    if not (isinstance(value, str) and isinstance(default, str) and value and default):
+        return value == default
+    return _paths.normcase(_paths.normpath(value)) == _paths.normcase(_paths.normpath(default))
 
 
 def is_changed(item: Mapping[str, Any], *, env: Mapping[str, str] | None = None) -> bool:
     """Whether the key `show --json` printed as `item` holds a value other than its
     default. A switch table is changed when any entry is on, since a missing entry reads
-    off."""
+    off. A `path` key's empty value and empty default both read as none."""
     if item.get("switch_table") is True:
         entries = item.get("entries")
         return isinstance(entries, list) and any(
             isinstance(entry, Mapping) and entry.get("value") is True for entry in entries)
     default = item.get("default")
     if item.get("type") == "path":
-        default = _path_default(default, env)
+        # An empty path is no path, as an empty default is.
+        value = item.get("value")
+        return not _same_path(None if value == "" else value, _path_default(default, env))
     return item.get("value") != default
 
 
 def is_drawn(module: str, key: Mapping[str, Any]) -> bool:
     """Whether the page draws descriptor `key` among `module`'s rows: not when it needs an
-    absent module, not when another page edits it, and not ui's `gateway.*` keys, which
-    the phone's group draws."""
-    if key.get("needs_absent") or key.get("elsewhere"):
+    absent module, not when another page edits it, not a table that can't be read (no key),
+    and not ui's `gateway.*` keys, which the phone's group draws."""
+    if key.get("needs_absent") or key.get("elsewhere") or key.get("table_error"):
         return False
     return not (module == "ui" and str(key.get("name")).startswith(PHONE_KEYS))
 
@@ -444,6 +481,8 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
     platform = platform or sys.platform
     locked = frozenset(locked)
     name = str(item.get("name"))
+    if isinstance(item.get("table_error"), str):
+        return _table_error(name, item, env)
     type_ = str(item.get("type"))
     source = item.get("source") if isinstance(item.get("source"), str) else "default"
     variable, needs = _text(item.get("env")), _text(item.get("needs"))
@@ -464,7 +503,8 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         "value": spell(item.get("value"), type_),
         "value_items": _strings(item.get("value")) if type_ == "list" else None,
         "source": source,
-        "mark": _mark(module, name, item.get("read"), set(switches), platform, logins),
+        "mark": _mark(module, name, item.get("read"), set(switches), platform, logins,
+                      item.get("applies")),
         "note": note,
         "needs_absent": needs_absent,
         "switch_table": switch_table,
@@ -477,6 +517,9 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         "json": _json_text(item.get("value")),
         "default_json": _json_text(item.get("default")),
         "changed": is_changed(item, env=env),
+        **_table_fields(item, env),
+        "clear_only": item.get("clear_only") is True,
+        "table_error": None, "table_fix": None,
     }
     if switch_table and item.get("declarations") == "unavailable":
         out["declarations"] = "unavailable"
@@ -484,6 +527,30 @@ def descriptor(module: str, item: Mapping[str, Any], *, switches: Iterable[str] 
         out["reason"] = (f"{reason}. Entries not yet switched on can't be listed until "
                          "this clears.")
     return out
+
+
+def _table_fields(item: Mapping[str, Any], env: Mapping[str, str] | None) -> dict[str, Any]:
+    """A table key's table fields, each a string or None; the file with the home written
+    `~`."""
+    file = _text(item.get("table_file"))
+    return {"table_title": _text(item.get("table_title")),
+            "table_line": _text(item.get("table_line")),
+            "table_file": _tilde(file, env) if file else None,
+            "warning": _text(item.get("warning")), "refused": _text(item.get("refused"))}
+
+
+def _table_error(name: str, item: Mapping[str, Any], env: Mapping[str, str] | None
+                 ) -> dict[str, Any]:
+    """The descriptor of a table whose file can't be read: its title, line, file, error
+    and fix, and no value."""
+    return {"name": name, "type": "table", "default": None, "doc": "", "values": None,
+            "read": "use", "env": None, "needs": None, "items": None, "value": None,
+            "value_items": None, "source": "default", "mark": MARK_NOW, "note": None,
+            "needs_absent": False, "switch_table": False, "entries": None,
+            "declarations": None, "reason": None, "locked": False,
+            **_page_fields({}), "json": "null", "default_json": "null", "changed": False,
+            **_table_fields(item, env), "clear_only": False,
+            "table_error": item["table_error"], "table_fix": _text(item.get("table_fix"))}
 
 
 # --- the commands -----------------------------------------------------------------------
@@ -533,7 +600,11 @@ def file_of(module: str, env: Mapping[str, str] | None = None) -> str | None:
     if not _valid_module(module):
         return None
     layout = core() if module == HARNESS else Layout(module)
-    path = str(layout.config_file(env))
+    return _tilde(str(layout.config_file(env)), env)
+
+
+def _tilde(path: str, env: Mapping[str, str] | None) -> str:
+    """`path` with the home folder `env` places written `~`."""
     try:
         root = str(home(env)).rstrip("/\\")
     except LookupError:
@@ -556,7 +627,8 @@ def _valid_module(module: str) -> bool:
 
 class SchemaRead(NamedTuple):
     """One read of `moxi config <module> show --json`: its keys in order, or why it gave
-    none. `ended` is false when the command did not run to its end."""
+    none. `ended` is false when the command did not run to its end. When the module's own
+    config file can't be read, `keys` holds its tables' keys (or None) beside the error."""
 
     keys: list[dict[str, Any]] | None
     error: str | None = None
@@ -582,14 +654,25 @@ def read_schema(module: str, *, cwd: str, env: Mapping[str, str] | None,
     except (ValueError, TypeError):
         data = None
     if isinstance(data, Mapping) and isinstance(data.get("error"), str):
-        # The file won't parse.
-        return SchemaRead(None, data["error"], _text(data.get("fix")))
+        # The file won't parse; its tables' keys, kept in other files, still read.
+        tables = data.get("keys")
+        return SchemaRead(_named(tables) if isinstance(tables, list) else None,
+                          data["error"], _text(data.get("fix")))
     if not isinstance(data, list):
         text = _stderr_text(done.stderr) or f"moxi config {module} show exited " \
                                              f"{done.returncode} with no answer"
         return SchemaRead(None, text)
-    return SchemaRead([item for item in data
-                   if isinstance(item, Mapping) and isinstance(item.get("name"), str)])
+    return SchemaRead(_named(data))
+
+
+def _named(items: list[Any]) -> list[dict[str, Any]]:
+    return [item for item in items if isinstance(item, Mapping) and isinstance(item.get("name"), str)]
+
+
+def _unread(schema: SchemaRead, key: str) -> bool:
+    """Whether a read that holds an error leaves `key` unread: every key of a read that
+    gave none, and the module's own keys when only its tables' keys came back."""
+    return schema.keys is None or (schema.error is not None and find_key(schema.keys, key) is None)
 
 
 def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
@@ -604,6 +687,7 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     if schema.keys is None:
         # A file that won't parse makes the section read-only, saying why.
         return _section(module, env=env, error=schema.error, fix=schema.fix)
+    # With an error, the keys are the tables' alone: the module's own are read-only.
     listing = listing or {}
     own = listing.get(module) or {}
     present = ([name for name, entry in listing.items() if entry.get("state") == "present"]
@@ -611,14 +695,14 @@ def read_section(module: str, *, cwd: str, env: Mapping[str, str] | None,
     keys = [descriptor(module, item, switches=switches_of(own), present=present,
                        platform=platform, logins=logins_of(own), locked=locked, env=env)
             for item in schema.keys]
-    return _section(module, keys=keys, env=env)
+    return _section(module, keys=keys, env=env, error=schema.error, fix=schema.fix)
 
 
 def find_key(keys: Iterable[Mapping[str, Any]], key: str) -> Mapping[str, Any] | None:
     """Key `key` in a schema read's keys, or None when the read doesn't list it. An entry
     of a switch table, `<table>.<entry>`, is found as a bool key of its own whose value is
     the entry's (off when the file doesn't hold it)."""
-    keys = list(keys)
+    keys = [item for item in keys if not item.get("table_error")]
     for item in keys:
         if item.get("name") == key:
             return item
@@ -683,7 +767,7 @@ def change(module: str, key: str, *, value: str | None = None, add: str | None =
     except ValueError as exc:
         raise Refused(str(exc)) from None
     schema = read_schema(module, cwd=cwd, env=env, run=run)
-    if schema.keys is None:
+    if _unread(schema, key):
         raise _schema_refusal(module, schema)
     item = find_key(schema.keys, key)
     if item is None:
@@ -755,7 +839,7 @@ def _key_mark(module: str, item: Mapping[str, Any], own: Mapping[str, Any],
     if item.get("entry"):
         return MARK_SWITCH if item.get("daemon") else MARK_NOW
     return _mark(module, str(item.get("name")), item.get("read"), switches_of(own),
-                 platform or sys.platform, logins_of(own))
+                 platform or sys.platform, logins_of(own), item.get("applies"))
 
 
 def save_one(module: str, key: str, *, value: str, reset: bool, was: str,
@@ -910,7 +994,7 @@ async def save(call: Any) -> dict[str, Any]:
     schema = await aio.offload(lambda: read_schema(module, cwd=cwd, env=env))
     results = []
     for key, value, reset, before in zip(keys, values, resets, was, strict=True):
-        if schema.keys is None:
+        if _unread(schema, key):
             results.append(_result(key, "failed", problem=schema.error, fix=schema.fix))
             continue
         results.append(await aio.offload(lambda key=key, value=value, reset=reset,

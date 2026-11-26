@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  choiceKey, choiceOf, chosenPreset, commandLine, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
+  choiceKey, choiceOf, chosenPreset, commandLine, dropsShown, emptyGroups, fieldsFor, filledFields, followedOf, formPath,
   HARNESS, keepLabel, launchBody, launchesView, leaveOutChoice, NO_PRESET, olderPath, outcomeOf, parseCatalog,
   parseForm, parsePasts, parsePresets, parsePreview, pastItem, pastView, presetLines, presetProblems, presetsOf,
-  quote, refusalLine, requestOf, shownValue, sourceNote, statusOf,
+  quote, refusalLine, requestOf, resumeBody, shownValue, sourceNote, statusOf,
 } from "../src/panel.ts";
 
 const T = "2026-10-31T10:01:02.123456Z";
@@ -62,7 +62,7 @@ const FORM_FIELDS = [
   field("brief", { default: "" }),
   field("brief_file", { type: "path", default: "" }),
   field("target", { type: "enum", default: "terminal", values: ["terminal", "headless", "slot"] }),
-  field("limit_at", { type: "enum", default: "1x", values: ["1x", "2x"] }),
+  field("keep_warm", { type: "enum", default: "off", values: ["off", "on"] }),
   field("add_dir", { type: "list", items: "path", default: null, value_items: null }),
   field("director", { type: "list", repeatable: true, needs_absent: true, note: "works only with the comms module" }),
   field("model", { default: "" }),
@@ -75,7 +75,7 @@ const FORM = {
   state: "up", detail: null, harness: "claude", refused: null,
   rows: [row("harness", "claude", "shipped"), row("cwd", null, "shipped"), row("project", "app"),
          row("scratch", "false", "shipped"), row("brief", null, "preset", { withheld: true }),
-         row("brief_file", null, "shipped"), row("target", "slot", "defaults"), row("limit_at", "1x", "shipped"),
+         row("brief_file", null, "shipped"), row("target", "slot", "defaults"), row("keep_warm", "off", "shipped"),
          row("add_dir", null, "preset", { items: ["/a", "/b"] }), row("model", "opus"),
          row("effort", null, "shipped"), row("remote_control", "true"), row("max_turns", null, "shipped")],
 };
@@ -157,8 +157,8 @@ test("each enum gets its empty state: a blank choice, or leave out naming the wo
   assert.equal(f.effort.value, "");
   assert.deepEqual(f.target.values, ["terminal", "headless", "slot", "leave out (launches terminal)"]);
   // A row no layer sets shows its shipped word, not "leave out".
-  assert.equal(f.limit_at.value, "1x");
-  assert.deepEqual(f.limit_at.values, ["1x", "2x", "leave out (launches 1x)"]);
+  assert.equal(f.keep_warm.value, "off");
+  assert.deepEqual(f.keep_warm.values, ["off", "on", "leave out (launches off)"]);
   assert.deepEqual(f.harness.values, ["claude", "codex"]);
   assert.equal(leaveOutChoice(field("recycle_at_limit", { type: "enum", default: "off" })), "leave out (launches off)");
   assert.equal(leaveOutChoice(f.effort), null);
@@ -202,7 +202,7 @@ test("a field shown off, and every field of a refused answer, keeps the catalog'
 test("each field kind's value goes in values, as the page server reads it", () => {
   const fields = filled();
   const VALUE = { harness: "claude", cwd: "/w", project: "app", scratch: "true", brief: "mine", brief_file: "/b.md",
-                  target: "slot", limit_at: "1x", add_dir: ["/a"], model: "opus", effort: "high",
+                  target: "slot", keep_warm: "off", add_dir: ["/a"], model: "opus", effort: "high",
                   remote_control: "", max_turns: "5" };
   assert.deepEqual(requestOf(fields, VALUE, WITHHELD, new Set(["brief"])), {
     values: { ...VALUE, remote_control: "true" },
@@ -215,14 +215,23 @@ test("each field kind's value goes in values, as the page server reads it", () =
 test("each field kind's empty state goes in leave_out, and the harness never does", () => {
   const fields = filled();
   const EMPTY = { harness: "codex", cwd: null, project: null, scratch: "false", brief: null, brief_file: null,
-                  target: "leave out (launches terminal)", limit_at: "leave out (launches 1x)", add_dir: [],
+                  target: "leave out (launches terminal)", keep_warm: "leave out (launches off)", add_dir: [],
                   model: null, effort: null, remote_control: null, max_turns: null };
   assert.deepEqual(requestOf(fields, EMPTY, WITHHELD, new Set()), {
     values: { harness: "codex" },
-    leave_out: ["cwd", "project", "scratch", "brief", "brief_file", "target", "limit_at", "add_dir", "model",
+    leave_out: ["cwd", "project", "scratch", "brief", "brief_file", "target", "keep_warm", "add_dir", "model",
                 "effort", "remote_control", "max_turns"],
   });
   assert.deepEqual(requestOf(fields, { harness: null }, WITHHELD, new Set()), { values: {}, leave_out: [] });
+});
+
+test("a bool whose default is true sends unticked as false, since left out it would launch ticked", () => {
+  const fields = [field("takes_policy_directors", { type: "bool", default: "true" }),
+                  field("scratch", { type: "bool", default: "false" })];
+  assert.deepEqual(requestOf(fields, { takes_policy_directors: "false", scratch: "false" }, new Set(), new Set()),
+                   { values: { takes_policy_directors: "false" }, leave_out: ["scratch"] });
+  assert.deepEqual(requestOf(fields, { takes_policy_directors: "true" }, new Set(), new Set()),
+                   { values: { takes_policy_directors: "true" }, leave_out: [] });
 });
 
 test("a kept withheld text is in neither list; unticked it is left out; typed it is the user's own", () => {
@@ -239,7 +248,7 @@ test("a kept withheld text is in neither list; unticked it is left out; typed it
 test("the form left as filled sends every row as it shows, and a field shown off in neither list", () => {
   const fields = filled();
   const request = requestOf(fields, asShown(fields), WITHHELD, new Set(["brief"]));
-  assert.deepEqual(request.values, { harness: "claude", project: "app", target: "slot", limit_at: "1x",
+  assert.deepEqual(request.values, { harness: "claude", project: "app", target: "slot", keep_warm: "off",
                                      add_dir: ["/a", "/b"], model: "opus", remote_control: "true" });
   assert.deepEqual(request.leave_out, ["cwd", "scratch", "brief_file", "effort", "max_turns"]);
   assert.ok(!("director" in request.values) && !request.leave_out.includes("director"));
@@ -466,4 +475,22 @@ test("the past sessions add the older pages after the first, each launch once", 
   assert.equal(pastView(feed(null, { loading: true })).state, "loading");
   assert.deepEqual(parsePasts({ state: "up", detail: null, sessions: [PAST, { nope: 1 }] }).sessions, [PAST]);
   assert.equal(parsePasts({ state: "up", detail: null }), null);
+});
+
+test("a resume's body carries the brief or brief file typed beside it, and nothing blank", () => {
+  assert.deepEqual(resumeBody("s1", "", ""), { session: "s1" });
+  assert.deepEqual(resumeBody("s1", "  \n", " "), { session: "s1" });
+  assert.deepEqual(resumeBody("s1", "Carry on.\n", ""), { session: "s1", brief: "Carry on.\n" });
+  assert.deepEqual(resumeBody("s1", "", " /w/brief.md "), { session: "s1", brief_file: "/w/brief.md" });
+  assert.deepEqual(resumeBody("s1", "Go.", "/w/brief.md"), { session: "s1", brief: "Go.", brief_file: "/w/brief.md" });
+});
+
+test("a launches topic value that leaves out a shown launch is read again, not drawn", () => {
+  const up = (...ids) => ({ state: "up", detail: null, launches: ids.map((id) => ({ ...ROW, request_id: id })) });
+  assert.equal(dropsShown(up("q1", "q2"), up("q1")), true);
+  assert.equal(dropsShown(up("q1"), up("q2", "q1")), false, "a new launch is drawn");
+  assert.equal(dropsShown(up("q1"), up("q1")), false);
+  assert.equal(dropsShown(null, up()), false, "nothing shown yet");
+  assert.equal(dropsShown(up("q1"), { state: "error", detail: "x", launches: [] }), false);
+  assert.equal(dropsShown(up("q1"), null), false);
 });

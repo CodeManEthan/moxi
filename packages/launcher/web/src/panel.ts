@@ -48,6 +48,11 @@ function refusal(value: Refusal): Refusal {
   return { code: value.code, row: text(value.row), problem: value.problem, hint: text(value.hint) ?? "" };
 }
 
+/** `value` read as a refusal; null when it is not one. */
+export function refusalOf(value: unknown): Refusal | null {
+  return isRefusal(value) ? refusal(value) : null;
+}
+
 // --- the catalog and the presets -------------------------------------------------------
 
 /** One harness's form: the launcher's rows, then the harness's own. */
@@ -376,8 +381,9 @@ export interface FormRequest {
  * The request from every field the form sends (`<moxi-ui-form>`'s values; a field shown
  * off sends none and is in neither list). Each kind's empty state goes in `leave_out`: an
  * empty text, a list with no items, a switch off, a bool unticked, the blank or "leave
- * out" choice. A switch on is `"true"` with no text, else its text. `harness` always has a
- * value. A withheld text left empty with its keep box ticked is in neither list, so the
+ * out" choice. A bool whose default is true is the exception: left out it would launch
+ * ticked, so unticked it sends `"false"`. A switch on is `"true"` with no text, else its
+ * text. `harness` always has a value. A withheld text left empty with its keep box ticked is in neither list, so the
  * launch takes the preset's text.
  */
 export function requestOf(fields: readonly FieldDescriptor[], values: Record<string, FormValue>,
@@ -392,6 +398,8 @@ export function requestOf(fields: readonly FieldDescriptor[], values: Record<str
     } else if (field?.optional_value === true) {
       if (value === null) out.leave_out.push(name);
       else out.values[name] = value === "" ? "true" : value;
+    } else if (field?.type === "bool" && value === "false" && field.default === "true") {
+      out.values[name] = value;
     } else if (value === null || (field?.type === "bool" && value === "false") || value === leaveOutChoice(field)) {
       if (name === HARNESS) continue;
       if (value === null && withheld.has(name) && keep.has(name)) continue;
@@ -467,7 +475,7 @@ function emptied(field: FieldDescriptor): FieldDescriptor {
  * When the user has set one row of a group (its value differs from what its field shows,
  * and is a value), every other row of the group that still shows its filled value is
  * emptied, and a withheld sibling's keep box is unticked, so the form shows what will
- * launch. A row the user changed himself stays as he left it. `fields` comes back as the
+ * launch. A row the user changed stays as the user left it. `fields` comes back as the
  * same array when nothing changed.
  */
 export function emptyGroups(fields: FieldDescriptor[], now: Record<string, FormValue>,
@@ -664,6 +672,16 @@ export interface LaunchesView {
   detail: string | null;
 }
 
+/** Whether a `launches` topic value leaves out a launch the page shows now. The log only
+ * gains launches, and the topic is a snapshot the shell may have kept from before the last
+ * read, so such a value is read again from the route rather than drawn: drawing it would
+ * take a row away under the reader's press and put it back at the next snapshot. */
+export function dropsShown(shown: Launches | null, next: Launches | null): boolean {
+  if (shown === null || next === null || shown.state !== "up" || next.state !== "up") return false;
+  const kept = new Set(next.launches.map((row) => row.request_id));
+  return shown.launches.some((row) => !kept.has(row.request_id));
+}
+
 /** The launch log's newest rows, each live one marked so from the live launches' states. */
 export function launchesView(launches: FeedState<Launches>, states: FeedState<States> | null,
                              mine: ReadonlySet<string> = new Set()): LaunchesView {
@@ -734,6 +752,22 @@ export function parsePasts(data: unknown): Pasts | null {
   const { sessions } = read.fields;
   if (!Array.isArray(sessions)) return null;
   return { state: "up", detail: null, sessions: sessions.filter(isPast) };
+}
+
+/** The body of a past session's `POST /api/resume`: its session, and the brief or the
+ * brief file typed beside it, each only when it holds more than spaces. Both typed go as
+ * they are, and the page server refuses them as a resume of both is refused. */
+export interface ResumeBody {
+  session: string;
+  brief?: string;
+  brief_file?: string;
+}
+
+export function resumeBody(session: string, brief: string, briefFile: string): ResumeBody {
+  const body: ResumeBody = { session };
+  if (brief.trim()) body.brief = brief;
+  if (briefFile.trim()) body.brief_file = briefFile.trim();
+  return body;
 }
 
 /** What a past session's resume does: `slot` runs it as a job, `terminal` gives the

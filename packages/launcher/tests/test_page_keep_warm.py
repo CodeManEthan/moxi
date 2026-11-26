@@ -16,10 +16,11 @@ import pytest
 from test_keepwarm import agent, me
 from test_page import _send, loopback, post, served
 from test_page_joiner import fresh, stop, until
-from test_page_waits import (ASKS, Cache, Turns, agents_case, joined, live, pressed, seeded,
-                             wired)
+from test_page_waits import (ASKS, OFF, Cache, Turns, agents_case, joined, live, pressed,
+                             seeded, subagent_nudges, wired)
 
 from moxi import aio
+from moxi_dev.testing import PROC_WAIT_S
 from moxi_launcher import joiner, keepwarm, page, pagehandlers, settings, store, waits
 
 __all__ = ["fresh", "wired"]
@@ -71,7 +72,7 @@ class Clock(Cache):
 def waiting(wired):
     """A launch made with `keep_warm` off whose live session waits on one subagent, its
     turn closed, in a warm cache the watcher asks keep-warm about: a press covers it."""
-    sid = seeded()
+    sid = seeded(**OFF)
     session = live(sid, entries=[agent("a1")])
     wired.turns = Turns({sid: session})
     wired.cache = Clock([sid], asks=ASKS)
@@ -231,12 +232,38 @@ def test_a_session_nobody_works_for_is_not_waiting(waiting):
     assert code() == "not-waiting"
 
 
-def test_an_open_hold_alone_is_not_waiting(wired):
+def test_an_open_hold_alone_at_the_director_cap_is_covered_by_a_press(wired):
+    """An open hold is work out, as a live subagent or a directed agent at work is: a
+    session at its director cap with only a hold open is covered by a press."""
     sid = seeded(values={"keep_warm": "on"})
     wired.turns = Turns({sid: live(sid)})
     wired.cache = Clock([sid], asks=ASKS)
     writing(lambda conn: (store.open_hold(conn, "r1", "review"), nudges(conn, sid, 10)))
-    assert code() == "not-waiting"
+    assert press() is None
+    (event,) = covers()
+    assert event.detail["waits"] == {"kind": "holds", "count": 1}
+
+
+def test_a_hold_of_a_launch_made_with_keep_warm_off_counts_for_its_press(wired):
+    """A press reads the session as if cover had just been set, so the open holds of its
+    chain count, as they will once it is covered."""
+    sid = seeded(**OFF)
+    wired.turns = Turns({sid: live(sid)})
+    wired.cache = Clock([sid], asks=ASKS)
+    writing(lambda conn: store.open_hold(conn, "r1", "review"))
+    assert press() is None
+    assert [e.detail["waits"] for e in covers()] == [{"kind": "holds", "count": 1}]
+
+
+def test_a_session_with_nobody_at_work_and_no_hold_open_is_not_waiting(wired):
+    sid = seeded(values={"keep_warm": "on"})
+    wired.turns = Turns({sid: live(sid)})
+    wired.cache = Clock([sid], asks=ASKS)
+    writing(lambda conn: nudges(conn, sid, 10))
+    refused = press()
+    assert refused["code"] == "not-waiting"
+    assert refused["problem"] == ("no subagent of the session and no agent it directs is "
+                                  "at work, and no hold is open")
 
 
 @pytest.mark.parametrize("unread", ["agents raise", "agents incomplete", "comms down",
@@ -418,6 +445,19 @@ def director(wired, *workers):
     return sid
 
 
+def test_a_press_past_the_subagent_cap_with_an_agent_it_directs_at_work_is_answered(
+        wired, woken):
+    """The press reads the join the ask reads: under cover, with the subagent case's cap
+    spent since the press and a directed agent at work, the next ask nudges as a
+    director, so a second press is answered and writes nothing."""
+    sid = director(wired, ("coder@proj-a", live("x", turn_open=True)))
+    wired.turns.sessions[sid] = live(sid, entries=[agent("a1")])
+    assert press() is None and len(covers()) == 1
+    subagent_nudges(sid, 3)
+    assert press() is None
+    assert len(covers()) == 1 and joined()["covered"] is True
+
+
 def test_a_join_cut_short_with_nobody_found_is_unreadable(wired, monkeypatch, woken):
     director(wired, ("coder@proj-a", live("x", turn_open=True)))
     Made(monkeypatch, comms_after=1)
@@ -469,7 +509,7 @@ def test_wake_from_another_thread_starts_a_pass(wired, monkeypatch):
             await until(lambda: feed.joiner.passes >= 1 and feed.joined_once.is_set())
             passes = feed.joiner.passes
             await aio.offload(feed.wake)
-            await until(lambda: feed.joiner.passes > passes, timeout_s=3.0)
+            await until(lambda: feed.joiner.passes > passes, timeout_s=PROC_WAIT_S)
         finally:
             stop(feed)
 
@@ -509,9 +549,10 @@ def open_run(conn, sid):
 
 
 def nudges(conn, sid, count):
-    """`count` nudged keep-warm runs in a row, the newest opening turn 4."""
+    """`count` director nudges in a row, the newest opening turn 4."""
     for number in range(4 - count, 4):
         run = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
                                session_id=sid, by="launcher", state="acting",
                                job=f"proc:{me()}", turn_number=number)
-        store.end_run(conn, run.run_id, "nudged", word="nudged", turn_number=number + 1)
+        store.end_run(conn, run.run_id, "nudged", word=keepwarm.DIRECTOR,
+                      turn_number=number + 1)

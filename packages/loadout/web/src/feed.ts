@@ -69,6 +69,10 @@ export interface Section {
   where: string;
   /** A path section's absolute root, else null. */
   root: string | null;
+  /** The key of the project a path section's root is in (at the project's root or under
+   * it), as projects says; null for any other section, and for every section without
+   * projects. */
+  project: string | null;
 }
 
 /** One global instruction file and what the next install makes of it. */
@@ -88,6 +92,15 @@ export interface GlobalFile {
 export interface Project {
   key: string;
   root: string;
+}
+
+/** `/api/list`: every item each section lists, and the sections. `problem` is set, and the
+ * rest empty, when the manifest can't be read. */
+export interface Listing {
+  problem: string | null;
+  manifest: string | null;
+  sections: Section[];
+  items: Item[];
 }
 
 /** `/api/projects`: the projects a section can name by key, or why there are none. */
@@ -127,7 +140,7 @@ export interface ViewRow extends Row {
   edited: boolean;
   /** On the Codex rules file's row, the permission items it holds; else null. */
   covers: string[] | null;
-  /** An entry the user had before loadout, which loadout keeps as his. */
+  /** An entry the user had before loadout, which loadout keeps as the user's. */
   prior: boolean;
   /** The sections under which `install` applies the row: `section`, `whole`, or null when
    * no run does. */
@@ -207,8 +220,13 @@ export interface View {
   home: string | null;
   folder: string | null;
   manifest: string | null;
-  /** The harness table's names, in its order: the item grid's columns. */
+  /** The harness table's names, in its order. */
   harnesses: string[];
+  /** Those on this machine, in the table's order: what Add offers. */
+  present: string[];
+  /** Those the page draws, in the table's order: the present ones, and any other where
+   * something of loadout's, or in its way, stands. */
+  shown: string[];
   resolved_all: boolean;
   sections: ViewSection[];
   items: ViewItem[];
@@ -291,7 +309,8 @@ function isItem(value: unknown): value is Item {
 }
 
 function isSection(value: unknown): value is Section {
-  return isObj(value) && isStr(value.name) && isStr(value.where) && isStrOrNull(value.root);
+  return isObj(value) && isStr(value.name) && isStr(value.where) && isStrOrNull(value.root)
+    && isStrOrNull(value.project);
 }
 
 function isGlobalFile(value: unknown): value is GlobalFile {
@@ -349,14 +368,16 @@ export function parseView(data: unknown): View | null {
   if (!isObj(data) || !isStrOrNull(data.problem) || !isStrings(data.lines)
       || !isStrings(data.notes) || !isCounts(data.counts) || !isStrOrNull(data.note)
       || !isStrOrNull(data.home) || !isStrOrNull(data.folder) || !isStrOrNull(data.manifest)
-      || !isStrings(data.harnesses) || !isBool(data.resolved_all)
+      || !isStrings(data.harnesses) || !isStrings(data.present) || !isStrings(data.shown)
+      || !isBool(data.resolved_all)
       || !isListOf(data.sections, isViewSection) || !isListOf(data.items, isViewItem)
       || !isListOf(data.rows, isViewRow) || !isListOf(data.item_notes, isItemNote)
       || !isViewGlobal(data.global)) return null;
   return {
     problem: data.problem, lines: data.lines, notes: data.notes, counts: data.counts,
     note: data.note, home: data.home, folder: data.folder, manifest: data.manifest,
-    harnesses: data.harnesses, resolved_all: data.resolved_all, sections: data.sections,
+    harnesses: data.harnesses, present: data.present, shown: data.shown,
+    resolved_all: data.resolved_all, sections: data.sections,
     items: data.items, rows: data.rows, item_notes: data.item_notes, global: data.global,
   };
 }
@@ -433,6 +454,13 @@ export function parseReplacePreview(data: unknown): ReplacePreview | null {
   return { problem: data.problem, case: data.case, target: data.target, kept_in: data.kept_in,
            tracked: data.tracked, others: data.others, label: data.label, diff: data.diff,
            lines: data.lines, skipped: data.skipped };
+}
+
+/** `/api/list`'s value, or null when it isn't one. */
+export function parseListing(data: unknown): Listing | null {
+  if (!isObj(data) || !isStrOrNull(data.problem) || !isStrOrNull(data.manifest)
+      || !isListOf(data.sections, isSection) || !isListOf(data.items, isItem)) return null;
+  return { problem: data.problem, manifest: data.manifest, sections: data.sections, items: data.items };
 }
 
 /** `/api/projects`'s value, or null when it isn't one. */

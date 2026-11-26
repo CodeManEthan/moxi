@@ -29,7 +29,7 @@ import time
 import pytest
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser,
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="usage's page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
@@ -129,12 +129,19 @@ def strip_of(panel):
 
 
 def session_rows(panel):
-    return panel.locator("section[data-group=sessions] moxi-ui-row")
+    """The Sessions table's rows."""
+    return panel.locator("section[data-group=sessions] table[data-table=sessions] tbody tr[data-row]")
 
 
 def session_row(panel, session: str):
-    """A row of the Sessions section, by the harness and session it opens."""
-    return panel.locator(f'section[data-group=sessions] moxi-ui-row[data-key="claude/{session}"]')
+    """The row of the session opened in the Sessions section, first in it."""
+    return panel.locator(f'section[data-group=sessions] [data-list=placed] moxi-ui-row[data-key="claude/{session}"]')
+
+
+def open_session(panel, session: str) -> None:
+    """Opens a session by its name in the Sessions table."""
+    panel.locator(f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{session}"]'
+                  ).get_by_role("link").click()
 
 
 def show_subagents(opened):
@@ -146,7 +153,9 @@ def show_subagents(opened):
 # --- the contract --------------------------------------------------------------------------
 
 def test_the_page_keeps_the_contract(indexed, ui_page, ui_component_check):
-    check = ui_component_check(ui_page, "usage", "page", {"route": ""}, tokens=("text",))
+    # The page reads launcher's running launches, with launcher installed.
+    check = ui_component_check(ui_page, "usage", "page", {"route": ""}, tokens=("text",),
+                               allow=("launcher",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/status" in url for url in check.requests), check.requests
 
@@ -172,7 +181,7 @@ def test_the_cost_block_keeps_the_contract_and_says_how_old_the_index_is(
 #: Each address and what shows once its reads have drawn.
 VIEWS = {
     "": "[data-group=chart] svg g[data-period]",
-    "sessions": f'section[data-group=sessions] moxi-ui-row[data-key="claude/{FIRST}"]',
+    "sessions": f'section[data-group=sessions] table[data-table=sessions] tr[data-row="claude/{FIRST}"]',
     f"sessions/claude/{FIRST}": "[data-part=session] [data-line=subagents]",
     f"sessions/claude/{FIRST}/{AGENT}": "[data-part=agent] svg[data-part=session-chart] rect.bar",
 }
@@ -190,7 +199,7 @@ def test_each_address_draws_the_index_and_fits_a_phone(indexed, ui_page, ui_widt
 def test_an_opened_session_shows_its_subagents_as_rows_under_a_map_of_its_agents(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     expect(session_rows(panel)).to_have_count(2)
-    session_row(panel, FIRST).get_by_role("link", name="Open").click()
+    open_session(panel, FIRST)
     expect(ui_page).to_have_url(f"{indexed.url}/m/usage/sessions/claude/{FIRST}")
     opened = session_row(panel, FIRST).locator("[data-part=session]")
     rows = show_subagents(opened)
@@ -219,16 +228,16 @@ def test_an_opened_session_shows_its_subagents_as_rows_under_a_map_of_its_agents
 def test_a_session_opens_under_its_rows_harness_and_sums_to_the_row(indexed, ui_page):
     panel = open_view(ui_page, "sessions")
     harness = panel.locator("[data-part=filters] [data-filter=harness] button.pick")
+    with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
+        open_session(panel, FIRST)
+    # Read over its whole life with its row's harness, so it adds up to its row: the main
+    # agent's requests and the subagent's, and the subagent's cost a part of the row's.
+    assert "harness=claude" in sent.value.url and "since=" not in sent.value.url, sent.value.url
     row = session_row(panel, FIRST)
     expect(row).to_have_attribute("lead", re.compile(r"^\d+ requests?$"))
     requests = row.get_attribute("lead").split()[0]
     expect(row).to_have_attribute("fact", re.compile(r"^\$\d+\.\d\d$"))
     cost = row.get_attribute("fact")
-    with ui_page.expect_request(lambda request: "/m/usage/api/session?" in request.url) as sent:
-        row.get_by_role("link", name="Open").click()
-    # Read with its list's days and its row's harness, so it adds up to the row: the main
-    # agent's requests and the subagent's, and the subagent's cost a part of the row's.
-    assert "harness=claude" in sent.value.url and "since=" in sent.value.url, sent.value.url
     opened = row.locator("[data-part=session]")
     expect(opened.locator("[data-line=requests]")).to_have_text(re.compile(r"^Requests\s*3 requests by the main agent (at|from) "))
     expect(opened.locator("[data-line=subagents]")).to_have_text(
@@ -295,7 +304,7 @@ def test_read_new_sessions_moves_the_last_pass_and_brings_them_in(own_shell):
     expect(last).not_to_have_attribute("data-last-pass", before)
     expect(strip).to_have_attribute("data-state", "up")
     expect(session_rows(panel)).to_have_count(2)
-    expect(session_row(panel, LATER)).to_have_count(1)
+    expect(session_rows(panel).and_(panel.locator(f'tr[data-row="claude/{LATER}"]'))).to_have_count(1)
 
 
 # --- a session's requests, its cost terms and the rates ------------------------------------
@@ -413,8 +422,9 @@ def bill(prices):
 
 def test_the_page_keeps_the_contract_on_the_prices_section(charted, charted_page,
                                                             ui_component_check):
+    # The page reads launcher's running launches, with launcher installed.
     check = ui_component_check(charted_page, "usage", "page", {"route": "prices"},
-                               tokens=("text",))
+                               tokens=("text",), allow=("launcher",))
     assert check.element == "moxi-usage-page"
     assert any("/m/usage/api/terms?" in url for url in check.requests), check.requests
 
@@ -467,8 +477,8 @@ SCROLLED = """(table) => {
   };
 }"""
 
-BILL_HEADERS = ["Model", "Priced by", "fresh input", "cache read", "cache write 5m",
-                "cache write 1h", "output", "Cost"]
+BILL_HEADERS = ["Model", "Priced by", "input", "cache read", "cache write 5m",
+                "cache write 1h", "output", "Est. cost"]
 RATE_HEADERS = ["Model", "Input", "Output", "Cache read", "Write 5m", "Write 1h", "Window",
                 "Tiers", "Period", "Where from"]
 
@@ -581,7 +591,7 @@ def test_an_addressed_session_is_first_in_the_section_read_over_its_whole_life(
     placed = section.locator("[data-list=placed] moxi-ui-row")
     expect(placed).to_have_attribute("data-key", f"claude/{CHARTED}")
     expect(placed).to_have_attribute("open", "")
-    expect(section.locator("[data-list=first] moxi-ui-row")).to_have_count(0)
+    expect(section.locator("table[data-table=sessions]")).to_be_visible()
     # Closed, its row stays first and the address goes back to the section.
     placed.get_by_role("link", name="Close").click()
     expect(placed).not_to_have_attribute("open", "")
@@ -602,8 +612,8 @@ def test_the_opened_sessions_table_has_a_row_a_request_and_its_compaction(
     expect(table.locator("tbody tr")).to_have_count(7)
     expect(table.locator('tr[data-row="c:4"]')).to_contain_text("compaction (auto)")
     expect(table.locator("thead th")).to_have_text(
-        ["#", "Time", "Turn", "Model", "Context", "Fresh input", "Cache read", "Cache write 5m",
-         "Cache write 1h", "Output", "Cost"])
+        ["#", "Time", "Turn", "Model", "Context", "Input", "Cache read", "Cache write 5m",
+         "Cache write 1h", "Output", "Est. cost"])
 
 
 def test_check_against_a_bill_in_the_opened_session_lines_up_each_agents_models(
@@ -791,7 +801,7 @@ def test_token_kinds_closed_says_the_input_read_from_cache_and_opens_its_classes
     rows = kinds.locator("[data-part=rows] .tr2")
     expect(rows).to_have_count(4)
     names = rows.locator(".nm").evaluate_all("cells => cells.map((cell) => cell.textContent.split('·')[0].trim())")
-    assert sorted(names) == ["Cache reads", "Cache writes", "Fresh input", "Output"], names
+    assert sorted(names) == ["Cache create", "Cache reads", "Input", "Output"], names
     for row in rows.all():
         expect(row).to_contain_text(re.compile(r"tokens\s*(at least )?\$\d"))
     # The sixth request ran on the `[[model]]` row's fast tier.
@@ -802,6 +812,6 @@ def test_token_kinds_says_what_caching_saved_as_an_estimate(charted, charted_pag
     kinds = kinds_of(open_view(charted_page, "kinds"))
     expect(kinds.locator("[data-part=saving]")).to_have_text(re.compile(
         r"^[\d.]+[kM]? of [\d.]+[kM]? input tokens were read from cache\. With no cache, at the same prices, "
-        r"those reads would have cost \$[\d.]+ as fresh input; they cost \$[\d.]+(, and cache writes .*)?, "
+        r"those reads would have cost \$[\d.]+ as input; they cost \$[\d.]+(, and cache writes .*)?, "
         r"so caching (saved about \$[\d.]+|cost about \$[\d.]+ more than it saved)\. An estimate\.$"))
 

@@ -29,7 +29,7 @@ Path=/) and a key in the body, which the page keeps in the origin's storage and 
 but storage is per origin. Sessions live in this shell's memory only and end with it, and
 end after 12 hours unused or 7 days old, at sign-out, when their device is revoked or goes
 stale, and when the gateway turns off or its profile is rebuilt for a new port, host or
-provider. At most 4 per device and 16 in all, the oldest evicted first.
+provider. At most 4 per device and 16 in all, the least recently used evicted first.
 
 The credential each request needs, after the provider check, by its one entry:
 

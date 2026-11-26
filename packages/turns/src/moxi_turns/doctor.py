@@ -3,21 +3,24 @@
 `check()` yields `moxi.doctor.Row`s of module `turns`: its config, the start list, the
 registered listeners (an after-tool row's floor that does not import fails its module's
 row), the guards, the launch-additions contributors, the live endpoints (dead ones
-are swept on the way) and any version 1 endpoint directory left behind, when a live
+are swept on the way) and any version 1 endpoint directory left behind, the kept ends
+(`kept ends`, and a `warn` row for each one older than a day, with its ref and its
+asker, since turns removes none by age), when a live
 Codex host last saw the account's rate limits (`codex limits`), the hook times,
 and each harness adapter's rows (`ADAPTER_ROWS`: the Claude plugins, the placed copy,
 `endpoint.json` and the Claude Code version; Codex; the OpenCode host's binary). turns
 has no doctor command of its own.
 
-The guard rows read the list as an endpoint would, in the doctor's own process: `guards`
-names each guard on, its step, what turned it on and where it runs on each harness;
-`guard <id>` is `off` for an available guard nobody turned on, `fail` for one on the list
-that does not load, whose judge does not import or whose `match` does not compile, and for a
-switch that fails the core's check, listed or not, and `warn` for one on the list whose
-module is not installed, whose import took over `IMPORT_WARN_MS`, or (the removal guard)
-when the installed Claude Code is newer than the one its rule was checked against;
-`guard <id>: <harness>` says, as information, that a guard on covers no call there or
-that the harness has no pre-tool point. A guard's breaks are records the core shows.
+The guard rows read the list as an endpoint would, in the doctor's own process (a guard's
+`sessions` function is asked with the doctor's own environment): `guards` names each guard
+on, its step, what turned it on and where it runs on each harness; `guard <id>` is `off`
+for an available guard nobody turned on, `fail` for one on the list that does not load,
+whose judge does not import or whose `match` does not compile, and for a switch that fails
+the core's check or a `sessions` function that reads off, listed or not, and `warn` for
+one on the list whose module is not installed, whose import took over `IMPORT_WARN_MS`,
+or (the removal guard) when the installed Claude Code is newer than the one its rule was
+checked against; `guard <id>: <harness>` says, as information, that a guard on covers no
+call there or that the harness has no pre-tool point. A guard's breaks are records the core shows.
 The doctor adds readings and denies nothing.
 """
 
@@ -32,7 +35,7 @@ from collections.abc import Iterator
 from moxi import doctor as moxi_doctor
 from moxi.config import ConfigError
 
-from . import client, config, hooktimes, listeners, protocol
+from . import client, config, hooktimes, kept, listeners, protocol
 
 MODULE = "turns"
 
@@ -69,6 +72,7 @@ def check() -> Iterator[moxi_doctor.Row]:
     yield from _guard_rows(settings)
     yield from _additions_rows()
     yield from _endpoint_rows()
+    yield from _kept_rows()
     yield _codex_limits_row()
     yield from _hook_rows()
     for target in ADAPTER_ROWS:
@@ -164,7 +168,7 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
     warns: dict[str, list[str]] = {}
     fixes: dict[str, str] = {}
     for p in loaded.problems:
-        if p.kind == "switch":
+        if p.kind in ("switch", "sessions"):
             fails.setdefault(p.id, []).append(p.reason)
         elif p.kind == "missing" and p.on:
             warns.setdefault(p.id, []).append(p.reason)
@@ -227,8 +231,11 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
         fix = (f"moxi config set {f.module} {f.guard.switch} true"
                if f.module and f.guard.switch
                else f"moxi config set turns {guards.ON_KEY} --add {f.id}")
-        yield moxi_doctor.Row(MODULE, f"guard {f.id}", "off",
-                              f.guard.doc or "available and off", fix)
+        detail = f.guard.doc or "available and off"
+        if f.guard.sessions:
+            detail = (f"{detail.rstrip('.')}; it also runs in each session "
+                      f"{f.guard.sessions} picks")
+        yield moxi_doctor.Row(MODULE, f"guard {f.id}", "off", detail, fix)
     on_ids = {o.id: o for o in loaded.on}
     for gid in dict.fromkeys([*fails, *warns]):
         reasons = fails.get(gid, []) + warns.get(gid, [])
@@ -241,17 +248,18 @@ def _guards(settings) -> Iterator[moxi_doctor.Row]:
 
 
 def _off_fix(on) -> str | None:
-    """The command that turns guard `on` off: off the list, else its switch off."""
+    """The command that turns guard `on` off: off the list, else its switch off; None when
+    only its `sessions` function turned it on."""
     found = on.found
     if "list" in on.by:
         return f"moxi config set turns guards.run --remove {found.path or found.id}"
-    if found.module and found.guard.switch:
+    if "switch" in on.by and found.module and found.guard.switch:
         return f"moxi config set {found.module} {found.guard.switch} false"
     return None
 
 
 #: How the `guards` row says what turned a guard on.
-_BY = {"list": "guards.run", "switch": "its switch"}
+_BY = {"list": "guards.run", "switch": "its switch", "sessions": "its sessions function"}
 
 
 def _tool_points() -> dict[str, dict[str, bool]]:
@@ -320,6 +328,25 @@ def _endpoint_rows() -> Iterator[moxi_doctor.Row]:
             "removes",
             "reload that session's plugins or restart it; once no turns 0.1 session "
             "runs, remove the directory")
+
+
+def _kept_rows(now: float | None = None) -> Iterator[moxi_doctor.Row]:
+    """`kept ends`: how many there are; and one `warn` row for each older than a day."""
+    now = time.time() if now is None else now
+    found = [r for _, r in kept.records()]
+    ages = [(r, now - r["settled_at"]) for r in found
+            if isinstance(r.get("settled_at"), (int, float))]
+    old = [(r, age_s) for r, age_s in ages if age_s > kept.OLD_S]
+    yield Row("kept ends", ok=True,
+              detail=f"{len(found)} kept under {kept.kept_dir()}, {len(old)} older than a day")
+    for record, age_s in old:
+        age_h = age_s / 3600
+        by = record.get("by") or "an asker that gave no name"
+        yield moxi_doctor.Row(
+            MODULE, f"kept end {record['ref']}", "warn",
+            f"asked by {by}, settled {age_h:.0f} h ago in session "
+            f"{', '.join(record.get('session_ids') or ()) or '(not known)'}; not acked",
+            f"{by} acks it once it holds the end (turns.ack); turns keeps it until then")
 
 
 def _codex_limits_row() -> moxi_doctor.Row:

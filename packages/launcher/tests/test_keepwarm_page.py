@@ -108,9 +108,13 @@ def test_with_every_step_passing_the_page_reads_covered_and_the_ask_nudges(case)
 # -- each step false alone --------------------------------------------------------------
 
 
+#: The launch log's change that makes launch r1 a launch made with keep_warm off.
+MADE_OFF = ("UPDATE launches SET values_json = json_set(values_json, '$.keep_warm', "
+            "'off') WHERE request_id = 'r1'")
+
+
 def test_step_one_a_launch_that_does_not_keep_warm(case):
-    case.conn.execute("UPDATE launches SET values_json = json_set(values_json, "
-                      "'$.keep_warm', 'off') WHERE request_id = 'r1'")
+    case.conn.execute(MADE_OFF)
     assert case.would() is False
     assert words(case.asked()) == (None, "off")
 
@@ -376,8 +380,7 @@ def test_reading_names_the_first_step_not_passed_and_would_nudge_is_true_only_wi
         (lambda: setattr(case, "turn_open", True), 5),
         (lambda: setattr(case, "age", case.ttl), 4),
         (lambda: setattr(case, "records", []), 3),
-        (lambda: case.conn.execute("UPDATE launches SET values_json = json_set(values_json, "
-                                   "'$.keep_warm', 'off') WHERE request_id = 'r1'"), 1),
+        (lambda: case.conn.execute(MADE_OFF), 1),
     ]
     for change, step in changes:
         change()
@@ -519,10 +522,21 @@ def test_under_cover_a_directed_agent_at_work_is_a_signal(off):
     assert off.would() is True
 
 
-def test_without_cover_or_a_press_a_directed_agent_is_not_read(case):
+def test_without_cover_or_a_press_a_directed_agent_at_work_is_a_signal(case):
     case.agents = []
     case.directed = AT_WORK
+    assert case.reading() == keepwarm.Reading(None, keepwarm.DIRECTOR)
+    case.directed = NOBODY
     assert case.reading().step == 6
+
+
+def test_past_the_subagent_cap_a_directed_agent_at_work_is_the_director_case(case):
+    for number in (1, 2, 3):
+        nudged(case.conn, number=number, agents=["a1"])
+    case.number = 4
+    assert case.reading() == keepwarm.Reading(7, keepwarm.SUBAGENTS)
+    case.directed = AT_WORK
+    assert case.reading() == keepwarm.Reading(None, keepwarm.DIRECTOR)
 
 
 @pytest.mark.parametrize("join", [None, NOBODY, waits.Directed(raised=True),
@@ -535,12 +549,13 @@ def test_under_cover_nobody_directed_at_work_is_no_signal(off, join):
     assert off.reading(pressed=True).step == 6
 
 
-def test_a_hold_in_the_chain_with_the_launch_value_off_and_cover_on_is_no_signal(off):
+def test_a_hold_in_the_chain_with_the_launch_value_off_and_cover_on_is_a_signal(off):
     off.agents = []
     store.open_hold(off.conn, "r1", "review")
+    assert off.reading().step == 1
     press(off)
-    assert off.reading().step == 6
-    assert off.reading(pressed=True).step == 6
+    assert off.reading() == keepwarm.Reading(None, keepwarm.DIRECTOR)
+    assert off.reading(pressed=True) == keepwarm.Reading(None, keepwarm.DIRECTOR)
 
 
 # -- the cap ---------------------------------------------------------------------------------
@@ -562,20 +577,20 @@ def test_under_cover_only_the_nudges_since_the_press_count(off):
     assert off.would() is True
 
 
-def test_a_director_on_its_holds_at_its_cap_with_nobody_directed_at_work_is_not_coverable(
-        case):
-    # The launch value is on and a hold is open: a press can't start the hold's count
-    # again, since the next ask ends a cover that finds nobody directed at work.
+def test_a_director_on_its_holds_at_its_cap_reads_as_a_cover_would_start_its_count(case):
+    # The launch value is on and a hold is open: a cover would hold (an open hold keeps
+    # it) and start the hold's count again. Home offers the press only where someone is
+    # at work (`waits`), which the page's tests read.
     asking(case, value="on")
     case.agents = []
     store.open_hold(case.conn, "r1", "review")
     for number in range(1, 11):
-        nudged(case.conn, number=number)
+        nudged(case.conn, number=number, word="director")
     case.number = 11
     for join in (NOBODY, None):
         case.directed = join
         assert case.reading() == keepwarm.Reading(7, keepwarm.DIRECTOR)
-        assert case.reading(pressed=True) == keepwarm.Reading(7, keepwarm.DIRECTOR)
+        assert case.reading(pressed=True) == keepwarm.Reading(None, keepwarm.DIRECTOR)
     case.directed = AT_WORK
     assert case.coverable() is True
 

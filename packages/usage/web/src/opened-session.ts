@@ -100,6 +100,9 @@ export interface OpenedFacts {
   /** Null until the restart point is asked. */
   restart: Read<RestartPoint> | null;
   today: string | null;
+  /** The effort the running launch that holds the session was launched with; null when
+   * none holds it or it set none. */
+  effort?: string | null;
 }
 
 export interface OpenedSession {
@@ -199,11 +202,12 @@ export function subagentsLine(report: Report<AgentRow>): Part[] | null {
   return parts;
 }
 
-/** `claude · opus · started today 12:45`: the harness, the newest request's model and the
- * session's start, each absent when not known. */
+/** `claude · opus · high · started today 12:45`: the harness, the newest request's model,
+ * the effort its running launch was launched with and the session's start, each absent
+ * when not known. */
 export function sessionLine(harness: string, model: string | null, started: number | null, today: string | null,
-                            clock: Clock = LOCAL): Part[] {
-  const parts = [plain(model === null ? harness : `${harness} · ${model}`)];
+                            clock: Clock = LOCAL, effort: string | null = null): Part[] {
+  const parts = [plain([harness, model, effort].filter((part) => part !== null).join(" · "))];
   if (started !== null) parts.push(dim(` · started ${whenWord(started, today, clock, true)}`));
   return parts;
 }
@@ -261,7 +265,8 @@ export function openedSession(facts: OpenedFacts, clock: Clock = LOCAL): OpenedS
   const model = newestModel(rows);
   if (session !== null) {
     line("subagents", subagentsLine(session));
-    line("session", sessionLine(ref?.harness ?? facts.harness, model, ref?.started ?? null, facts.today, clock));
+    line("session", sessionLine(ref?.harness ?? facts.harness, model, ref?.started ?? null, facts.today, clock,
+                                facts.effort ?? null));
   }
   const restart = facts.restart;
   if (restart !== null && model !== null) {
@@ -291,7 +296,7 @@ export function requestsTable(report: Report<RequestRow, RequestsTotal>, today: 
     ...["#", "Time", "Turn", "Model"].map((label) => ({ label, num: false })),
     { label: "Context", num: true },
     ...REQUEST_CLASSES.map(([, label]) => ({ label: label[0].toUpperCase() + label.slice(1), num: true })),
-    { label: "Cost", num: true },
+    { label: "Est. cost", num: true },
   ];
   const when = (at: number | null): string => (at === null ? "" : whenWord(at, today, clock, true));
   const blank = REQUEST_CLASSES.map(() => "");
@@ -340,7 +345,7 @@ export function placedRow(report: Report<AgentRow> | null, requests: RequestRow[
     ...report.total, ...ref, unpriced_models: report.unpriced_models, rules: report.rules,
     cwd: ref.folder, project: null, models,
     first_ts: firsts.length ? Math.min(...firsts) : null, last_ts: lasts.length ? Math.max(...lasts) : null,
-    context: report.context ?? null,
+    turns: 0, subagent_share: null, context: report.context ?? null,
   };
 }
 

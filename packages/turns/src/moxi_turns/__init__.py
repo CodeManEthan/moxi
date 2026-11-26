@@ -16,15 +16,35 @@ out of the harness. This package is turns' whole public API, the announcement's
     f = s.facts()    # Facts(session_id, turn_number, turn_open, turn, agents, draft, at,
                      #       stale, ready); turn: OpenTurn | None
     a = s.agents()   # Agents(entries, complete, at)
+    turns.STALE_AFTER_S   # seconds a `waiting` Claude subagent must be silent to read
+                          # stale (capability stale-agents): it reads `idle`, and an
+                          # entry's `last_write_at` plus this is when it would
     e = s.env(names)   # {name: value | None}: the session's own environment, read
                            # from its endpoint (capability environ; at most 64 names)
 
     d = s.deliver(text, *, only_if_idle=False, if_turn_number=None, refuse_draft=False,
-                  refuse_agents=False, ref=None)
-    d = s.steer(text, *, ref=None)
+                  refuse_agents=False, ref=None, by=None, senders=())
+    d = s.steer(text, *, ref=None, by=None, senders=())
+                             # by: the asking module; senders: the names the text speaks
+                             # for; prompt listeners read them as delivery_by and
+                             # delivery_senders
+    d = s.fork(text, *, by, ref=None, keep=False, round_timeout_s=None)
+                             # a fork of the main loop (capability fork); Started
+                             # carries its agent_id, Ended its answer; round_timeout_s
+                             # bounds the wait for its answer (None: 120 s on Claude Code)
+    d = s.fork_continue(delivery, text, *, ref=None, keep=False, round_timeout_s=None)
+                             # the fork's next round
     d.id, d.ref              # id None until a hand-in whose answer never came is found
     d.wait_started(timeout_s)  # Started | Refused | Lost
-    d.wait_ended(timeout_s)    # Ended | Refused | Lost
+    d.wait_ended(timeout_s)    # Ended(turn_id, outcome, delivery, ref, answer) | Refused
+                               # | Lost; answer: the turn's final text, None when the
+                               # turn had none or the harness gave none
+    s.ack(ref)               # keep=True (deliver, fork, fork_continue; capability keep)
+                             # keeps a delivery's end until its ref is acked, readable
+                             # by the waits after the endpoint has ended too
+    v = turns.wait_ref(ref, *, session_id, until="ended", timeout_s=None)
+    turns.ack(ref, *, session_id)    # the same for a caller holding no Delivery, on the
+                                     # live endpoint or turns' state folder
 
     r = s.command("clear" | "exit" | "compact", *, if_turn_number=None, timeout_s=None,
                   stop_shells=False)              # Ran(new_session_id, shells) | Refused | Failed
@@ -59,9 +79,16 @@ out of the harness. This package is turns' whole public API, the announcement's
                               additions=None)   # an OpenCode host, experimental
     turns.Guard(name, calls, *, who="any", match=None, match_flags="", judge=None,
                 deny="", wants=(), on_error="allow", deadline_ms=500, switch=None,
-                doc="")       # a guard, declared in a module's GUARDS (group
+                sessions=None, doc="", step="call")
+                              # a guard, declared in a module's GUARDS (group
                               # moxi.turns.guards); its judge takes a ToolCall (prompts:
-                              # Prompt values) and answers None | Allow(line) | Deny(reason)
+                              # Prompt values) and answers None | Allow(line) | Deny(reason);
+                              # sessions, "package.module:function", takes the session's
+                              # env and answers True to turn the guard on there, asked
+                              # once at the session's start
+    turns.touched_files(call)   # (TouchedFile(path, kind, text), ...): the files a write
+                              # call touches, in its order; kind write | add | update |
+                              # delete | moved-from | moved-to; () for any other call
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,
@@ -79,8 +106,9 @@ from __future__ import annotations
 #: Each public name and the submodule that holds it.
 _WHERE = {
     "codex": "codex",
-    **dict.fromkeys(("find", "sessions", "wait_ready", "Session", "Delivery", "Watch",
-                     "StopHandler", "TurnsError", "VersionError"), "client"),
+    **dict.fromkeys(("find", "sessions", "wait_ready", "wait_ref", "ack", "Session",
+                     "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError"),
+                    "client"),
     **dict.fromkeys(("launch_additions", "LaunchAdditions", "Contribution",
                      "AdditionsRequest", "McpServer"), "additions"),
     "codex_host_available": "codex_host",
@@ -93,12 +121,14 @@ _WHERE = {
                      "StopFacts", "SessionEvent", "CAPABILITIES", "OUTCOMES",
                      "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES", "COMMANDS"),
                     "results"),
-    **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny"), "guards"),
+    **dict.fromkeys(("Guard", "ToolCall", "Prompt", "Allow", "Deny", "TouchedFile",
+                     "touched_files"), "guards"),
     "COMMANDS_ENV": "config",
+    "STALE_AFTER_S": "claude_stale",
 }
 
 __all__ = [
-    "find", "sessions", "wait_ready", "codex", "codex_host_available", "opencode",
+    "find", "sessions", "wait_ready", "wait_ref", "ack", "codex", "codex_host_available", "opencode",
     "codex_rate_limits", "CodexLimits", "start_plan", "StartPlan", "StartEntry",
     "launch_additions", "LaunchAdditions", "Contribution", "AdditionsRequest",
     "McpServer", "Session", "Delivery", "Watch", "StopHandler", "TurnsError", "VersionError",
@@ -106,7 +136,8 @@ __all__ = [
     "Shells", "LeftShell", "Failed", "Ready", "TurnStarted", "TurnSteered", "TurnEnded",
     "DeliveryRef", "Gone", "StopFacts", "SessionEvent",
     "CAPABILITIES", "OUTCOMES", "DELIVERY_REFUSALS", "COMMAND_REFUSALS", "READY_SOURCES",
-    "COMMANDS", "COMMANDS_ENV", "Guard", "ToolCall", "Prompt", "Allow", "Deny",
+    "COMMANDS", "COMMANDS_ENV", "STALE_AFTER_S", "Guard", "ToolCall", "Prompt", "Allow",
+    "Deny", "TouchedFile", "touched_files",
 ]
 
 

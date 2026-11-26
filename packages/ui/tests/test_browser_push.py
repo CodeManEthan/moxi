@@ -9,13 +9,13 @@ import threading
 
 import pytest
 from moxi import modules
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from moxi_ui.testing import WAIT_S
 from playwright.sync_api import expect
 
 import fixture_kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(90)]
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(90, method="thread")]
 
 PUSH = "/m/ui/api/push"
 
@@ -25,6 +25,13 @@ def _streams(shell) -> int:
     status, data = shell.call("GET", "/m/ui/api/servers")
     assert status == 200
     return data["shell"]["streams"]
+
+
+def _seen(shell, pages) -> str:
+    """The shell's stream count and each tab's visibility, for a failed wait to name."""
+    tabs = ", ".join(f"tab {n} {page.evaluate('document.visibilityState')}"
+                     for n, page in enumerate(pages, 1))
+    return f"{_streams(shell)} streams at the shell; {tabs}"
 
 
 def _count(shell) -> int:
@@ -103,7 +110,8 @@ def test_seven_tabs_share_one_stream_and_closing_the_leader_hands_it_on(ui_shell
     for page in pages:
         page.goto("/m/fixture/")
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n}")
-    wait_for(lambda: _streams(ui_shell) == 1, 5, what="one push stream at the shell")
+    wait_for(lambda: _streams(ui_shell) == 1,
+             PROC_WAIT_S, what="one push stream at the shell")
     held = [lock for lock in pages[0].evaluate("navigator.locks.query()")["held"]
             if lock["name"] == "moxi-ui-push"]
     assert len(held) == 1, held
@@ -154,28 +162,36 @@ def test_the_stream_closes_after_10_s_with_no_visible_tab_and_reopens_when_one_i
     context.clock.install()
     first = ui_shell.sign_in(context.new_page())
     second = context.new_page()
+    pages = (first, second)
     n = _count(ui_shell)
-    for page in (first, second):
+    for page in pages:
         page.goto("/m/fixture/")
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n}")
-    wait_for(lambda: _streams(ui_shell) == 1, 5, what="one push stream at the shell")
+
+    def seen() -> str:
+        return _seen(ui_shell, pages)
+
+    wait_for(lambda: _streams(ui_shell) == 1, PROC_WAIT_S,
+             what=lambda: f"one push stream at the shell: {seen()}")
     _hide(second)
     context.clock.fast_forward(11_000)
-    assert _streams(ui_shell) == 1, "the stream closed while one tab was still shown"
+    assert _streams(ui_shell) == 1, f"the stream closed while one tab was still shown: {seen()}"
     _hide(first)
     context.clock.fast_forward(9_000)
-    assert _streams(ui_shell) == 1, "the stream closed before 10 s"
+    assert _streams(ui_shell) == 1, f"the stream closed before 10 s: {seen()}"
 
     def closed() -> bool:
         context.clock.fast_forward(500)
         return _streams(ui_shell) == 0
 
-    wait_for(closed, 5, interval=0.1, what="the stream to close with no tab shown")
+    wait_for(closed, PROC_WAIT_S, interval=0.1,
+             what=lambda: f"the stream to close with no tab shown: {seen()}")
     # Acts while no stream is open; showing a tab reopens it with the current value.
     ui_shell.session().post("/m/fixture/api/add", {"by": 5})
     _hide(second, hidden=False)
-    wait_for(lambda: _streams(ui_shell) == 1, 5, what="the stream to reopen")
-    for page in (first, second):
+    wait_for(lambda: _streams(ui_shell) == 1,
+             PROC_WAIT_S, what=lambda: f"the stream to reopen: {seen()}")
+    for page in pages:
         expect(_panel(page).get_by_test_id("count")).to_have_text(f"Count: {n + 5}")
 
 
@@ -193,7 +209,8 @@ def test_a_crash_shows_down_in_the_status_line_and_the_panel_comes_back(ui_shell
     }""")
     crashes = ui_shell.server("fixture")["crashes"]
     ui_shell.kill("fixture")
-    ui_page.wait_for_function("window.__statusSeen.some((t) => t.startsWith(\"fixture's page server is down\"))")
+    ui_page.wait_for_function(
+        "() => window.__statusSeen.some((t) => t.startsWith(\"fixture's page server is down\"))")
     expect(ui_page.locator("#moxi-status")).to_be_hidden()
     row = ui_shell.wait_server("fixture", lambda r: r["state"] == "running" and r["crashes"] > crashes)
     assert row["crashes"] == crashes + 1
@@ -284,7 +301,7 @@ def test_three_failed_starts_in_a_row_turn_the_servers_row_to_fail(ui_shells, fi
             session.get("/m/fixture/api/summary")
             return shell.server("fixture")["failed_in_row"] >= n
 
-        wait_for(failed_again, 5, interval=0.1, what=f"failed start {n}")
+        wait_for(failed_again, PROC_WAIT_S, interval=0.1, what=f"failed start {n}")
     expect(row).to_contain_text("the last 3 starts failed")
     expect(row).to_have_class("fail")
     expect(row).to_contain_text("log: ")
@@ -302,7 +319,8 @@ def test_a_version_change_drains_the_server_and_the_next_request_starts_the_new_
     assert old["version"] == "0.1.0"
     fixture_kit.hold(shell)
     held = _in_thread(lambda: shell.session(timeout=30).get("/m/fixture/api/wait"))
-    wait_for(lambda: fixture_kit.waiting(shell) == 1, 5, what="the held read to reach the server")
+    wait_for(lambda: fixture_kit.waiting(shell) == 1,
+             PROC_WAIT_S, what="the held read to reach the server")
 
     fixture_kit.set_version(site, "0.2.0")
 
@@ -310,7 +328,7 @@ def test_a_version_change_drains_the_server_and_the_next_request_starts_the_new_
         status, view = shell.session().get("/m/ui/api/modules")
         return any(m["name"] == "fixture" and m.get("version") == "0.2.0" for m in view["modules"])
 
-    wait_for(seen_new, 10, interval=0.2, what="the snapshot to see version 0.2.0")
+    wait_for(seen_new, PROC_WAIT_S, interval=0.2, what="the snapshot to see version 0.2.0")
     expect(row.locator(".state")).to_have_text("restarting")
     expect(row).to_have_class("warn")
     assert shell.server("fixture")["state"] == "draining"

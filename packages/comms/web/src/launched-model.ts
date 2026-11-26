@@ -4,8 +4,8 @@
 // the bound row whose address is its identity. The joined address then takes launcher's
 // words: where it runs, its cache fact (which wins over comms', so Home and this page say
 // the same), the `Session` line, and launcher's three cache cases. A session that waits on
-// agents or subagents while its cache is warm is `covered` when keep-warm will nudge it
-// before the cache goes cold, and `uncovered` when nothing will: that one is loud.
+// agents, subagents or open holds while its cache is warm is `covered` when keep-warm will
+// nudge it before the cache goes cold, and `uncovered` when nothing will: that one is loud.
 //
 // An uncovered session that a press would cover (`coverable`) gets `Keep warm`. A press
 // posts its request id to launcher's `KEEP_WARM_PATH` and waits, the button disabled, for
@@ -35,9 +35,10 @@ export interface Cache {
   estimated: boolean;
 }
 
-/** What a running launch waits on while its own turn is closed. */
+/** What a running launch waits on while its own turn is closed: subagents, else agents it
+ * directs, else its open holds. */
 export interface Waits {
-  kind: "agents" | "subagents";
+  kind: "agents" | "subagents" | "holds";
   count: number;
 }
 
@@ -104,7 +105,9 @@ function parseCache(value: unknown): Cache | null {
 }
 
 function parseWaits(value: unknown): Waits | null {
-  if (!isTable(value) || (value.kind !== "agents" && value.kind !== "subagents")) return null;
+  if (!isTable(value) || (value.kind !== "agents" && value.kind !== "subagents" && value.kind !== "holds")) {
+    return null;
+  }
   const count = typeof value.count === "number" && Number.isInteger(value.count) ? value.count : 0;
   return count > 0 ? { kind: value.kind, count } : null;
 }
@@ -145,8 +148,8 @@ export function stampOf(at: string | null): number | null {
   return Number.isNaN(when) ? null : when / 1000;
 }
 
-/** Launcher's three cases: `uncovered` and `covered` wait on agents or subagents with the
- * cache warm; every other session is `ordinary`. */
+/** Launcher's three cases: `uncovered` and `covered` wait on agents, subagents or open
+ * holds with the cache warm; every other session is `ordinary`. */
 export function caseOf(entry: RunningEntry): "ordinary" | "covered" | "uncovered" {
   if (entry.waits === null || entry.cache === null || entry.cache.state !== "warm") return "ordinary";
   return entry.covered ? "covered" : "uncovered";
@@ -157,14 +160,19 @@ function plural(n: number, one: string, many: string): string {
 }
 
 function waited(waits: Waits): string {
+  if (waits.kind === "holds") return plural(waits.count, "open hold", "open holds");
   return waits.kind === "agents" ? plural(waits.count, "agent", "agents") : plural(waits.count, "subagent", "subagents");
 }
 
-/** `kept warm while <n> agent(s) work(s)`, launcher's words for a covered session. */
+/** `kept warm while <n> agent(s) work(s)` (or subagents run, or holds are open), launcher's
+ * words for a covered session. */
 export function keptWords(waits: Waits): string {
-  const work = waits.kind === "agents"
-    ? `${plural(waits.count, "agent", "agents")} ${waits.count === 1 ? "works" : "work"}`
-    : `${plural(waits.count, "subagent", "subagents")} ${waits.count === 1 ? "runs" : "run"}`;
+  const one = waits.count === 1;
+  const work = waits.kind === "holds"
+    ? `${plural(waits.count, "hold", "holds")} ${one ? "is" : "are"} open`
+    : waits.kind === "agents"
+      ? `${plural(waits.count, "agent", "agents")} ${one ? "works" : "work"}`
+      : `${plural(waits.count, "subagent", "subagents")} ${one ? "runs" : "run"}`;
   return `kept warm while ${work}`;
 }
 

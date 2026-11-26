@@ -15,12 +15,13 @@ import sys
 import time
 from pathlib import Path
 
+from moxi_dev.testing import PROC_WAIT_S
 import pytest
 from playwright.sync_api import expect
 
 import projects_page_kit as kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
@@ -286,7 +287,7 @@ def test_the_fixtures_reads_stop_on_another_page_and_a_placement_anew_opens_the_
     expect_path(fixture_page, "/m/projects/open/kestrel-web")
     # The fixture reads every 300 ms while it is placed.
     start = kit.reads(fixture_shell)
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + PROC_WAIT_S
     while kit.reads(fixture_shell) < start + 2 and time.monotonic() < deadline:
         fixture_page.wait_for_timeout(100)
     assert kit.reads(fixture_shell) >= start + 2
@@ -308,7 +309,7 @@ def test_the_fixtures_reads_stop_on_another_page_and_a_placement_anew_opens_the_
     expect(row(fixture_page, "kestrel-web")).to_have_attribute("open", "")
     expect(facts).to_have_attribute("open", "kestrel-web")
     assert lists, "the list was not read again"
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + PROC_WAIT_S
     while kit.reads(fixture_shell) <= stopped and time.monotonic() < deadline:
         fixture_page.wait_for_timeout(100)
     assert kit.reads(fixture_shell) > stopped

@@ -6,8 +6,8 @@ import { Feed, parseRoster, RETRIES } from "../src/feed.ts";
 const settled = () => new Promise((done) => setImmediate(done));
 
 const ROW = { qualified: "core/alpha", name: "alpha", scope: "core", live: true, kind: null, module: null,
-              tier: "worker", adapter: "claude", directors: ["core/lead"], session_id: "s1",
-              bound_at: 100, awaiting: [], cache: null, holder: null };
+              tier: "worker", adapter: "claude", directors: ["core/lead"], policy_directors: [], session_id: "s1",
+              bound_at: 100, awaiting: [], cache: null, holder: null, via: null };
 const UP = { now: 1000, state: "up", detail: null, rows: [ROW] };
 
 /** A feed over `answers`, read in order; the clock reads 400. */
@@ -33,6 +33,7 @@ test("the route's three states, and what isn't one", () => {
                               rows: [{ name: "x" }, { ...ROW, directors: null, awaiting: [1, "a"] }] });
   assert.equal(value.rows.length, 1);
   assert.deepEqual(value.rows[0].directors, []);
+  assert.deepEqual(value.rows[0].policy_directors, []);
   assert.deepEqual(value.rows[0].awaiting, ["a"]);
 });
 
@@ -42,6 +43,12 @@ test("a send-only row's holder is kept when it is a string, else null", () => {
   assert.equal(holder("module"), "module");
   assert.equal(holder(undefined), null);
   assert.equal(holder(3), null);
+});
+
+test("comms' words for a binding are kept when they are a string with text, else null", () => {
+  const via = (value) => parseRoster({ state: "up", detail: null, rows: [{ ...ROW, via: value }] }).rows[0].via;
+  assert.equal(via("Claude's apps, through the connector"), "Claude's apps, through the connector");
+  for (const bad of [undefined, null, "", 3, ["x"]]) assert.equal(via(bad), null, JSON.stringify(bad));
 });
 
 test("a row's cache fact is kept when it is one, else null", () => {

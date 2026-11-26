@@ -8,10 +8,13 @@ is an optional link, asked through `moxi.modules.load` where the feature needs i
 """
 
 #: The API module: `launch`, `check` and `preview`. Interface 1 is `launch_kind` and
-#: `launch_kinds`: the launch kind (`scratch`, `seat`, `project` or `one-off`) of a
+#: `launch_kinds`: the launch kind (`fork`, `scratch`, `seat`, `project` or `one-off`) of a
 #: session the launcher started, read from the launch log by session id. Interface 2 adds
 #: `running`: the launches running now, read from the launch log and the process table.
-INTERFACES = frozenset({1, 2})
+#: Interface 3 adds `fork`, a new session from a copy of another's conversation, with the
+#: caller's own `SESSION_ENV` stamps set on it; `exit_session`, which exits a quiet
+#: launched session; and `slots_here`, whether tmux slots run on this machine.
+INTERFACES = frozenset({1, 2, 3})
 API = "moxi_launcher.api"
 #: What `moxi launcher` runs, in process, as `main(argv, prog="moxi launcher")`.
 CLI = "moxi_launcher.cli:main"
@@ -38,16 +41,24 @@ OPTIONAL = {
           "it the launcher is its command only.",
     "notes": "Handoffs in notes: a launch's handoff folder is the one notes keeps for its "
              "directory (or its notes_dir), where the handoff pointer looks and a "
-             "relaunch's handoff must be. Without it the launcher keeps its own folder.",
+             "relaunch's handoff must be; a launch with no notes directory has no "
+             "handoff folder. Without it the launcher keeps its own folder.",
     "cache": "Prompt cache timing: keep_warm nudges a waiting session before its cache "
              "expires, as Keep warm on a running session's row does from the press on, "
-             "and recycle_on_expiry clears or compacts an idle session once it has. "
+             "and recycle_on_expiry clears an idle session once it has, or compacts it "
+             "shortly before, once per idle stretch, while its cache is still warm. "
              "Without it those rows and Keep warm aren't offered.",
-    "usage": "Context warnings: warn_at sets the mark where usage warns the session, and "
-             "recycle_at_limit with limit_at relaunches or compacts a session past its "
-             "mark. Without it those rows aren't offered.",
+    "usage": "Context warnings: warn_at sets the mark where usage warns the session and "
+             "a session that can relaunch itself is told it may, with recycle_at_limit "
+             "relaunch. Without it those rows aren't offered.",
     "sessions": "The latest thing said in each running session, on Home's Sessions row. "
                 "Without it a row shows when it was launched.",
+    "memory": "memory's subconscious: the subconscious row turns it on for a launch, "
+              "automatic or on demand, and the subconscious_route row picks where its "
+              "recalls run, a subagent or a slot (on Codex only the slot route runs "
+              "one), each stamped where memory reads it. A recall's slot fork is left "
+              "to memory to end: park, crash discovery and restore leave it out. "
+              "Without it those rows aren't offered.",
 }
 GATED = {}
 #: Each Moxi variable the launcher reads outside moxi.paths and moxi.config, and why: the
@@ -63,15 +74,18 @@ INTERNAL_ENV = {
     "MOXI_LAUNCHER_KEEP_WARM": "launcher stamp: the launch keeps its session warm, read by "
                                "a cache watcher started before the timer asked by "
                                "MOXI_LAUNCHER_REQUEST",
-    "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "launcher stamp: the launch clears or compacts its "
-                                       "session once its cache expires, read by cache's "
-                                       "timer",
+    "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "launcher stamp: the launch clears its session "
+                                       "once its cache expires, or compacts it shortly "
+                                       "before, read by cache's timer",
     "MOXI_LAUNCHER_TURNS": "test seam: the import name of a module that stands in for "
                            "turns' API in the first-turn sender",
     "MOXI_LAUNCHER_SLOTS": "test seam: the import name of a module that stands in for "
                            "slots' API in the slot target",
 }
 SETTINGS = "settings.toml"
+#: The launch defaults, `[defaults]` of the user's `presets.toml`, which `moxi config
+#: launcher` shows and sets as `defaults.<row>` through this hook.
+CONFIG_TABLES = {"defaults": "moxi_launcher.defaults:TABLE"}
 #: Asks the two startup-screen questions when slots is installed.
 SETUP = "moxi_launcher.startup:setup"
 SEGMENT = None
@@ -80,8 +94,8 @@ SEGMENT = None
 PAGE = "moxi_launcher.page:PAGE"
 #: What the launcher offers the browser UI shell: its panel, the piece for Home's main spot
 #: that starts a session, Home's Sessions row with the launches running now, a block for
-#: the modules view with each launched session's state, and one session's state that any
-#: host may place.
+#: the modules view with each launched session's state, one session's state that any host
+#: may place, and its facts for the Projects page.
 #: Each script is a file the page's web build writes beside the page's assets.
 COMPONENTS = {
     "page": {"script": "page.js", "title": "Launcher", "contract": 1, "place": "page",
@@ -102,6 +116,14 @@ COMPONENTS = {
               "place": "inline", "doc": "One session's state",
               "attributes": {"session": {"type": "string", "required": True,
                                          "doc": "a session id"}}},
+    "project-facts": {"script": "project-facts.js", "title": "Launcher",
+                      "doc": "Each project's running launches, and the opened one's preset, "
+                             "last launch and session names, for the Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }
 
 # The announcement's version, and the optional names it declares.
@@ -134,7 +156,7 @@ SESSION_ENV = {
                               "pointer",
     "MOXI_LAUNCHER_KEEP_WARM": "set when the launch keeps its session warm",
     "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY": "set to clear or compact when the launch recycles its "
-                                       "session on cache expiry",
+                                       "session around its cache's expiry",
     "MOXI_USAGE_CROSSING_AT": "usage's crossing mark, set when the launch recycles at its "
                               "limit; scrubbed even without usage installed",
     "MOXI_USAGE_WARN_AT": "usage's warning mark, set from warn_at; scrubbed even without "

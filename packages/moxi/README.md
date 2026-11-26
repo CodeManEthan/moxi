@@ -54,7 +54,11 @@ commands:
   gives its source.
 - `moxi install <module>` installs a module with the modules it requires, runs its setup,
   and offers each optional extra with a line saying what it enables. `--with`,
-  `--without`, `--all` and `--none` answer ahead.
+  `--without`, `--all` and `--none` answer ahead. `moxi install <module> --setup-only`
+  runs an installed module's setup again and records the version it ran at, installing
+  nothing and reaching no index, so it works for a module that isn't on PyPI or was
+  installed by other means. It is the doctor's fix when a module's setup last ran at
+  another version.
 - `moxi uninstall <module>` runs the module's teardown, then removes its daemons and
   timers, its skills and its package. Its config file is kept, and so are its stores
   unless `--purge` is given (`--yes` answers its questions).
@@ -70,6 +74,17 @@ commands:
   shows first, its group, unit, words for an enum's values, and whether a change can hurt
   or is made at the terminal or on another page). `moxi config set --json` and `unset
   --json` print one object, `{changed, problem, fix, units}`, in place of their lines.
+- A module may keep one TOML table of rows in a file of its own, which it reads, checks
+  and writes itself, and name it in its announcement's `CONFIG_TABLES`
+  (`{"defaults": "package.module:NAME"}`, listed by `moxi modules --json` as
+  `config_tables`). `moxi config <module> show` lists the table's rows after the module's
+  own keys, each named `<table>.<row>`, and `moxi config set` and `unset` of such a key go
+  to the module's hook, with a config key's exit codes, `--json` answer and history line;
+  the module's warning lines print after the `set` line (on stderr with `--json`).
+  `--add` and `--remove` are refused there: a row takes its whole value. A table file that
+  can't be read shows as one item with `table_error` and `table_fix`, and the module's
+  own keys still show; a config file that can't be read leaves the table's rows listed
+  and editable. `path`, `check` and `init` are the config file's alone.
 - `moxi paths <module>` prints where a module keeps its files: its data, state, cache,
   config and runtime directories, its config file and each store it declares.
 - `moxi doctor [<module>...]` checks the modules, their settings, daemons, timers and

@@ -1,5 +1,5 @@
 // The acts the page sends: each its route relative to loadout's page, its body, and the
-// verb's words as he would type them, which the page shows in place of the act while the
+// verb's words as the user would type them, which the page shows in place of the act while the
 // harness homes' note is set. No DOM, so the Node tests read it.
 
 import type { ActScope, ProblemAct } from "./placed-model.ts";
@@ -56,10 +56,14 @@ export function removeAct(kind: string, name: string, section: Section): PageAct
 }
 
 /** `add <kind> <name>` to one section: Your items with `section` null, else that project
- * section (or a project's key, which gives it a section). */
-export function addAct(kind: string, name: string, section: string | null): PageAct {
-  return { path: "api/add", body: { kind, name, ...(section === null ? {} : { project: section }) },
-           argv: ["add", kind, name, ...(section === null ? [] : [`--project=${section}`])] };
+ * section (or a project's key, which gives it a section); for every harness with `harness`
+ * null, else for that harness only. */
+export function addAct(kind: string, name: string, section: string | null, harness: string | null = null): PageAct {
+  return { path: "api/add",
+           body: { kind, name, ...(section === null ? {} : { project: section }),
+                   ...(harness === null ? {} : { harnesses: [harness] }) },
+           argv: ["add", kind, name, ...(section === null ? [] : [`--project=${section}`]),
+                  ...(harness === null ? [] : [`--harness=${harness}`])] };
 }
 
 /** `global mode <mode>` for `managed` or `if-absent`. */
@@ -84,7 +88,7 @@ export function shellWord(word: string): string {
   return `'${word.replaceAll("'", "'\\''")}'`;
 }
 
-/** The command an act runs, as he would type it: `moxi loadout <argv>`. */
+/** The command an act runs, as the user would type it: `moxi loadout <argv>`. */
 export function commandOf(argv: readonly string[]): string {
   return ["moxi", "loadout", ...argv.map(shellWord)].join(" ");
 }

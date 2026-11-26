@@ -1,10 +1,13 @@
 """`moxi memory`: search past sessions, start an ingest or a rebuild, and see the index.
 
     moxi memory search "WORDS" [--project P] [--since TIME] [--harness H] [--results]
-                               [--subagents] [--scratch] [--limit N] [--json]
+                               [--subagents] [--scratch] [--forks] [--limit N] [--json]
     moxi memory ingest [--all]
     moxi memory reindex [--relabel]
     moxi memory status [--json]
+    moxi memory subconscious list [--session ID] [--json]
+    moxi memory subconscious recall TOPIC [--json]
+    moxi memory subconscious discard RECALL_ID
 
 `search` prints each hit (harness, session id, time, project, row kind, then a snippet),
 and under them one `moxi sessions read` command that opens the first hit's session
@@ -24,8 +27,13 @@ started: each says it is queued behind a running rebuild, or that it runs now or
 ingest holding the lock ends. `reindex` builds a new index from every transcript in every
 folder that answers (each harness's live root and archive folders), keeps the sessions
 of a harness with a folder that doesn't answer, and says so first, naming each folder that
-didn't answer the last run and each one sessions' config no longer names. `--relabel`
-derives each session's project label again where its folder still exists.
+didn't answer the last run and each one sessions' config no longer names. When the
+index's rows were stored by an older secrets `redact` than the installed one, the rebuild
+is a version rebuild (`moxi_memory.ingest`), and `reindex` says first what it keeps and
+what still leaves. `--relabel` derives each session's project label again where its
+folder still exists.
+
+`subconscious` holds the subconscious's verbs (`moxi_memory.recall_cli`).
 
 `status` prints the index's rows, reads and backlog, whether the first full read has
 finished, whether a rebuild is running, a request waiting, the session table's counts
@@ -153,7 +161,7 @@ def _search(args, out, prog: str) -> int:
         result = searching.search(args.words, project=args.project, since=since,
                                   harness=args.harness, results=args.results,
                                   subagents=args.subagents, scratch=args.scratch,
-                                  limit=args.limit)
+                                  forks=args.forks, limit=args.limit)
     except (searching.IndexMissing, searching.IndexUnreadable) as exc:
         message = _missing_message(exc, searching.rebuilding())
         state = "missing" if isinstance(exc, searching.IndexMissing) else "unreadable"
@@ -225,10 +233,24 @@ def _ingest(args, out, prog: str) -> int:
 def _reindex(args, out, prog: str) -> int:
     from . import start
 
-    print("A rebuild drops each session whose transcript is gone from every folder of its "
-          "harness, and only when every folder of that harness answers it; until the "
-          "rebuild ends, those sessions stay searchable. A harness with a folder that "
-          "doesn't answer keeps all its sessions.", file=out)
+    behind = _redact_behind()
+    if behind is not None:
+        stored, now = behind
+        print(f"The index's rows were stored under secrets' redact version {stored}, and "
+              f"the installed secrets is version {now}, so this rebuild redacts every row "
+              "again. It reads every transcript from its start. It drops no session, and "
+              "no row of a source it can't read to its end (a deleted transcript, a folder "
+              "that doesn't answer, a harness or subagents' rows the config leaves out): it "
+              "keeps those rows, redacted again and trimmed at their stored cuts. A row "
+              "of a source it reads to its end that the source no longer gives leaves, as "
+              "in any rebuild, unless its session also has a source it can't read. A later "
+              "`moxi memory reindex` drops what a rebuild drops today: each session whose "
+              "transcript is gone.", file=out)
+    else:
+        print("A rebuild drops each session whose transcript is gone from every folder of "
+              "its harness, and only when every folder of that harness answers it; until "
+              "the rebuild ends, those sessions stay searchable. A harness with a folder "
+              "that doesn't answer keeps all its sessions.", file=out)
     for line in _last_run_lines():
         print(line, file=out)
     if args.relabel:
@@ -237,6 +259,21 @@ def _reindex(args, out, prog: str) -> int:
     _asked("a relabel" if args.relabel else "a rebuild",
            lambda: start.start_rebuild(relabel=args.relabel), out)
     return codes.OK
+
+
+def _redact_behind() -> tuple[int, int] | None:
+    """The index's redact version and the installed secrets', when the index's is lower;
+    None when it isn't, or there is no index to read."""
+    from . import index
+    from .rows import redact_version
+
+    try:
+        with index.open_read() as reader:
+            stored = index.stored_redact_version(reader.conn)
+    except (index.IndexMissing, index.IndexUnreadable):
+        return None
+    now = redact_version()
+    return (stored, now) if stored < now else None
 
 
 def _last_run_lines() -> list[str]:
@@ -343,7 +380,14 @@ def _status(args, out, prog: str) -> int:
     return codes.OK if s.index == stat.OK else codes.ERROR
 
 
-_VERBS = {"search": _search, "ingest": _ingest, "reindex": _reindex, "status": _status}
+def _subconscious(args, out, prog: str) -> int:
+    from . import recall_cli
+
+    return recall_cli.run(args, out, prog)
+
+
+_VERBS = {"search": _search, "ingest": _ingest, "reindex": _reindex, "status": _status,
+          "subconscious": _subconscious}
 
 
 def _parser(prog: str) -> argparse.ArgumentParser:
@@ -371,6 +415,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                         "index.include_subagents is on)")
     p.add_argument("--scratch", action="store_true",
                    help="search sessions launched as scratch too")
+    p.add_argument("--forks", action="store_true",
+                   help="search sessions launched as forks of another session too")
     p.add_argument("--limit", type=_positive, default=10, metavar="N",
                    help="how many hits (default 10)")
     p.add_argument("--json", action="store_true", help="print one JSON object")
@@ -396,6 +442,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                      "whether a rebuild is running, and the session "
                                      "table's counts.")
     p.add_argument("--json", action="store_true", help="print one JSON object")
+
+    from . import recall_cli
+
+    recall_cli.add_parser(verbs)
     return parser
 
 

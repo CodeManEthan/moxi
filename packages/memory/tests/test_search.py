@@ -379,6 +379,21 @@ def test_a_scratch_session_is_found_only_with_scratch_in_every_tier():
     assert {h.tier for h in api.search("ocelot", scratch=True).hits} == {1}
 
 
+def test_a_fork_session_is_found_only_with_forks_in_every_tier():
+    t = claude(1)
+    t.user("quokka prompt")
+    call = t.request().tool_use("Bash", {"command": "ls"})
+    t.tool_result(call, "quokka output")
+    t.assistant("quokka answer")
+    t.write()
+    run(kinds={t.session_id: "fork"}, config=config(**{"index.include_subagents": True}))
+    assert api.search("quokka", results=True).hits == ()
+    assert api.search("quokka", results=True).rows == 0
+    assert api.search("quokka", results=True, scratch=True).hits == ()
+    tiers = {h.tier for h in api.search("quokka", results=True, forks=True).hits}
+    assert tiers == {1, 2}
+
+
 def test_project_seat_one_off_and_no_kind_sessions_are_found_by_default():
     kinds = {}
     for n, kind in enumerate(("project", "seat", "one-off", None), 1):

@@ -3,10 +3,10 @@ import test from "node:test";
 
 import { fieldsFor, filledFields, NO_PRESET, parseCatalog, parseForm, parsePreview } from "../src/panel.ts";
 import {
-  briefFileOf, buttonWords, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
+  briefFileOf, buttonWords, handoffAtCopy, handoffAtLaunch, handoffAtPreset, handoffOf, copied, edited, FIRST_TURN, RESUMING, resumeSent, followed, following, HOME_REFUSALS, IDLE, inFlight, launched, LAUNCHED, launchRequest, notesOf, NO_TARGETS,
   afterNoAnswer, aroundPage, parseTargets, PRESSED, UNREAD_TARGETS, previewed, runMenu, runOf, slotWords, startedWords, stopped,
   chipFace, chipMenu, firstOpen, folderFace, formValues, harnessName, hasEffort, HOME, openWhere, parsePlaces, pickOf, pickValues, placed, placeRows,
-  placeTime, projectKeys, samePick, tilde, typedFolder, valueOf, whereFace, withProjects,
+  placeTime, projectKeys, samePick, SCRATCH_PICK, takesScratch, tilde, typedFolder, valueOf, whereFace, withProjects,
 } from "../src/prompt-model.ts";
 
 const place = (project_key, cwd, at = "2026-11-10T18:45:00Z") => ({ project_key, cwd, at });
@@ -66,12 +66,20 @@ test("a place with a project is picked as the project with projects and as its f
   assert.deepEqual(pickOf(place(null, "/srv/x"), true), { kind: "folder", path: "/srv/x" });
 });
 
-test("a pick sets its own place row and empties the other", () => {
-  assert.deepEqual(pickValues({ kind: "project", key: "proj-a" }), { project: "proj-a", cwd: null });
-  assert.deepEqual(pickValues({ kind: "folder", path: "~/notes" }), { project: null, cwd: "~/notes" });
-  assert.deepEqual(pickValues({ kind: "choose" }), { project: null, cwd: null });
+test("a pick sets its own place row and empties the others", () => {
+  assert.deepEqual(pickValues({ kind: "project", key: "proj-a" }), { project: "proj-a", cwd: null, scratch: "false" });
+  assert.deepEqual(pickValues({ kind: "folder", path: "~/notes" }), { project: null, cwd: "~/notes", scratch: "false" });
+  assert.deepEqual(pickValues(SCRATCH_PICK), { project: null, cwd: null, scratch: "true" });
+  assert.deepEqual(pickValues({ kind: "choose" }), { project: null, cwd: null, scratch: "false" });
   assert.equal(placed({ kind: "choose" }), false);
   assert.equal(placed({ kind: "folder", path: HOME }), true);
+  assert.equal(placed(SCRATCH_PICK), true);
+});
+
+test("the line's menu offers Scratch only where the form has the row", () => {
+  assert.equal(takesScratch([field("scratch", { type: "bool" })]), true);
+  assert.equal(takesScratch([field("cwd", { type: "path" })]), false);
+  assert.equal(takesScratch([field("scratch", { type: "bool", needs_absent: true })]), false);
 });
 
 test("the first open is the one project, a choice among several, else the home folder", () => {
@@ -193,6 +201,7 @@ test("the line reads Project with a key and Folder with a path", () => {
                    { word: "Folder", dim: "~/code/", name: "proj-a" });
   assert.deepEqual(whereFace({ kind: "folder", path: "~" }, ALICE), { word: "Folder", dim: "", name: "~" });
   assert.deepEqual(whereFace({ kind: "choose" }, ALICE), { word: "Project", dim: "", name: "choose" });
+  assert.deepEqual(whereFace(SCRATCH_PICK, ALICE), { word: "Scratch", dim: "", name: "a throwaway folder" });
 });
 
 test("two picks are the same place by key, or by folder however home is written", () => {
@@ -200,6 +209,8 @@ test("two picks are the same place by key, or by folder however home is written"
   assert.equal(samePick({ kind: "project", key: "proj-a" }, { kind: "project", key: "proj-a" }, ALICE), true);
   assert.equal(samePick({ kind: "project", key: "notes" }, { kind: "folder", path: "notes" }, ALICE), false);
   assert.equal(samePick({ kind: "choose" }, { kind: "choose" }, ALICE), false);
+  assert.equal(samePick(SCRATCH_PICK, { kind: "scratch" }, ALICE), true);
+  assert.equal(samePick(SCRATCH_PICK, { kind: "folder", path: "scratch" }, ALICE), false);
 });
 
 test("a place's time is the time of day today and the day before that", () => {
@@ -229,7 +240,7 @@ test("without projects every place is its folder and a pick of it sets the folde
   assert.deepEqual(rows.map((row) => [row.dim, row.name, row.current]),
                    [["~/code/proj-a/", "web", false], ["~/", "notes", true], ["/srv/", "proj-b", false]]);
   assert.ok(rows.every((row) => row.pick.kind === "folder"));
-  assert.deepEqual(pickValues(rows[0].pick), { project: null, cwd: "/home/alice/code/proj-a/web" });
+  assert.deepEqual(pickValues(rows[0].pick), { project: null, cwd: "/home/alice/code/proj-a/web", scratch: "false" });
 });
 
 test("two places drawn the same are one row, the newer", () => {
@@ -330,17 +341,19 @@ test("the chip reads the values the form is filled with until one is set here", 
 
 // --- where it runs -------------------------------------------------------------------------
 
-const slot = (number, state, extra = {}) =>
-  ({ number, state, launchable: false, holder: null, until: null, taken_by: null, ...extra });
+const slot = (number, state, extra = {}) => ({
+  number, state, launchable: false, choosable: false, crashed: false, holder: null, until: null, taken_by: null,
+  parked: null, ...extra,
+});
 const TARGETS = {
   state: "up", detail: null, new_slot: true, default: { target: "slot", slot: 2 },
   slots: [
     slot(1, "occupied", { taken_by: { request_id: "r1", label: "planner" } }),
-    slot(2, "free", { launchable: true }),
+    slot(2, "free", { launchable: true, choosable: true }),
     slot(3, "free", { holder: "reviewer", until: 1900000000.5 }),
     slot(4, "missing"),
     slot(5, "occupied"),
-    slot(6, "ended", { launchable: true }),
+    slot(6, "ended", { launchable: true, choosable: true }),
   ],
 };
 const NONE_FREE = { ...TARGETS, default: { target: "slot", slot: null }, slots: [TARGETS.slots[0], TARGETS.slots[3]] };
@@ -415,6 +428,32 @@ test("the menu's rows say each slot's state, and only a free one can be picked",
   assert.equal(slotWords({ ...parseTargets(TARGETS).slots[2], until: null }), "held for reviewer");
 });
 
+test("a missing slot can be picked and made again, a crashed or reserved one can't", () => {
+  const listing = {
+    ...TARGETS, default: { target: "slot", slot: 1 },
+    slots: [
+      slot(1, "missing", { choosable: true }),
+      slot(2, "missing", { crashed: true }),
+      slot(3, "missing", { holder: "park-p1", parked: { session_id: "s1", label: "planner" } }),
+      slot(4, "missing", { holder: "reviewer" }),
+      slot(5, "free", { launchable: true, crashed: true }),
+    ],
+  };
+  const targets = parseTargets(listing);
+  assert.deepEqual(targets.default, { target: "slot", slot: 1, named: false });
+  const menu = runMenu(targets, targets.default, clock);
+  assert.deepEqual(menu.slots.map((row) => [row.lead, row.words, row.run !== null]), [
+    ["Slot 1", "missing, made again at launch", true],
+    ["Slot 2", "crashed, reserved at the next launch", false],
+    ["Slot 3", "held for park-p1 · parked planner", false],
+    ["Slot 4", "held for reviewer", false],
+    ["Slot 5", "crashed, reserved at the next launch", false],
+  ]);
+  // A pick of a slot crash discovery would reserve falls back to the default.
+  assert.deepEqual(runOf(targets, { target: "slot", slot: 5, named: true }), targets.default);
+  assert.deepEqual(runOf(targets, { target: "slot", slot: 1, named: true }), { target: "slot", slot: 1, named: true });
+});
+
 test("a new slot is offered only while no slot is free, and is then the ticked default", () => {
   assert.equal(runMenu(parseTargets(TARGETS), SLOT_2, clock).slots.some((row) => row.lead === "A new slot"), false);
   const menu = runMenu(parseTargets(NONE_FREE), NEW_SLOT, clock);
@@ -460,6 +499,34 @@ test("a target or slot the form is filled with never places the launch", () => {
   assert.equal(launchRequest(FORM_FIELDS, null, SET, { target: "headless" }).values.target, "headless");
 });
 
+test("the request names the one place the line picks, and a switch between them never sends two", () => {
+  const fields = [...FORM_FIELDS, field("scratch", { type: "bool", default: "false", value: "false" })];
+  const places = (body) => ["cwd", "project", "scratch"].filter((name) => name in body.values);
+  const sent = (pick) => launchRequest(fields, null, { brief: "go", ...pickValues(pick) }, SLOT_2);
+  const folder = sent({ kind: "folder", path: "~/code" });
+  assert.deepEqual(places(folder), ["cwd"]);
+  assert.equal(folder.values.cwd, "~/code");
+  assert.deepEqual(folder.leave_out.filter((name) => name !== "slot").sort(), ["instructions", "model", "project", "scratch"]);
+  const project = sent({ kind: "project", key: "proj-a" });
+  assert.deepEqual(places(project), ["project"]);
+  assert.equal(project.values.project, "proj-a");
+  const scratch = sent(SCRATCH_PICK);
+  assert.deepEqual(places(scratch), ["scratch"]);
+  assert.equal(scratch.values.scratch, "true");
+  assert.equal(scratch.leave_out.includes("cwd") && scratch.leave_out.includes("project"), true);
+  // A form filled with a scratch folder, by a preset or the user's defaults, still sends the
+  // line's one place: a folder or a project picked turns Scratch off.
+  const filled = fields.map((item) => item.name === "scratch" ? { ...item, value: "true" } : item);
+  for (const pick of [{ kind: "folder", path: "~/code" }, { kind: "project", key: "proj-a" }]) {
+    const body = launchRequest(filled, null, { brief: "go", ...pickValues(pick) }, SLOT_2);
+    assert.equal(places(body).length, 1, JSON.stringify(body));
+    assert.equal(body.leave_out.includes("scratch"), true);
+  }
+  // Without the row nothing of it is sent.
+  const bare = launchRequest(FORM_FIELDS, null, { brief: "go", ...pickValues({ kind: "folder", path: "~/code" }) }, SLOT_2);
+  assert.equal("scratch" in bare.values || bare.leave_out.includes("scratch"), false);
+});
+
 test("an install with no slot row sends no slot either way", () => {
   const fields = FORM_FIELDS.map((item) => item.name === "slot" ? { ...item, needs_absent: true } : item);
   const sent = launchRequest(fields, null, SET, { target: "terminal" });
@@ -492,19 +559,20 @@ test("a brief file the form is filled with is left out, with the box empty and w
   assert.equal(launchRequest(FORM_FIELDS, null, SET, SLOT_2).leave_out.includes("brief_file"), false);
 });
 
-test("no first-turn row reaches the request but the brief, as the box's text", () => {
-  // Each row filled by the form, each withheld by it, and all of them at once.
+test("no brief row reaches the request but the box's text", () => {
+  // Each row filled by the form, each withheld by it, and both at once.
+  const BRIEF_ROWS = FIRST_TURN.filter((name) => name !== "handoff");
   const filled = (name) => field(name, { type: name === "brief" ? "string" : "path", value: `/form/${name}.md` });
   const without = FORM_FIELDS.filter((item) => !FIRST_TURN.includes(item.name));
   const withheld = { state: "up", detail: null, harness: "claude", refused: null,
-                     rows: FIRST_TURN.map((name) => ({ name, value: null, items: null, source: "defaults", withheld: true })) };
-  const cases = [...FIRST_TURN.map((name) => [name]), [...FIRST_TURN]];
+                     rows: BRIEF_ROWS.map((name) => ({ name, value: null, items: null, source: "defaults", withheld: true })) };
+  const cases = [...BRIEF_ROWS.map((name) => [name]), [...BRIEF_ROWS]];
   for (const names of cases) {
     const fields = [...without, ...names.map(filled)];
     for (const form of [null, withheld]) {
       const empty = launchRequest(fields, form, { ...SET, brief: null }, SLOT_2);
       const typed = launchRequest(fields, form, SET, SLOT_2);
-      for (const name of FIRST_TURN) {
+      for (const name of BRIEF_ROWS) {
         assert.equal(name in empty.values, false, `${name} sent from an empty box`);
         assert.equal(empty.leave_out.includes(name), names.includes(name), `${name} left out of an empty box`);
         if (name === "brief") continue;
@@ -516,7 +584,7 @@ test("no first-turn row reaches the request but the brief, as the box's text", (
       assert.equal(typed.leave_out.includes("brief"), false);
       // A request built with no box text at all sends no brief the form is filled with.
       const unset = launchRequest(fields, form, { project: null, cwd: "~/code" }, SLOT_2);
-      assert.equal(FIRST_TURN.some((name) => name in unset.values), false);
+      assert.equal(BRIEF_ROWS.some((name) => name in unset.values), false);
     }
   }
 });
@@ -533,6 +601,105 @@ test("a brief file set through the + is the first turn: brief_file sent, no brie
   const empty = launchRequest(filled, null, { ...SET, brief: null, brief_file: "/srv/briefs/first.md" }, SLOT_2);
   assert.equal(empty.values.brief_file, "/srv/briefs/first.md");
   assert.equal("brief" in empty.values, false);
+});
+
+test("a handoff set through the + is sent beside the box's text or the brief file", () => {
+  const fields = [...FORM_FIELDS, field("brief_file", { type: "path", value: "" }), field("handoff", { type: "path", value: "" })];
+  const typed = launchRequest(fields, null, { ...SET, handoff: " ~/notes/handoff.md " }, SLOT_2);
+  assert.equal(typed.values.handoff, "~/notes/handoff.md");
+  assert.equal(typed.values.brief, "fix the build");
+  const filed = launchRequest(fields, null, { ...SET, brief_file: "/srv/b.md", handoff: "/srv/h.md" }, SLOT_2);
+  assert.deepEqual([filed.values.brief_file, filed.values.handoff], ["/srv/b.md", "/srv/h.md"]);
+  // None set and none filled: left out, as before.
+  const none = launchRequest(fields, null, SET, SLOT_2);
+  assert.equal("handoff" in none.values, false);
+  assert.equal(none.leave_out.includes("handoff"), true);
+  // A form with no handoff row sends nothing of it, set or not.
+  const bare = launchRequest(FORM_FIELDS, null, { ...SET, handoff: "/srv/h.md" }, SLOT_2);
+  assert.equal("handoff" in bare.values || bare.leave_out.includes("handoff"), false);
+  assert.equal(handoffOf(FORM_FIELDS, { handoff: "/srv/h.md" }), null);
+  assert.equal(handoffOf([field("handoff", { type: "path", value: "/srv/h.md", needs_absent: true })], {}), null);
+});
+
+test("a handoff the defaults or a preset fill is sent unless cleared, and a cleared one is left out", () => {
+  const fields = [...FORM_FIELDS, field("handoff", { type: "path", value: "/home/alice/handoffs/last.md" })];
+  // Filled: shown, and sent with nothing set over it.
+  assert.equal(handoffOf(fields, {}), "/home/alice/handoffs/last.md");
+  const sent = launchRequest(fields, null, SET, SLOT_2);
+  assert.equal(sent.values.handoff, "/home/alice/handoffs/last.md");
+  // Another set through the + stands over the fill.
+  assert.equal(launchRequest(fields, null, { ...SET, handoff: "/srv/mine.md" }, SLOT_2).values.handoff, "/srv/mine.md");
+  // Cleared, blank or empty: none shown, and the row left out so no layer gives it.
+  for (const handoff of ["", "  ", null]) {
+    assert.equal(handoffOf(fields, { handoff }), null);
+    const cleared = launchRequest(fields, null, { ...SET, handoff }, SLOT_2);
+    assert.equal("handoff" in cleared.values, false);
+    assert.equal(cleared.leave_out.includes("handoff"), true);
+  }
+});
+
+test("a Clear covers the one launch it was made for; after it, or a preset change, the form's handoff shows and is sent", () => {
+  const filled = (path) => [...FORM_FIELDS, field("handoff", { type: "path", value: path })];
+  const alpha = filled("/home/alice/handoffs/alpha.md");
+  const beta = filled("/home/alice/handoffs/beta.md");
+  const setOf = (held) => (held === null ? SET : { ...SET, handoff: held });
+  // Cleared over alpha's handoff: none shown, and the launch it was made for leaves it out.
+  let held = "";
+  assert.equal(handoffOf(alpha, setOf(held)), null);
+  const cleared = launchRequest(alpha, null, setOf(held), SLOT_2);
+  assert.equal("handoff" in cleared.values, false);
+  assert.equal(cleared.leave_out.includes("handoff"), true);
+  // That launch started with the Clear: it is let go, so the next launch shows and sends
+  // alpha's handoff.
+  held = handoffAtLaunch(held, "");
+  assert.equal(held, null);
+  assert.equal(handoffOf(alpha, setOf(held)), "/home/alice/handoffs/alpha.md");
+  assert.equal(launchRequest(alpha, null, setOf(held), SLOT_2).values.handoff, "/home/alice/handoffs/alpha.md");
+  // A Clear made after the press is for the next launch, so the one in flight keeps it.
+  assert.equal(handoffAtLaunch("", null), "");
+  assert.equal(handoffAtLaunch("", "/srv/mine.md"), "");
+  // Cleared, then another preset picked, or the same picked again: its handoff shows and is sent.
+  held = handoffAtPreset("");
+  assert.equal(held, null);
+  assert.equal(handoffOf(beta, setOf(held)), "/home/alice/handoffs/beta.md");
+  assert.equal(launchRequest(beta, null, setOf(held), SLOT_2).values.handoff, "/home/alice/handoffs/beta.md");
+  // One set through the + stays over a preset change, as a brief file does, and goes after a
+  // launch that sent it, unless it was changed since.
+  assert.equal(handoffAtPreset("/srv/mine.md"), "/srv/mine.md");
+  assert.equal(launchRequest(beta, null, setOf(handoffAtPreset("/srv/mine.md")), SLOT_2).values.handoff,
+               "/srv/mine.md");
+  assert.equal(handoffAtLaunch("/srv/mine.md", "/srv/mine.md"), null);
+  assert.equal(handoffAtLaunch("/srv/other.md", "/srv/mine.md"), "/srv/other.md");
+  assert.equal(handoffAtLaunch(null, null), null);
+  assert.equal(handoffAtPreset(null), null);
+});
+
+test("a command copied with a Clear lets go of it, so the next shows and sends the form's handoff; a + one stays", () => {
+  const alpha = [...FORM_FIELDS, field("handoff", { type: "path", value: "/home/alice/handoffs/alpha.md" })];
+  const setOf = (held) => (held === null ? SET : { ...SET, handoff: held });
+  // Cleared for the command copied: let go, so alpha's handoff shows and goes with the next.
+  const held = handoffAtCopy("", "");
+  assert.equal(held, null);
+  assert.equal(handoffOf(alpha, setOf(held)), "/home/alice/handoffs/alpha.md");
+  assert.equal(launchRequest(alpha, null, setOf(held), SLOT_2).values.handoff, "/home/alice/handoffs/alpha.md");
+  // A Clear made after the press covers the next command, not the one copied.
+  assert.equal(handoffAtCopy("", null), "");
+  assert.equal(handoffAtCopy("", "/srv/mine.md"), "");
+  // One set through the + stays after a copy, as a brief file does, and so does a fill.
+  assert.equal(handoffAtCopy("/srv/mine.md", "/srv/mine.md"), "/srv/mine.md");
+  assert.equal(handoffAtCopy("/srv/other.md", ""), "/srv/other.md");
+  assert.equal(handoffAtCopy(null, null), null);
+});
+
+test("a handoff alone, with an empty box and no brief file, is the launch's first turn", () => {
+  const fields = [...FORM_FIELDS, field("brief_file", { type: "path", value: "" }), field("handoff", { type: "path", value: "" })];
+  for (const set of [{ cwd: "~/code", handoff: "/srv/h.md" }, { cwd: "~/code", brief: null }]) {
+    const body = launchRequest(fields.map((item) => item.name === "handoff" && !("handoff" in set)
+      ? { ...item, value: "/srv/h.md" } : item), null, set, { target: "headless" });
+    assert.equal(body.values.handoff, "/srv/h.md");
+    assert.equal(body.values.target, "headless");
+    assert.equal("brief" in body.values || "brief_file" in body.values, false);
+  }
 });
 
 test("with no brief file set the rule is the box's: an empty or blank file is none", () => {

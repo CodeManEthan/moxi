@@ -8,8 +8,9 @@ same way, so a log with a later version's events still folds. `folding(events)` 
 same fold, giving the state after each event in turn.
 
 The state holds what the round's first event set (its description, its flow's name and
-the steps recorded for it, its parent, and its status), the rulings recorded in the log,
-its questions, each with every change made to it, the options it offers and the key its
+the steps recorded for it, its parent, its lead, and its status), the lead the newest
+change of it names, the rulings recorded in the log, its questions, each with every
+change made to it, the options it offers, the answers prepared for it and the key its
 answer chose, and the whole history. A ruling of a question is one event: the ruling's
 own record names the question and says what it becomes, and the fold changes the
 question from it. A question that was moved to another log stays in this one as moved,
@@ -36,7 +37,8 @@ A stage is in the plan from the event that declared it: its own, or the freezing
 design version whose block first carried it. A frozen version is one event, and it is
 the whole of what the freezing did: it holds the version's number and digest, what the
 design's block declared, and what of that was new to the record, which the fold adds
-from it (a question, a stage, a stage another must follow, a wider hold, options).
+from it (a question, a stage, a stage another must follow, a wider hold, options, a
+prepared answer).
 What the block took away is kept with the version as pending and changes nothing.
 
 A report's verdict is one event, kept in `verdicts`. One that finds a version of the
@@ -144,8 +146,8 @@ class Ruling:
     replaced_by: str | None = None
     revoked_by: str | None = None
     #: The pointer to where the operator was shown it, from the first mark that named
-    #: it, or None while no mark has. His read-back of the project's list also makes a
-    #: ruling shown, and is a ruling of the project's log: `shown.is_shown` reads both.
+    #: it, or None while no mark has. The operator's read-back of the project's list
+    #: also makes a ruling shown, and is a ruling of the project's log: `shown.is_shown` reads both.
     shown: str | None = None
 
 
@@ -178,6 +180,49 @@ class Change:
     undone_by: str | None = None
     #: Whether a verdict made the change, applying what a design's block took away.
     verdict: bool = False
+    #: The answer it prepared for the question, or None.
+    prepared: Prepared | None = None
+
+
+@dataclass(frozen=True)
+class PreparedOption:
+    """What a prepared answer says of one option: its key, what choosing it costs and
+    what it rules out later, and the option's line where the answer gave one."""
+
+    key: str
+    costs: str
+    forecloses: str
+    text: str | None = None
+
+
+@dataclass(frozen=True)
+class Prepared:
+    """An answer prepared for a question, as the log recorded it: the key it
+    recommends, who prepared it and with which model, how sure it is (`low`, `medium`
+    or `high`) and why, the one fact that would flip it, the pointers to what was
+    read, and what it says of each option. `actor` and `at` are who recorded it and
+    when. It changes nothing a gate reads."""
+
+    recommend: str
+    by: str
+    model: str
+    sure: str
+    why: str
+    flips: str
+    read: tuple[str, ...]
+    options: tuple[PreparedOption, ...]
+    actor: str
+    at: str
+
+    def body(self) -> dict:
+        """The answer as an event stores it: the keys of its block, less `kind` and
+        `question`."""
+        return {"by": self.by, "model": self.model, "recommend": self.recommend,
+                "sure": self.sure, "why": self.why, "flips": self.flips,
+                "read": list(self.read),
+                "option": [{"key": one.key, **({"text": one.text} if one.text else {}),
+                            "costs": one.costs, "forecloses": one.forecloses}
+                           for one in self.options]}
 
 
 @dataclass(frozen=True)
@@ -199,7 +244,7 @@ class Question:
     #: Who asked it, and when.
     by: str
     at: str
-    #: The operator's pointer, when the question is his own.
+    #: The operator's pointer, when the question is the operator's own.
     record: str | None = None
     #: What a parked question waits for, or None.
     until: str | None = None
@@ -223,6 +268,9 @@ class Question:
     moved_to: str | None = None
     #: The builder of the build it came up in, whom `by` asked it for, or None.
     builder: str | None = None
+    #: Every answer prepared for it, oldest first. `questions.prepared_now` reads the
+    #: newest and whether it is current.
+    prepared: tuple[Prepared, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -297,6 +345,9 @@ class Version:
     at: str
     #: The number of its event in the log, which places it among the verdicts.
     event: int | None = None
+    #: The digest its frozen copy was re-stamped with (a `digest` repair), None while
+    #: it holds the one recorded at its freeze. `digest` stays as frozen.
+    restamped: str | None = None
 
 
 @dataclass(frozen=True)
@@ -374,6 +425,13 @@ class State:
     #: The ids of the project's standing rulings the round starts from, as it was
     #: opened with them.
     inherits: list[str] = field(default_factory=list)
+    #: The checklist marks the round was opened with, None when its opening marked
+    #: nothing (a round whose design's block marks them).
+    marked: list[str] | None = None
+    #: The agent who leads the round, from its opening or the newest change of its
+    #: lead; None while the log names none. `leads.of` gives the lead to use, which
+    #: falls back to the project's.
+    lead: str | None = None
     #: `OPEN`, `CLOSED` or `DROPPED`, or None for a log that opened no round.
     status: str | None = None
     #: How the round ended, or None while it has not.
@@ -429,7 +487,17 @@ def _round_opened(state: State, event: dict) -> None:
     state.steps = copy.deepcopy(event["steps"])
     state.parent = event.get("parent")
     state.inherits = list(_ids(event.get("inherits")))
+    marked = event.get("marked")
+    state.marked = ([str(one) for one in marked] if isinstance(marked, list) else None)
+    state.lead = event["lead"] if isinstance(event.get("lead"), str) else None
     state.status = OPEN
+
+
+def _lead_changed(state: State, event: dict) -> None:
+    """The round is led by the agent the event names, from then on. An event that
+    names nobody changes no lead."""
+    if isinstance(event.get("lead"), str) and event["lead"]:
+        state.lead = event["lead"]
 
 
 def _flow_changed(state: State, event: dict) -> None:
@@ -485,10 +553,12 @@ def _ruling_recorded(state: State, event: dict) -> None:
     # it, so a verb stopped after this event has left the question ruled.
     if event.get("question") is not None:
         _change(state, event, question_id=event["question"], ruling=event.get("id"))
-    # His ruling of the flow is the whole of the move, as the lead's event is of his.
+    # The operator's ruling of the flow is the whole of the move, as the lead's event is
+    # of the lead's.
     if (event.get("rules") or "").startswith(_FLOW):
         _flow_changed(state, event)
-    # His ruling that a stage waits for one stage fewer is the whole of that change.
+    # The operator's ruling that a stage waits for one stage fewer is the whole of that
+    # change.
     if (event.get("rules") or "").startswith(_UNAFTER):
         stage_id, _equals, waited = event["rules"][len(_UNAFTER):].partition("=")
         _waits(state, stage_id, gone=(waited,))
@@ -651,6 +721,39 @@ def _offered(value, have: tuple[tuple[str, str], ...] = (),
     return tuple(added)
 
 
+def _prepared(value, *, by: str, at: str) -> Prepared | None:
+    """The prepared answer an event's `prepared` holds, recorded by `by` at `at`, or
+    None for a value that is not one. An answer carried from another log keeps who
+    recorded it there and when."""
+    if not isinstance(value, dict):
+        return None
+    words = ("recommend", "by", "model", "sure", "why", "flips")
+    if not all(isinstance(value.get(name), str) for name in words):
+        return None
+    read = value.get("read")
+    listed = value.get("option")
+    return Prepared(
+        **{name: value[name] for name in words},
+        read=tuple(one for one in read if isinstance(one, str))
+        if isinstance(read, list) else (),
+        options=tuple(
+            PreparedOption(key=one["key"], costs=str(one.get("costs") or ""),
+                           forecloses=str(one.get("forecloses") or ""),
+                           text=one.get("text") or None)
+            for one in (listed if isinstance(listed, list) else ())
+            if isinstance(one, dict) and isinstance(one.get("key"), str)),
+        actor=value.get("actor") if isinstance(value.get("actor"), str) else by,
+        at=value.get("at") if isinstance(value.get("at"), str) else at)
+
+
+def _carried(value, *, by: str, at: str) -> tuple[Prepared, ...]:
+    """The prepared answers a question brought from another log carries, oldest
+    first."""
+    found = (_prepared(one, by=by, at=at)
+             for one in (value if isinstance(value, list) else ()))
+    return tuple(one for one in found if one is not None)
+
+
 def _question_asked(state: State, event: dict) -> None:
     state.questions.append(Question(
         id=event.get("id"), text=event.get("text"), origin=event.get("from"),
@@ -663,7 +766,8 @@ def _question_asked(state: State, event: dict) -> None:
         # A key retired where the question was before stays retired here.
         retired=tuple(event.get("retired") or ()),
         moved_from=event.get("moved_from"), held=_blocks(event.get("held")),
-        builder=event.get("builder")))
+        builder=event.get("builder"),
+        prepared=_carried(event.get("prepared"), by=event["actor"], at=event["at"])))
 
 
 def _question_changed(state: State, event: dict) -> None:
@@ -690,7 +794,9 @@ def _change(state: State, event: dict, *, question_id: str | None,
                     # Only a key the question offers is retired, and only once.
                     retired=tuple(dict.fromkeys(
                         key for key in event.get("retired") or ()
-                        if any(key == had for had, _text in question.options))))
+                        if any(key == had for had, _text in question.options))),
+                    prepared=_prepared(event.get("prepared"), by=event["actor"],
+                                       at=event["at"]))
     state.questions[place] = replace(
         question,
         state=question.state if change.state is None else change.state,
@@ -703,7 +809,9 @@ def _change(state: State, event: dict, *, question_id: str | None,
         changes=(*question.changes, change),
         options=tuple(one for one in (*question.options, *change.options)
                       if one[0] not in change.retired),
-        retired=(*question.retired, *change.retired))
+        retired=(*question.retired, *change.retired),
+        prepared=question.prepared if change.prepared is None else (
+            *question.prepared, change.prepared))
     if change.blocks is not None:
         _let_go(state, state.questions[place])
 
@@ -787,6 +895,8 @@ def _design_frozen(state: State, event: dict) -> None:
             _change(state, {"options": change.get("options"),
                             "retired": change.get("retired"), **who},
                     question_id=question_id, ruling=None)
+    for question_id, body in (added.get("prepared") or {}).items():
+        _change(state, {"prepared": body, **who}, question_id=question_id, ruling=None)
 
 
 def _taken_away(listed) -> tuple[Pending, ...]:
@@ -845,17 +955,34 @@ def _thread_decided(state: State, event: dict) -> None:
         actor=event["actor"], at=event["at"]))
 
 
-#: What a repair re-derives: the base of an open build, or the record of a verdict.
+#: What a repair re-derives: the base of an open build, the record of a verdict, or
+#: the digest of the design's current version.
 BASE = "base"
 REPORT = "report"
+DIGEST = "digest"
 #: The lists of a verdict's event a reread may add to.
 REREAD_LISTS = ("findings", "waits", "decisions")
+
+
+def _restamp(state: State, event: dict) -> None:
+    fields = event.get("fields")
+    change = fields.get(DIGEST) if isinstance(fields, dict) else None
+    now = change.get("now") if isinstance(change, dict) else None
+    if not isinstance(now, str):
+        return
+    for place, version in enumerate(state.versions):
+        if version.n == event.get("version"):
+            state.versions[place] = replace(version, restamped=now)
 
 
 def _repair(state: State, event: dict) -> None:
     """A reread adds to the lists of the verdict it names the entries the record
     lacked, an id the list holds already being kept as it is. A repair of a base is
-    read where builds are (`builds.builds`)."""
+    read where builds are (`builds.builds`). A re-stamp gives the version it names
+    its new digest beside the one recorded at its freeze."""
+    if event.get("what") == DIGEST:
+        _restamp(state, event)
+        return
     if event.get("what") != REPORT:
         return
     n = event.get("verdict")
@@ -903,6 +1030,7 @@ def with_rereads(state: State) -> Iterable[dict]:
 _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "round.opened": _round_opened,
     "flow.changed": _flow_changed,
+    "lead.changed": _lead_changed,
     "design.frozen": _design_frozen,
     "verdict.recorded": _verdict_recorded,
     "question.asked": _question_asked,
@@ -916,6 +1044,8 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "ci.read": _kept,
     "finding.marked": _kept,
     "wait.marked": _kept,
+    "decision.settled": _kept,
+    "decision.raised": _kept,
     "brief.sized": _kept,
     "finish.action": _kept,
     "finish.done": _kept,
@@ -925,9 +1055,16 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "thread.decided": _thread_decided,
     "repair": _repair,
     "round.closed": _round_closed,
+    "queue.join": _kept,
+    "queue.left": _kept,
+    "queue.batch": _kept,
+    "queue.landed": _kept,
+    "queue.ejected": _kept,
+    "queue.requeued": _kept,
 }
 
 __all__ = ["OPEN", "DROPPED", "CLOSED", "FROZEN_FILE", "QUESTION", "STAGE", "AFTER", "BLOCKS",
-           "Ended", "Ruling", "Change", "Question", "Stage", "Pending", "Version",
+           "Ended", "Ruling", "Change", "PreparedOption", "Prepared", "Question",
+           "Stage", "Pending", "Version",
            "Decided", "Verdict", "State", "fold", "folding", "without", "BASE", "REPORT",
-           "REREAD_LISTS", "with_rereads"]
+           "DIGEST", "REREAD_LISTS", "with_rereads"]

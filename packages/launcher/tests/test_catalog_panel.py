@@ -23,9 +23,11 @@ modes = ["interactive"]
 command = ["codex", "exec", "--help"]
 modes = ["exec"]
 """
-ROW = '[x]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-x"\nmodes = ["interactive"]\n'
+ROW = ('[x]\ntype = "string"\ndefault = ""\ndoc = "d"\nflag = "-x"\nmodes = ["interactive"]\n'
+       'fork = "copy"\n')
 PICK = ROW + 'values = ["a", "b"]\n'
-SWITCH = '[x]\ntype = "bool"\ndefault = false\ndoc = "d"\nflag = "-x"\nmodes = ["interactive"]\n'
+SWITCH = ('[x]\ntype = "bool"\ndefault = false\ndoc = "d"\nflag = "-x"\n'
+          'modes = ["interactive"]\nfork = "copy"\n')
 
 #: Where each settable row is drawn: group, then subgroup, then the rows in it.
 ASSIGNED = {
@@ -36,14 +38,15 @@ ASSIGNED = {
     ("tools", "MCP"): {"mcp_config"},
     ("tools", "Web & browser"): {"search"},
     ("seat", "Role"): {"agent"},
-    ("seat", "Comms"): {"identity", "scope", "director", "posture"},
+    ("seat", "Comms"): {"identity", "scope", "director", "takes_policy_directors", "posture"},
     ("seat", "Instructions"): {"instructions", "instructions_file"},
     ("seat", "Name & notes"): {"name", "native_name", "notes_dir"},
     ("seat", None): {"handoff"},
     ("runs-in", "Remote"): {"remote_control"},
-    ("lifecycle", "Context"): {"warn_at", "recycle_at_limit", "limit_at"},
+    ("lifecycle", "Context"): {"warn_at", "recycle_at_limit"},
     ("lifecycle", "Cache"): {"keep_warm", "recycle_on_expiry"},
     ("lifecycle", "Headless"): {"headless_exit"},
+    ("lifecycle", "Memory"): {"subconscious", "subconscious_route"},
     ("config", "Layers"): {"profile", "config"},
     ("config", "Pass-through"): {"extra_flags"},
     ("config", None): {"scratch"},
@@ -57,14 +60,16 @@ LABELS = {
     "harness": "Harness", "model": "Model", "effort": "Effort / reasoning",
     "cwd": "Folder", "project": "Project", "scratch": "Scratch folder",
     "identity": "Comms identity", "scope": "Comms scope", "director": "Directors",
+    "takes_policy_directors": "Takes policy directors",
     "posture": "Start posture", "instructions": "Standing instructions (inline)",
     "instructions_file": "Standing instructions (file)", "brief": "Brief",
     "brief_file": "Brief from a file", "handoff": "Handoff file as first turn",
     "target": "Where it runs", "slot": "Slot", "extra_flags": "Extra harness flags",
     "name": "Session name", "notes_dir": "Notes folder", "warn_at": "Warn at context mark",
     "keep_warm": "Keep warm", "recycle_on_expiry": "Recycle on cache expiry",
-    "recycle_at_limit": "Recycle at limit", "limit_at": "Limit mark",
-    "headless_exit": "Headless exit",
+    "recycle_at_limit": "Recycle at limit",
+    "headless_exit": "Headless exit", "subconscious": "Subconscious",
+    "subconscious_route": "Subconscious route",
     "agent": "Agent role", "tools": "Built-in tool set", "allowed_tools": "Allowed tools",
     "disallowed_tools": "Disallowed tools", "permission_mode": "Permission mode",
     "add_dir": "Extra folders", "remote_control": "Remote Control",
@@ -201,7 +206,7 @@ def test_only_the_rows_another_control_owns_are_never_filled_from_an_earlier_lau
 def test_the_comms_rows_and_the_project_are_drawn_only_with_their_module():
     assert {row.name: row.shown_with for row in every_row() if row.shown_with} == {
         "identity": ("comms",), "scope": ("comms",), "director": ("comms",),
-        "headless_exit": ("comms",), "project": ("projects",)}
+        "takes_policy_directors": ("comms",), "headless_exit": ("comms",), "project": ("projects",)}
     assert {row.name: row.typed_with for row in every_row() if row.typed_with} == {
         "posture": "comms"}
     # Drawing a row only with a module is no launch rule: the row stays offered without it.

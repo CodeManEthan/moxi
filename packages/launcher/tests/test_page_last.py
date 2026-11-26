@@ -86,8 +86,9 @@ def world(tmp_path, monkeypatch):
     for root in roots.values():
         root.mkdir()
     (roots["proj-a"] / "src").mkdir()
-    table = {key: SimpleNamespace(key=key, root=str(root), lead=None, associated=(),
-                                  agents=(), notes_root=None) for key, root in roots.items()}
+    table = {key: SimpleNamespace(key=key, root=str(root), kind="project", lead=None,
+                                  associated=(), agents=(), notes_root=None)
+             for key, root in roots.items()}
 
     def get_project(key):
         if key in table:
@@ -138,7 +139,8 @@ effort = "medium"
 add_dir = ["{added}"]
 """)
     return SimpleNamespace(root=roots["proj-a"], other=roots["proj-b"], work=work,
-                           added=added, brief_file=brief_file, elsewhere=tmp_path)
+                           added=added, brief_file=brief_file, elsewhere=tmp_path,
+                           projects=table)
 
 
 def stored(request_id: str) -> store.LaunchRow:
@@ -213,7 +215,7 @@ def test_a_replay_records_neither_and_the_log_takes_no_new_step(world):
     replayed = stored("r2")
     assert "sources" not in replayed.values and "filled" not in replayed.values
     assert replayed.values["model"] == "opus"
-    assert len(store.STEPS) == 2
+    assert len(store.STEPS) == 4
 
 
 def test_filled_goes_through_the_request_file():
@@ -402,7 +404,8 @@ def test_a_danger_value_and_a_posture_row_fill_like_any_other(world):
 
 
 def test_a_key_with_no_launch_or_no_key_fills_nothing(world):
-    none = {"state": "up", "detail": None, "at": None, "harness": None, "values": []}
+    none = {"state": "up", "detail": None, "at": None, "harness": None, "values": [],
+            "identities": []}
     assert last() == none
     assert last(cwd=str(world.work)) == none
     launch({"values": {"cwd": str(world.work), "model": "opus"}}, "r1")
@@ -502,6 +505,238 @@ def test_the_last_launch_is_the_seats_else_the_projects_else_the_dirs(world):
     assert newest(seat="planner", project="proj-a", cwd=root) == "planner"
     assert last(seat="nobody", project="proj-a")["values"] == []
     assert newest(project="proj-a", cwd=str(world.work)) == "bare"
+
+
+# --- the comms identity /api/last hands back ------------------------------------------------
+
+
+def bound(request_id: str, identity: str, scope: str | None = None, *,
+          state: str | None = None) -> None:
+    """Record on a stored launch the comms identity it bound, and its state."""
+    conn = store.connect(create=False)
+    try:
+        conn.execute("UPDATE launches SET identity = ?, scope = ?, state = COALESCE(?, state) "
+                     "WHERE request_id = ?", (identity, scope, state, request_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def comms_listing(monkeypatch, *names: str) -> None:
+    """comms installed, its roster listing `names` as standing."""
+    roster = SimpleNamespace(bound=(), standing=tuple(SimpleNamespace(name=n) for n in names))
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api",
+                        lambda: SimpleNamespace(roster=lambda: roster))
+
+
+def comms_saying(monkeypatch, states: dict[str, str] | None = None, *,
+                 listed: tuple[str, ...] = ()) -> list:
+    """comms installed, its `identity_state` reporting each name in `states` in its state
+    there and every other name free, its roster listing `listed`; the names asked about,
+    with their scopes."""
+    asked = []
+
+    def identity_state(name, scope=None):
+        asked.append((name, scope))
+        return SimpleNamespace(state=(states or {}).get(name, "free"), qualified=name,
+                               holder="slot 1", reason=None)
+
+    roster = SimpleNamespace(bound=(), standing=tuple(SimpleNamespace(name=n) for n in listed))
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api", lambda: SimpleNamespace(
+        roster=lambda: roster, identity_state=identity_state))
+    return asked
+
+
+def identity_of(said: dict, harness: str = "claude") -> str | None:
+    """The comms identity the answer `said` fills a form drawn for `harness` with."""
+    found = [entry["identity"] for entry in said["identities"] if entry["harness"] == harness]
+    return found[0] if found else None
+
+
+def identity_at(said: dict, harness: str = "claude") -> str | None:
+    """When the launch that bound the identity `said` gives `harness` was made."""
+    [at] = [entry["at"] for entry in said["identities"] if entry["harness"] == harness]
+    return at
+
+
+def test_the_identity_is_the_newest_started_launch_of_the_harness_that_bound_one(world):
+    root = str(world.root)
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    launch({"values": {"cwd": root, "model": "opus"}}, "named")
+    launch({"values": {"cwd": root, "model": "opus"}}, "spawning")
+    launch({"values": {"cwd": root, "model": "sonnet"}}, "unnamed")
+    bound("codex", "cdx")
+    bound("named", "scout@proj-a", "proj-a")
+    bound("spawning", "ghost", state="spawning")
+    said = last(project="proj-a")
+    assert said["at"] == stored("unnamed").created_at
+    # The name only: the identity rows are not handed back with the values, so a project
+    # scope is not carried.
+    assert identity_of(said) == "scout" and identity_at(said) == stored("named").created_at
+    assert identity_of(said, "codex") == "cdx"
+    assert handed_values(said) == {"model": "sonnet"}
+
+
+def test_a_projects_identity_counts_the_launches_made_through_its_seats(world):
+    world.projects["proj-a"].lead = "boss"
+    launch({"seat": "planner", "values": {"model": "sonnet"}}, "seat")
+    bound("seat", "planner")
+    said = last(project="proj-a")
+    # The seat's launch is no launch of the project's for the values, but its name counts.
+    assert (said["at"], said["values"]) == (None, [])
+    assert (identity_of(said), identity_at(said)) == ("planner", stored("seat").created_at)
+    launch({"values": {"cwd": str(world.root), "model": "opus"}}, "bare")
+    launch({"seat": "planner", "values": {"model": "fable"}}, "seat-2")
+    bound("seat-2", "planner-2")
+    said = last(project="proj-a")
+    assert said["at"] == stored("bare").created_at and identity_of(said) == "planner-2"
+    # A folder's launches still leave out a seat's.
+    assert identity_of(last(cwd=str(world.root))) is None
+
+
+def test_a_launched_name_comms_reports_retired_stays_with_comms_refusal(world, monkeypatch):
+    root = str(world.root)
+    launch({"values": {"cwd": root, "model": "opus"}}, "older")
+    launch({"values": {"cwd": root, "model": "opus"}}, "newer")
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("older", "scout")
+    bound("newer", "ghost@proj-a", "proj-a")
+    bound("codex", "ghost")
+    asked = comms_saying(monkeypatch, {"ghost": "retired"}, listed=("proj-a-lead",))
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    # Asked at the global scope the form fills. The retired name is kept, not dropped for
+    # the default or the older launch's name, and comms' refusal goes with it.
+    assert ("ghost", None) in asked
+    for harness in ("claude", "codex"):
+        assert said[harness]["identity"] == "ghost"
+        assert said[harness]["at"] is not None
+        assert said[harness]["refused"]["code"] == "identity-taken"
+        assert said[harness]["refused"]["problem"] == "identity ghost is retired"
+    # A name comms can't say about stands too, with nothing beside it.
+
+    def down(name, scope=None):
+        raise RuntimeError("daemon gone")
+
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api",
+                        lambda: SimpleNamespace(identity_state=down))
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    assert said["codex"]["identity"] == "ghost" and said["codex"]["refused"] is None
+
+
+def test_each_identity_carries_comms_refusal_of_a_launch_under_it(world, monkeypatch):
+    root = str(world.root)
+    world.projects["proj-a"].lead = "boss"
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("codex", "cdx")
+    comms_saying(monkeypatch, {"boss": "held"})
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    # The name stays, with comms' words beside it, as a launch under it would meet them.
+    assert said["claude"]["identity"] == "boss"
+    assert said["claude"]["refused"] == {
+        "code": "identity-taken", "row": "identity", "problem": "identity boss is held by slot 1",
+        "hint": "pick another identity, or wait until that session ends"}
+    assert said["codex"]["refused"] is None
+    # Without comms there is nothing to say.
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api", lambda: None)
+    assert [entry["refused"] for entry in last(project="proj-a")["identities"]] == [None, None]
+
+
+def test_an_identity_with_a_live_namesake_in_a_project_scope_carries_a_note(world,
+                                                                          monkeypatch):
+    root = str(world.root)
+    world.projects["proj-a"].lead = "boss"
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("codex", "cdx")
+    comms_saying(monkeypatch)
+    live = (SimpleNamespace(name="boss", qualified="boss@proj-a"),
+            SimpleNamespace(name="cdx", qualified="cdx"))
+    roster = SimpleNamespace(bound=live, standing=())
+    monkeypatch.setattr(pagehandlers.joiner, "comms_api", lambda: SimpleNamespace(
+        roster=lambda: roster, identity_state=lambda name, scope=None: SimpleNamespace(
+            state="free", qualified=name, holder=None, reason=None)))
+    said = {entry["harness"]: entry for entry in last(project="proj-a")["identities"]}
+    # The global name stays filled, with the live binding in the project scope named.
+    assert said["claude"]["identity"] == "boss"
+    assert said["claude"]["note"] == (
+        "boss@proj-a is live in its project scope; the global name is the one filled. "
+        "Pick that scope only if you mean that binding")
+    # A live binding of the global name itself is no namesake.
+    assert said["codex"]["note"] is None
+
+
+def test_a_projects_default_is_its_lead_else_key_lead_when_comms_lists_it(world,
+                                                                        monkeypatch):
+    assert last(project="proj-a")["values"] == []
+    comms_listing(monkeypatch, "proj-b-lead")
+    assert last(project="proj-a")["values"] == []
+    comms_listing(monkeypatch, "proj-a-lead")
+    said = last(project="proj-a")
+    assert (said["at"], said["harness"], said["values"]) == (None, None, [])
+    assert said["identities"] == [{"harness": "claude", "identity": "proj-a-lead", "at": None,
+                                   "refused": None, "note": None}]
+    world.projects["proj-a"].lead = "boss"
+    assert identity_of(last(project="proj-a")) == "boss"
+    # A folder has no default.
+    assert last(cwd=str(world.root))["values"] == []
+
+
+def test_an_agent_projects_default_is_its_own_key_before_its_lead(world, monkeypatch):
+    world.projects["proj-a"].kind = "agent"
+    world.projects["proj-a"].lead = "boss"
+    comms_listing(monkeypatch, "proj-a-lead")
+    # Held by comms or not, ahead of the lead and of `<key>-lead`.
+    assert identity_of(last(project="proj-a")) == "proj-a"
+    # A seat that is no agent's falls to its project's own key.
+    assert identity_of(last(seat="pilot", project="proj-a")) == "proj-a"
+    # A launch that bound a name still comes first.
+    launch({"values": {"cwd": str(world.root), "model": "opus"}}, "named")
+    bound("named", "scout")
+    assert identity_of(last(project="proj-a")) == "scout"
+
+
+def test_a_seat_named_for_one_of_its_projects_agents_defaults_to_its_own_name(world):
+    world.projects["proj-a"].agents = ("planner", "scout")
+    assert identity_of(last(seat="planner")) == "planner"
+    # A seat with no home of its own reads the project the line names.
+    assert last(seat="scout")["values"] == []
+    assert identity_of(last(seat="scout", project="proj-a")) == "scout"
+    # A seat that is no agent's falls to the project's lead.
+    world.projects["proj-a"].lead = "boss"
+    assert identity_of(last(seat="pilot", project="proj-a")) == "boss"
+
+
+def test_a_seat_that_sets_its_own_identity_has_no_default(world):
+    edit_presets('[seat.planner]\n', '[seat.planner]\nidentity = "planner"\n')
+    world.projects["proj-a"].agents = ("planner",)
+    world.projects["proj-a"].lead = "boss"
+    assert last(seat="planner")["values"] == []
+
+
+def test_a_launch_that_bound_none_takes_the_default_but_codex_takes_none(world):
+    root = str(world.root)
+    world.projects["proj-a"].lead = "boss"
+    launch({"values": {"cwd": root, "model": "opus"}}, "claude")
+    assert identity_of(last(project="proj-a")) == "boss"
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    said = last(project="proj-a")
+    assert said["harness"] == "codex" and identity_of(said, "codex") is None
+
+
+def test_each_harness_has_its_own_identity_whatever_the_newest_launch_ran(world):
+    root = str(world.root)
+    world.projects["proj-a"].lead = "boss"
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex")
+    bound("codex", "cdx")
+    said = last(project="proj-a")
+    # A form drawn for Claude gets Claude's default though the newest launch ran Codex.
+    assert said["harness"] == "codex"
+    assert (identity_of(said), identity_at(said)) == ("boss", None)
+    launch({"values": {"cwd": root, "model": "opus"}}, "claude")
+    bound("claude", "scout")
+    launch({"values": {"harness": "codex", "cwd": root}}, "codex-2")
+    said = last(project="proj-a")
+    assert said["at"] == stored("codex-2").created_at
+    assert identity_of(said) == "scout" and identity_of(said, "codex") == "cdx"
 
 
 # --- /api/recents ---------------------------------------------------------------------------

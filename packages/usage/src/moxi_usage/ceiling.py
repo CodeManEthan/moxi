@@ -57,7 +57,7 @@ _DAY = 86400.0
 
 class Rules:
     """The ceiling's settings, read from usage's config: `warn` and `hard` in tokens of
-    growth, the return tools, the two texts, the allowlist's roots and command prefixes,
+    growth, the return tools, the two texts, the allowlist's roots and commands,
     and the markers' age in days. `active` is true when both thresholds are above 0."""
 
     __slots__ = ("on", "warn", "hard", "return_tools", "warning_text", "deny_text",
@@ -87,7 +87,7 @@ class Rules:
 
 def rules_of(settings, *, file=None) -> Rules:
     """`settings`' `ceiling.*` keys as `Rules`. Raises `moxi.config.ConfigError` for a
-    root that is not an absolute path (after `~`) or a command prefix that is not a
+    root that is not an absolute path (after `~`) or an allowed command that is not a
     non-empty list of words; `CONFIG_CHECK` runs it, so `moxi config set` refuses them
     too."""
     from moxi.config import ConfigError
@@ -110,7 +110,7 @@ def rules_of(settings, *, file=None) -> Rules:
                 or not all(isinstance(w, str) and w and not w.isspace() for w in value)):
             raise ConfigError(where, "ceiling.allow_commands", f"entry {n}, {value!r}, is "
                               "not a list of words",
-                              'write each as the words a command starts with, such as '
+                              'write each as the whole command\'s words, such as '
                               '["make", "report"]')
         commands.append(tuple(value))
     return Rules(enabled=bool(settings[SWITCH]), warn=int(settings["ceiling.warn_tokens"]),

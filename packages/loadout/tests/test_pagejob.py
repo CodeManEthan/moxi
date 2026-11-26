@@ -88,7 +88,7 @@ def test_a_job_runs_the_verb_and_writes_its_outcome(lo, page, recorded):
     assert pagejob.run("j1", ["add", "skill", "review"]) == 0
     record = end("j1")
     assert record["exit"] == 0 and record["outcome"]["exit"] == 0
-    assert "listed skill review in user" in record["outcome"]["lines"]
+    assert "listed skill review in user for every harness" in record["outcome"]["lines"]
     assert os.readlink(kit.claude() / "review") == str(lo / "skills" / "review")
     assert os.environ[homes.CALLER_ENV] == pagejob.CALLER
     assert not {"homes", "git"} & set(ledger.read())
@@ -154,7 +154,7 @@ def test_a_job_that_waits_past_the_core_lock_exits_75_with_the_waiting_line(
         holder.wait(timeout=30)
     record = end("j1")
     assert record["exit"] == 75
-    assert any("waiting for an install or uninstall" in line
+    assert any("waiting for the core lock, which pid " in line
                for line in record["outcome"]["lines"]), record
 
 

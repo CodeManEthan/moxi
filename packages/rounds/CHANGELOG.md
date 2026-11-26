@@ -1,5 +1,261 @@
 # Changelog
 
+## 0.1.5 (unreleased)
+
+- The page acts, at a desk. An item's popover and the walk take the operator's answer:
+  an option picked, an answer in the operator's own words, a request to explain, a park,
+  an unpark, a ruling read back or corrected, a decision accepted or rejected, a job
+  done. Answers wait in a tray, `Your answers`, kept in the browser's storage, and
+  `Send` sends it, or `Send now` one row. The page records the picks, decisions,
+  read-backs, done jobs, parks and unparks itself through rounds' own calls, each with a
+  page pointer; own words and corrections go in the message to the agent chosen in the
+  To picker (each round's lead by default, a project's lead marked `(the project's)`),
+  who words and records them, and the row reads recorded once the agent's ruling
+  appears. The message quotes the words as written and gives the command with
+  `--text TEXT` for the agent's wording, so no shell reads the words. With comms
+  installed one message goes to each recipient under rounds' send-only name; without it
+  nothing is sent and the row shows the command a lead would run. Each draft gets a
+  receipt, and `Sent` lists the sent drafts and the messages sent. A draft longer than
+  the answers route takes stays in the tray with its row saying so. A draft of a round
+  or project with no lead, as the board shows or the page server answers, offers no send
+  to a lead: it stays in the tray until an agent is picked in the To picker.
+- An act posted twice runs once: each act carries an act id, the page server answers a
+  repeat from the receipts it keeps, and after a restart an event whose pointer holds
+  the act id is that act's record, so it is not recorded again.
+- `Unpark` on a parked question takes back the parking that stands, a ruling of
+  `revoke:` that parking, whoever recorded it. A question offers `Unpark` while parked
+  and its answer form while open, whatever its row in the tray says.
+- `Drop this build…` on a step of a stage with an open build opens a confirm that names
+  what the drop ends, removes and keeps, read fresh; the drop is recorded as the
+  operator's with the page as the pointer, and with comms installed and a lead for the
+  round, the lead is told what the drop removed and kept. A drop whose post gets no
+  answer offers `Drop again` under the same act id.
+- The page reads each round's lead, a question's prepared answer (its recommended option
+  marked `recommended`), a question's record in every state with the ruling that put it
+  there, and the parked questions, which the foot's count opens.
+- A sent correction's row finds the ruling that replaced the corrected one through the
+  record route's new `what=ruling` record, which gives a ruling of a round or project
+  from its log, shown or not, with the newest ruling that replaces it: the row reads
+  `Recorded as C<n>` with who recorded it, also when that ruling was read back
+  elsewhere first, and `Ruled as C<n> from <pointer>, not from this message` for a
+  ruling recorded from another pointer. Every sent row, a round's as a project's, is
+  read again at each new board value the page takes, so a read-back in the project's log
+  updates a round's row too. A closed round the strip holds is read again when the
+  project's log changes.
+- New page routes, none open to the phone gateway: `GET /api/agents`, `GET /api/drop`,
+  `POST /api/answers` and `POST /api/drop/build`. Nothing acts at phone width.
+- `pointers.page_act` gives the act id a page pointer holds.
+- A board line's stage name, its id and branch with the round's `+N`, is drawn in a
+  cell of its own between the round's name and the rail, and the column labels put
+  `stage` there too. The rail holds only its steps' markers, so its line runs unbroken
+  from the round's own steps into the stage's, and no text sits on it. An unreadable
+  round's line grows to hold its reason, which no longer spills onto the line above.
+- Board lines are 38 px high, up from 34, around the same 34 px rail, so the ▼ over a
+  line's current step stays 5 px clear of the step words of the line above, where it
+  stood 1 px from them. An unreadable round's line keeps at least that height.
+
+## 0.1.4 (unreleased)
+
+- A project's table takes three settings of its own, empty by default and with no
+  `defaults.` form: `checklist`, items of an `id`, a line of `text` and the `skills` to
+  load; `watched_paths`, entries of a `pattern`, a `note`, `skills` and optionally
+  `only_new`; and `verifier_brief`, lines for a verifier. `moxi config rounds check`
+  refuses a value that breaks their rules, with the key and the fix.
+- A design's block gains a top-level `checklist` key, the items its work touches: a bare
+  id for the round's project, `<key>:<id>` for a project a stage names. `fold` refuses a
+  mark of no item and a block with no key while a weighed checklist is not empty; a
+  change of marks is no change of records only. `open --checklist LIST|none` marks for a
+  round with no design step, required while its project has a checklist, and any mark
+  steps the round up to `full` at its opening: `flow.changed` by the lead with the marks
+  as `marked`, counted in the numbers as `checklist_step_ups`, apart from `step_ups`.
+- `next` names the marked items' skills: the design group lists the items to mark, the
+  design's verification gives the marks, their skills and every item, and a build's
+  steps give the marks and their skills; the commission block carries the same line
+  above the repo's `brief`. A verifying group prints each `verifier_brief` line of its
+  projects as `brief: <line>`. `show`, `show --json` and the round note give the
+  round's marks with where they come from, under the same condition as `next`.
+- The watched-paths guard, `rounds.watched-paths`, registered with turns through the
+  `moxi.turns.guards` entry `rounds`: after a write to a path a project watches it adds
+  one line with the note and the skills, once per agent, and never refuses. It runs
+  only while `watched_paths_guard.enabled` is on, which `moxi install` asks about. The
+  `turns` extra needs turns 0.2.8, whose `touched_files` it reads the written files
+  with.
+
+- A `ci.workflows` entry can read jobs by name pattern (`matrix = ["browser (*)"]`), name
+  its run's `pick` job, and carry `reads_candidates = true`: a merge queue's candidate is
+  then read by the entries so marked, and a build's check and the target's full run by
+  the others. Where the pick job reads green, a matrix job it did not run reads
+  `skipped`, which counts as green, and so does a pattern no job matches once the run
+  has completed, when the pick picked nothing for it (its log's
+  `picked for <pattern>:` line, else its `picked:` line, is an empty list); a pattern
+  it picked something for reads `absent`. A job the entry names as itself never reads
+  `skipped`: skipped, it reads `red`, and missing, `absent`. The packages the pick
+  picked, from the `picked:` line of its log, are recorded in `ci.read`. The lander
+  reads the target's head by the full run's workflows alone, so a candidate's scoped run
+  at the same commit never stands in for it.
+- A `ci.workflows` entry can carry `stands_for`, a table from a job of its run to the
+  job of the target's full run it stands for (`stands_for = { scoped = "linux" }`); the
+  config check refuses a value that is not a table of job names. The lander compares a
+  red candidate's failures with the job each stands for, else the job of its own name.
+  A failure whose log names no test is now the target's own only when that job failed
+  in the target's run with no test named either, so a candidate's whole-tree failure is
+  no longer excused because the target's job fails some test; and a failed test is the
+  target's own only when the target's run fails that same test, so a job of the
+  target's that failed with no test named no longer excuses a candidate's new test.
+- A project's `private_files` lists files its repo neither tracks nor shows, such as an
+  `AGENTS.md` that `.git/info/exclude` hides. `commission` copies each into the new
+  worktree, never linking it, records each copy's source and `sha256` in
+  `build.commissioned` as `brought`, and names each in the commission block. It refuses
+  an entry that is missing, not a file, tracked at the commit the worktree checks out,
+  or not ignored. The removal rule lets an unchanged copy go with the worktree and keeps
+  the worktree for an edited one. A new finish gate, 11, refuses while any commit
+  finishing would bring into the target holds a private file, a path under one, or a
+  file where its folder would be; `check` reads it before it runs and `finish` again
+  under its lock. `moxi rounds doctor` gains a private files row.
+- The merge queue acts on a red, cancelled or absent CI reading only once its run has
+  finished. Until every run such a read names reads `completed`, the candidate, rerun
+  and main paths read it as pending: they rerun nothing, read no failure log, push
+  nothing again and count nothing toward the failed reads. A reading green on the jobs it reads stands at once,
+  while other jobs of the run still go. A batch or head `read` event held pending names
+  the runs still going in `running`, and the lander's log and `moxi rounds queue` say
+  the run is still running.
+- With no `ci.ref`, a head that shows no run of the full workflows for ten minutes is
+  given up (`no ref`) and the director told, so the lander can exit. `moxi rounds
+  queue` names the last landing and its candidate's run, and where main's last full run
+  was a candidate's run of the full workflows, says so with the ref it was pushed to.
+- The lander tells a member's builder only while comms reads the builder's name as held
+  by a live session; a builder passed over is neither sent to nor recorded. A member's
+  notice that no name received goes once to the project's director, saying who it could
+  not reach, also when that is known only once a send comms could not take ends
+  `unsent`. A message counts as undelivered only when no name got its text, and
+  `moxi rounds queue` names each send and a fix for a never-bound name and for a refused
+  credential.
+- `moxi rounds check --full` runs in a queue project: it runs and records the repo's
+  `check.command` at the tip without reading or changing `land`, and a passing run meets
+  the check step, the join's gate 3 and finish's, also after `land` is flipped to
+  `finish`.
+- The machine's check lock is taken in the order the checks asked for it, through a line
+  of ticket files beside the lock (`check.line/`). A ticket whose process is gone (pid
+  and start time, read the same way on every system) is removed at the next poll; one
+  not touched for a minute is passed over until it is touched again. `--no-wait` is
+  refused while a ticket waits, and the waiting line names the holder's round and stage,
+  how long it has held the lock and how many are ahead. The holder keeps
+  `check.holder.json` beside the lock, and `moxi doctor`'s new `check lock` row shows the
+  holder, its output's size and last write and the line in order, and warns of a holder
+  whose output has been quiet for 30 minutes, of a stale ticket and of a lock held with no
+  holder record. A ticket or holder record that can't be removed while another process
+  has it open, as on Windows, is tried again for a second and then left, so a removal
+  never ends a check or loses its record.
+
+## 0.1.3 (2026-11-23)
+
+- Under a test, rounds refuses its own directories when no Moxi variable places them
+  (`MOXI_ROUNDS_<KIND>_HOME`, `MOXI_ROUNDS_HOME` or `MOXI_HOME`), and a project's folders
+  when no Moxi variable places the projects registry: those are the real ones. It raises
+  `UnfencedTest`, an error that is not a `RoundsError`, before anything is written, and a
+  command prints it and exits 1. A test is running when `PYTEST_CURRENT_TEST` or
+  `PYTEST_VERSION` is set or pytest is imported. A process without those signs, another
+  agent writing the same notes folder among them, is never refused.
+- Every fixture of the tests' conftest that a test file elsewhere can borrow checks at
+  setup that the test fence's homes are in the test's own tmp, so a borrowed fixture
+  fails before it writes.
+- Stacked builds: of two open builds where one's commits are strictly part of the
+  other's, `finish` lets the one whose work reaches the target first go first and holds
+  the other until that work is on the target, in place of refusing both for sharing
+  commits. Normally the inner build goes first; an outer build already merged by hand
+  goes first and records the landing. Builds that overlap, or hold the same commits, are
+  refused as before. The rule holds under the finish lock too. `next` gives a held
+  finish as waiting with the build to finish first; `show`, `list` and the drop refusal
+  word each share as `inside`, `contains` or `shares with`, and each share in `--json`
+  gains `relation`.
+- `commission --existing` takes a branch strictly inside or around another open build's,
+  and refuses one that overlaps or holds the same commits, naming the build and the
+  relation, and one a recorded landing of another build already brought onto the
+  target.
+- A frozen copy edited after its freeze, as `design.md` was, is said to be so, with the
+  new repair `mark ROUND --restamp --record PTR`, in place of asking for a fold. It
+  records the copy's digest as the version's re-stamped one in a `repair` event,
+  changes no standing, and an ended round takes it. `show` lists it under Repairs and
+  on the versions line.
+- The numbers: the step times are labelled as overlapping, and the numbers gain
+  `round_time_s`, open to close, and `longest_gap`, the longest stretch with nothing
+  logged with the steps due across it. `show` computes both for a round that ended
+  before them; `list --numbers` sums `round_time_s` and says how many rounds hold it.
+- One rule says whose an open decision is: the operator's exactly when the close waits
+  for the operator's ruling of it, that is when the round's flow has a `ratify` step
+  that is not skipped, the project's `ratify` setting names its weight, its stage is
+  finished, and the build that finished it declared it. The close, the `ratify` step,
+  the labels, the ratify export and `list --waiting` all read it. Under each open
+  decision `show`, the note, `verdict` and `list --waiting` say `the operator's to
+  rule`, `not yet put to the operator` while only its stage is unfinished, `not put to
+  the operator (<why>)` for a major one, or `the lead's to settle` for a minor one, and
+  in an ended round that it is left open. Under `majors+minors` the minor decisions
+  of a finished build hold the close and the `ratify` step until the operator rules
+  them. A round whose flow has no `ratify` step, or whose `ratify` is skipped, puts no
+  decision in its export, which says why in `not_ratified`. The write that closes a
+  round lists each decision of a finished build it left open, and `show` of an ended
+  round keeps the list.
+- The rounds page counts and walks only the decisions put to the operator, and a round
+  whose open decisions are all not put to the operator is no longer drawn as the
+  operator's turn. `list --waiting` and a project's export head their decision rows
+  `decisions not yet ruled`, since the operator's minor decisions are among them. A
+  round's ratify export with no decision to draw no longer says its flow ratifies.
+- The lead settles a minor decision that is not the operator's:
+  `mark ROUND B<n>.M<k> --accept|--reject --record PTR`, one `decision.settled` event.
+  The close waits for every such one, in every flow, and a reject owes a fix as the
+  operator's does. `mark ROUND B<n>.M<k> --major --record PTR` raises a decision to
+  major, one `decision.raised` event; a settlement lapses once the weight rises. The
+  operator's ruling of a settled decision replaces it and names its line,
+  `settlement`. The numbers gain `settled`, read as zero in numbers written before it.
+- User-facing wording names the operator neutrally: output, refusals, help, the export,
+  the README and the shipped skill say "the operator" in place of a pronoun.
+- `commission --existing` refused on a branch another build's landing brought onto the
+  target now gives a second way that works: delete the branch, then commission without
+  `--existing`.
+- Tests: the rounds tests fail at setup when the test fence is not loaded, and a config
+  path outside the test's own tmp fails the test.
+- Answers prepared ahead: `next --schema answer` prints the block of a prepared
+  answer, and `ask ROUND|PROJECT ID --prepared FILE` records one on a question that is
+  open or parked: the key it recommends, how sure it is (`low`, `medium` or `high`) and
+  why, the fact that would flip it, what it read, and each option's costs and what it
+  forecloses. It has one option for each the question offers and no other; a question
+  with no options takes them from the answer. A design's `[question.prepared]` is
+  recorded by `fold` the same way, a records-only fold included, where it was refused
+  before. No gate reads an answer. The newest is shown, and reads `prepared for other
+  options` once an option is added or retired. `show`, its `--json`, the questions
+  export, `list --questions` and the read API's `questions()` carry it, and `list
+  --waiting` says of each open question whether its answer is current. The index keeps
+  it, so rows written before read as stale and are answered from the logs. A question
+  moved to another log takes its answers with it.
+
+## 0.1.2 (2026-11-21)
+
+- The rounds page, with the `ui` extra (`moxi-ui` 0.2.4 or later): at `/m/rounds/` in the
+  browser UI shell, every open round as one line of its steps, the steps in columns lined
+  up across rounds, with a line for each build in flight. It shows what waits on the
+  operator with `Go through in order`, the ten builds last acted on, the rounds grouped
+  as `Your turn`, `Stuck or red`, `Moving` and `Wrapping up`, the closed rounds folded,
+  and the key. A marker opens its step's record, a question, decision or job in place,
+  and the address keeps what is open. It reads only and writes nothing. At 720 px and
+  under it is a column of rounds, each opening a sheet with a vertical rail. Its routes
+  are `/api/rounds`, `/api/record` and the stream `/api/events`, none open to the phone
+  gateway.
+
+## 0.1.1 (2026-11-21)
+
+- A round's lead: `open --lead NAME` names the agent who leads the round, and `mark
+  ROUND --lead NAME` names a new one, written as `lead.changed` with the one before. A
+  name is checked for its shape only. A round with no lead of its own reads its
+  project's. `show` gives it in a line and in its `--json` head, each row of `list
+  --json` and of the read API's `rounds()` carries it, and the round note has a line for
+  it. The index gains a column for it, so rows written before read as stale and are
+  answered from the logs.
+- A page's act as a pointer: `page:<page>/<act id>@<UTC time>`, taken wherever a pointer
+  is. `mark --shown` refuses a page's act from before a ruling it marks was recorded.
+- `moxi_rounds.actors.default()`: the OS user an act is recorded as done by when no
+  name is given, one answer for the command line and for a page that calls the verbs'
+  functions in process.
+
 ## 0.1.0 (unreleased)
 
 The first version. It keeps the record of a round and takes it from its design through
@@ -10,6 +266,28 @@ decisions and the round's close.
   and the settings page draws: a plain label, a line where the label can't carry it,
   the unit of each number, and words for each value of `defaults.ratify` and
   `defaults.check_on`. rounds needs moxi 0.1.9 or later.
+- A round's log writes a path under the home folder as `~/<rest>`, and the home folder
+  itself as `~`: a build's worktree and scratch folder, a check run's argv words and
+  output file, the argvs of a read of CI, the argv words of a command step in the
+  round's flow, and a report or brief kept outside the round's folder. A path read from
+  the log is expanded before it is used, so a log whose paths were written with `~` is
+  checked, finished and swept, and an older log that holds the whole paths reads as
+  before. Only `~` and a path that starts with `~` and a separator are expanded; `~user`
+  is read as written. A check run recorded with `~` counts against the command that
+  names the whole path, and the other way round. A word of a command step's argv in the
+  round's flow that is `~` or starts with `~/` runs as the path under the home folder.
+  A rounds without this change reads a log written with `~` paths as relative paths, so
+  it shows builds as not clean or not there and keeps their folders rather than
+  removing them; update rounds first on every machine that reads the same notes.
+- `moxi rounds finish` is refused while a process uses the build's scratch folder,
+  naming the process. `finish` and `drop` don't move a scratch folder a process uses:
+  it stays for the sweep of leftover folders, named with the process, and a drop goes
+  through.
+- `moxi rounds check` holds the machine's check lock while its command runs, so one
+  check runs at a time on the machine; another run waits for it, or with `--no-wait`
+  is refused. A run with no `timeout_s` from the call, the check or the step stops at
+  3600 s, and a run at its limit gets SIGINT and 30 s later SIGKILL. rounds needs moxi
+  0.1.11 or later.
 - Public names renamed for the naming rules (callers passing the old keyword or reading
   the old name must change): `moxi_rounds.api`: `round` is now `round_data`.
 - `moxi rounds open`, `fold`, `verdict`, `commission`, `check`, `finish`, `ask`, `rule`,
@@ -196,7 +474,7 @@ decisions and the round's close.
   with no commit of its own and sharing with none, else the operator's. It records the
   branch's tip, deletes nothing and keeps the build's folders; the stage stays owed. A
   round's drop ends its open builds the same way, and the lead's is refused while one
-  is not his. `show` and `list --waiting` name who drops each build to look at.
+  is not the lead's. `show` and `list --waiting` name who drops each build to look at.
 - `rule ROUND credit:B<n>` credits to a build what its target gained by a fast-forward
   with no reading of the build's: the build reads `merged` until `revoke:` takes it
   back.

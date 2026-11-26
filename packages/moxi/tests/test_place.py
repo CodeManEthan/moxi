@@ -24,7 +24,7 @@ import moxi.paths
 from conftest import DIR_LINK, WINDOWS, is_link, link_dir, link_text
 from moxi import place
 from moxi.place import Item
-from moxi_dev.testing import can_symlink, need_symlinks, timed_slack
+from moxi_dev.testing import PROC_WAIT_S, can_symlink, need_symlinks, timed_slack
 
 
 @pytest.fixture(autouse=True)
@@ -1167,7 +1167,7 @@ def test_a_standalone_apply_waits_for_the_core_lock(tmp_path, skill):
         place.apply(steps)
         assert time.monotonic() - start > 0.5
     finally:
-        holder.wait(timeout=10)
+        holder.wait(timeout=PROC_WAIT_S)
 
 
 def test_a_standalone_remove_waits_for_the_core_lock(skill):
@@ -1178,7 +1178,7 @@ def test_a_standalone_remove_waits_for_the_core_lock(skill):
         place.remove("comms", say=lambda line: None)
         assert time.monotonic() - start > 0.5
     finally:
-        holder.wait(timeout=10)
+        holder.wait(timeout=PROC_WAIT_S)
     assert ledger() == {}
 
 
@@ -1191,7 +1191,7 @@ def test_a_standalone_adopt_waits_for_the_core_lock(skill):
                             say=lambda line: None)
         assert time.monotonic() - start > 0.5
     finally:
-        holder.wait(timeout=10)
+        holder.wait(timeout=PROC_WAIT_S)
     assert len(moved) == 1 and "loadout" in ledger()
 
 

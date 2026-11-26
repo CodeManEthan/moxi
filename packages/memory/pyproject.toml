@@ -22,9 +22,9 @@ classifiers = [
 # turns calls the start line, the lists, the reminder and the ingest trigger (the floor
 # rises when turns releases a default start order that names memory); sessions is
 # the only way memory reads a transcript (it needs the release that says which messages
-# the harness injected, the one with `retention()`, and the one with archive folders and
-# `corpus`, which no released version carries yet); secrets' sets redact every text
-# memory stores.
+# the harness injected, the one with `retention()`, the one with archive folders and
+# `corpus`, and interface 7, with `writer` and `opening`, which no released version
+# carries yet); secrets' sets redact every text memory stores.
 dependencies = ["moxi>=0.1.7,<0.2", "moxi-turns>=0.2.4,<0.3", "moxi-sessions>=0.2.6,<0.3",
                 "moxi-secrets>=0.1,<0.2"]
 
@@ -35,6 +35,19 @@ comms = ["moxi-comms>=0.3,<0.4"]
 # Each session's launch kind, which keeps scratch launches out of default search and the
 # start lists. memory reaches the launcher only through moxi.modules.load("launcher").
 launcher = ["moxi-launcher>=0.1.1,<0.2"]
+# The notes a recall of the subconscious reads, beside past sessions. memory reaches
+# notes only through moxi.modules.load("notes").
+notes = ["moxi-notes>=0.1,<0.2"]
+# search_memory in the Claude apps, through the public MCP host: the host's provider
+# interface with its `Limit`, which no released connector carries yet, and
+# personal-data's validators for the chat redaction. memory reaches the host only
+# through moxi.modules.load("connector", interface=1).
+connector = ["moxi-connector>=0.1,<0.2", "python-stdnum>=2.2"]
+# secrets' personal-data set by name, beside the sets memory stores with. secrets is
+# already a dependency and `connector` brings the set's python-stdnum, so this adds
+# nothing today. search_memory needs secrets' `chat_redact`, which no released secrets
+# carries yet; without it the tool refuses.
+secrets = ["moxi-secrets[personal-data]>=0.1,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -50,13 +63,28 @@ memory = "moxi_memory.module"
 [project.entry-points."moxi.turns.listeners"]
 memory = "moxi_memory.listeners"
 
+# The guards that keep a recall's fork to reads and refuse its permission asks.
+[project.entry-points."moxi.turns.guards"]
+memory = "moxi_memory.guards"
+
 # The two commands the start line names run without an approval prompt in a launch.
 [project.entry-points."moxi.turns.additions"]
 memory = "moxi_memory.additions:additions"
 
+# search_memory, served by the connector (the `connector` extra).
+[project.entry-points."moxi.connector.providers"]
+memory = "moxi_memory.connector:PROVIDER"
+
+# The word memory's recall sender is formed from: comms forms each session's recall
+# sender from the session's comms name and this word (`moxi_memory.recall_send`).
+[project.entry-points."moxi.comms.scoped_senders"]
+subconscious = "moxi_memory.recall_send:SUBCONSCIOUS"
+
 # The ingest child, which every trigger starts detached (`moxi_memory.start`).
+# The recall child, which the subconscious starts detached (`moxi_memory.recall_start`).
 [project.scripts]
 moxi-memory-ingest = "moxi_memory.ingest:main"
+moxi-memory-subconscious = "moxi_memory.recall_child:main"
 
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]

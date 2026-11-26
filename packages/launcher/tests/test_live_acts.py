@@ -39,8 +39,8 @@ from test_live import (ANSWER_S, CLAUDE_OWN, Terminal, flags, launch_row,  # noq
                        live_env, moxi_command, needs, needs_turns, own_slots, pane_text,
                        real_home, words, work)
 
-from moxi_launcher import (api, compose, exits, first, keepwarm, presets, recycle,
-                           relaunch, resume, store)
+from moxi_launcher import (api, compose, exits, first, handoffs, job, keepwarm, presets,
+                           recycle, relaunch, resume, slots, store)
 from moxi_launcher.compose import common
 
 pytestmark = [pytest.mark.live,
@@ -162,24 +162,33 @@ def processes_running(marker: str) -> list[int]:
 
 
 #: The person window these tests set (`relaunch.person_s`), short of the default two
-#: minutes. Claude redraws its screen for some seconds after a turn ends (a hint, its
-#: status line), and slots counts that as the pane's activity.
+#: minutes, so a hold for a person ends soon in a test.
 PERSON_S = 10
 
 
 def settled(row: store.LaunchRow) -> None:
-    """Wait until the slot's pane has drawn nothing for longer than `PERSON_S`, so the
-    quiet read's person check passes."""
-    from moxi_launcher import slots
+    """Wait until the session's quiet read holds nothing. The answer shows in the pane
+    before turns closes the turn, and an act refuses or waits on a read that holds."""
+    from moxi_launcher import quiet, slots, target
 
     api_ = slots.api()
+    held: list[str] = []
 
-    def quiet() -> bool:
-        use = api_.pane_use(row.slot)
-        return (use.pane_activity is not None
-                and time.time() - use.pane_activity > PERSON_S + 1)
-    wait_for(quiet, timeout=120, interval=1.0,
-             what=f"slot {row.slot}'s pane to draw nothing for {PERSON_S} s")
+    def is_quiet() -> bool:
+        found = target.find(row.session_id, slots_api=api_)
+        try:
+            if found.session is None:
+                held[:] = ["the session is not live"]
+                return False
+            reading = quiet.read(found.session, slot=row.slot, slots_api=api_,
+                                 person_s=PERSON_S)
+            held[:] = [str(hold) for hold in reading.holds]
+            return reading.quiet
+        finally:
+            found.close()
+    wait_for(is_quiet, timeout=120, interval=1.0,
+             what=lambda: f"session {row.session_id}'s quiet read to hold nothing; "
+                          f"held: {'; '.join(held)}")
 
 
 def claude_in_slot(work: Path, env: dict[str, str], brief: str, *, extra=(), **typed):
@@ -358,26 +367,61 @@ class DirectorComms:
         return self._real.qualify(self.director, self._real.GLOBAL)
 
 
+class JobInHere:
+    """slots as it is installed, but a job the call starts is kept, not run: the test
+    runs it in this process, in the environment and folder slots would have given it, so
+    the job's own cache read can take a stand-in."""
+
+    def __init__(self, real):
+        self._real, self.started = real, []
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def run_job(self, name, argv, *, env, cwd):
+        self.started.append(types.SimpleNamespace(name=name, argv=list(argv), env=dict(env),
+                                                   cwd=cwd))
+        return types.SimpleNamespace(exec="started", exec_line=None)
+
+    def run_kept(self, monkeypatch, **seams) -> str:
+        """Run the one kept job to its end, as `moxi-launcher-job KIND RUN` would."""
+        [kept] = self.started
+        kind, run_id = kept.argv[-2:]
+        with monkeypatch.context() as patched:
+            for name in list(os.environ):
+                patched.delenv(name)
+            for name, value in kept.env.items():
+                patched.setenv(name, value)
+            patched.chdir(kept.cwd)
+            return job.run(kind, run_id, **seams)
+
+
 class Cache:
     """A stand-in for cache's read of a session: its kind, its age and its lifetime."""
 
-    def __init__(self, kind: str, age: float, ttl: float = 3600.0):
-        self.kind, self.age, self.ttl = kind, age, ttl
+    def __init__(self, kind: str, age: float, ttl: float = 3600.0,
+                 response: float | None = 0.0):
+        self.kind, self.age, self.ttl, self.response = kind, age, ttl, response
 
     def read(self, harness, session_id, **options):
         return types.SimpleNamespace(kind=self.kind, age_s=self.age,
-                                     ttl_s=self.ttl)
+                                     ttl_s=self.ttl, response_s=self.response)
 
 
-def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
+def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots, tmp_path,
+                                                 monkeypatch):
     """A director relaunches a session that names it. The run ends `relaunched`; the new
-    launch is in the same pane with the director's `with:` posture and no first turn, and
+    launch is in the same pane, posture `relaunched` with the director's handoff as its
+    first turn, and
     its environment holds the new launch's stamp, of the director's shell only the name
     `relaunch.director_pass_env` lists, and none of what the session's own shell
     exported. The caller's comms identity is stood in (`DirectorComms`): proving it takes
     a director session bound on a comms daemon, and no fixture here runs one of the
-    test's own. The cache reads cold through a stand-in, since the session has just
-    answered and a director's relaunch of a warm session is refused."""
+    test's own. The launch has a notes directory and the handoff is in its handoff
+    folder, where a director's handoff must be. The cache reads cold through a stand-in,
+    since the session has just answered and a director's relaunch of a warm session is
+    refused; the job reads the cache again, so the call's job runs in this process with
+    the same stand-in (`JobInHere`), in the environment and folder slots gives a job."""
     needs_claude_with_turns(work, live_env)
     comms = presets.comms_api()
     if comms is None:
@@ -391,8 +435,10 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
     ask, answer = words()
     brief = (f"Run the shell command `export {shell_var}=1` with your Bash tool, then: "
              f"{ask}")
+    notes_dir = tmp_path / "notes"
+    notes_dir.mkdir()
     result, row = claude_in_slot(work, live_env, brief, director=["boss"],
-                                 **BASH_ALLOWED)
+                                 notes_dir=str(notes_dir), **BASH_ALLOWED)
     new = None
     try:
         assert result.state in ("started", "first-sent"), result.line
@@ -401,11 +447,17 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
                  what=lambda: f"{answer} in pane {row.pane_id}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
+        handoff = handoffs.handoff_dir_of_row(row, create=True) / "director-handoff.md"
+        ask, answer = words()
+        handoff.write_text(ask + "\n")
         director_env = {**live_env, director_var: "1", passed: "1"}
-        done = relaunch.call_director(row.session_id, caller_env=director_env,
+        slots_api = JobInHere(slots.api())
+        done = relaunch.call_director(row.session_id, handoff=str(handoff),
+                                      caller_env=director_env, slots_api=slots_api,
                                       comms=DirectorComms(comms, "boss"),
                                       cache=Cache("cold", 4000.0), follow=False)
         assert done.exit_code == 0, done.lines
+        slots_api.run_kept(monkeypatch, cache=Cache("cold", 4000.0))
 
         def ended() -> store.Run | None:
             finished = [r for r in runs_of(row.request_id) if r.kind == "relaunch"
@@ -419,13 +471,17 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots):
         new = launch_row(run.new_request_id)
         assert (new.relaunch_of, new.slot, new.pane_id) == (row.request_id, row.slot,
                                                             row.pane_id)
-        assert new.posture.startswith("with:") and "boss" in new.posture, new.posture
-        assert new.handoff_path is None
+        assert new.posture == f"relaunched (handoff: {handoff})", new.posture
+        assert new.handoff_path == str(handoff)
+        wait_for(lambda: answer in pane_text(own_slots, new.pane_id, live_env),
+                 timeout=ANSWER_S, interval=0.5,
+                 what=lambda: f"{answer} from the handoff; saw "
+                              f"{pane_text(own_slots, new.pane_id, live_env)[-2000:]}")
         wait_for(lambda: launch_row(new.request_id).pid, timeout=60, interval=0.5,
                  what="the new launch's process")
         env = proc.process_env(launch_row(new.request_id).pid) or {}
         assert env.get(common.REQUEST_ENV) == new.request_id
-        assert common.RELAUNCH_ENV not in env
+        assert env.get(common.RELAUNCH_ENV) == run.run_id
         assert env.get(passed) == "1", sorted(env)
         assert director_var not in env and shell_var not in env, sorted(env)
     finally:
@@ -477,11 +533,12 @@ def test_exit_session_ends_claude_through_the_exit_dialog_and_its_background_she
 
 @pytest.mark.parametrize("command", ["clear", "compact"])
 def test_a_clear_and_a_compact_on_expiry(live_env, work, own_slots, command):
-    """A launch with `recycle_on_expiry` cleared, and one compacted, once its cache reads
-    cold, while a background shell of the session runs. cache's timer asks only once a
-    Claude session's cache lifetime has passed (most often an hour after its last
-    request), so the test asks itself, with a stand-in cache that reads cold and idle past
-    the hour. The rest is live: the launch, the quiet read against Claude's idle screen,
+    """A launch with `recycle_on_expiry` cleared once its cache reads cold, and one
+    compacted while its cache still reads warm in the compact window, while a background
+    shell of the session runs. cache's timer asks only near or past a Claude session's
+    cache lifetime (most often an hour after its last request), so the test asks itself,
+    with a stand-in cache that reads cold and idle past the hour, or warm 300 s before the
+    expiry. The rest is live: the launch, the quiet read against Claude's idle screen,
     turns' command and Claude's answer to it. A clear stops the background shells, where
     turns can; a compact never does."""
     needs_claude_with_turns(work, live_env)
@@ -500,8 +557,8 @@ def test_a_clear_and_a_compact_on_expiry(live_env, work, own_slots, command):
                  what=lambda: f"{answer} and {marker}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
-        verdict = recycle.ask_expiry(row.session_id, cache=Cache("cold", 4000.0),
-                                     caller_env=live_env)
+        read = Cache("cold", 4000.0) if command == "clear" else Cache("warm", 3300.0)
+        verdict = recycle.ask_expiry(row.session_id, cache=read, caller_env=live_env)
         done = "cleared" if command == "clear" else "compacted"
         assert verdict.outcome == done, verdict
         [run] = [r for r in runs_of(row.request_id) if r.mode == "expiry"]

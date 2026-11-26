@@ -83,14 +83,7 @@ group = "Limits"
 unit = "minutes"
 
 [marks.default]
-type = "enum"
-values = ["off", "1x", "1.5x", "2x"]
-default = "off"
-doc = "The warn-at mark for a session its launch stamped none for."
-read = "use"
-label = "Warn when a session passes"
-line = "Of the restart point, for a session whose launch set no mark."
-common = true
+retired = "remove it: a session is warned only at the mark its launch stamps; set warn_at on the launch, its preset or the launcher's [defaults]"
 
 [marks.max_age_days]
 type = "int"
@@ -183,7 +176,7 @@ group = "Worker ceiling"
 
 [ceiling.warning_text]
 type = "string"
-default = "Your context has grown by {growth} tokens since you started (now {current}). Past {hard} tokens of growth your tools will be refused except to hand off. Finish the step you are on, save your work and write a short hand-off soon."
+default = "Worker context warning (usage's worker ceiling, set by whoever launched you): this worker has added {growth} input tokens since its first request (now {current}); hard stop at {hard} added. Do not start another slice or long proof. Finish the smallest safe unit, commit it, update the report with done, left, and where, then return to the parent."
 doc = "The line added once when a subagent passes warn_tokens; {growth}, {current} and {hard} are filled in."
 read = "use"
 label = "The warning's words"
@@ -191,7 +184,7 @@ group = "Worker ceiling"
 
 [ceiling.deny_text]
 type = "string"
-default = "This subagent has passed its context ceiling, so the tool call was refused. Save your work, write a short hand-off and return your result."
+default = "Worker context ceiling reached (usage's worker ceiling, set by whoever launched you): this worker has added {growth} input tokens, hard stop {hard}. This tool is denied. Do not retry it and do not start more work. Wrap up only. (1) Inspect and commit the existing diff with git, naming the repository as `git -C <dir> ...` or `cd <dir> && git ...`; give the whole message in one -m in single quotes, newlines inside the quotes, with no heredoc, $ or backtick. (2) Get the commit line the same way: `cd <dir> && moxi repo rules`, or the command your brief names when it prints `no commit rules`. Put every trailer in the last paragraph of the one -m. (3) Update a Markdown report under an allowed hand-off root. (4) Return CEILING HANDOFF with done, commit or uncommitted state, report path, left, and the next first action. Do not run tests, source reads, searches, skills, web or MCP calls, or another agent."
 doc = "The reason given for each tool call refused past hard_tokens; {growth}, {current} and {hard} are filled in."
 read = "use"
 label = "The refusal's words"
@@ -217,8 +210,8 @@ group = "Worker ceiling"
 
 [ceiling.allow_commands]
 type = "list"
-default = []
-doc = "More commands a subagent past its ceiling may run, each a list of the argument words a command must start with."
+default = [["moxi", "repo", "rules"]]
+doc = "More commands a subagent past its ceiling may run, each the list of a whole command's words; a word written <...>, such as <key>, stands for one name word."
 read = "use"
 label = "Commands it may still run"
 group = "Worker ceiling"

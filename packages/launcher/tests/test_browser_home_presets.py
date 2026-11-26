@@ -18,13 +18,13 @@ import sys
 from pathlib import Path
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
 from moxi_launcher import presets
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' picker is checked in a browser on Linux")]
 
@@ -159,7 +159,7 @@ def press(page, piece) -> dict:
 
 def argv_of(harness, brief: str) -> list[str]:
     [run] = wait_for(lambda: [run for run in harness.runs() if brief in " ".join(run["argv"])],
-                     10, what="the fake harness's run with the brief")
+                     PROC_WAIT_S, what="the fake harness's run with the brief")
     return run["argv"]
 
 

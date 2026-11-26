@@ -6,10 +6,12 @@ per exit, and the exit log."""
 from __future__ import annotations
 
 import os
+import time
 from types import SimpleNamespace
 
 import pytest
 from moxi import proc
+from moxi_dev.testing import PROC_WAIT_S
 
 from moxi_launcher import exits, first, job, store, target
 
@@ -153,6 +155,8 @@ def launched(conn, *, request_id="r1", target_name="slot", session_id=SID, claim
 
 def go(conn, which=SID, *, session=None, slots_api=None, turns=None, **kw):
     clock = Clock()
+    kw.setdefault("read_shells", lambda pid: [])
+    kw.setdefault("cache", None)
     return exits.exit_session(
         which, conn=conn, turns=turns or FakeTurns(session or FakeSession()),
         slots_api=slots_api if slots_api is not None else FakeSlots(ended=True),
@@ -223,6 +227,15 @@ def test_copy_mode_or_a_client_at_the_dialog_still_holds(conn, then):
     result = go(conn, slots_api=slots_api)
     assert result.data["outcome"] == "at-dialog" and result.run.word == "person"
     assert ("answer", 0) not in slots_api.calls
+
+
+def test_output_before_the_exit_is_not_a_person_at_the_dialog(conn):
+    # The job's wall reads 1e9 throughout: the status line drew 5 s before the exit.
+    pane = SimpleNamespace(pane_id="%9", pane_in_mode=False, client_activity=None,
+                           pane_activity=1e9 - 5)
+    slots_api = FakeSlots(pane=pane)
+    result = go(conn, slots_api=slots_api)
+    assert result.data["outcome"] == "exited" and ("answer", 0) in slots_api.calls
 
 
 @pytest.mark.parametrize("answer", ["ended-without-screen"])
@@ -394,6 +407,94 @@ def test_a_harness_that_offers_no_exit_is_refused(conn):
     assert logged(conn)[0].word == "no-exit"
 
 
+# -- Codex under the host ---------------------------------------------------------------
+
+
+def _host(tmp_path, *, ignores_term=False):
+    """A process standing in for turns' Codex host, a launch log whose Codex launch its
+    turns claim names, and a session it serves."""
+    import subprocess
+    import sys
+
+    code = ("import signal, sys, time\n"
+            + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignores_term else "")
+            + "print('ready', flush=True)\ntime.sleep(60)\n")
+    child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE)
+    assert child.stdout.readline() == b"ready\n"
+    ident = proc.identity(child.pid)
+    conn = store.connect(tmp_path / "launcher.db")
+    store.insert(conn, request_id="r1", by="ann", harness="codex", target="slot",
+                 cwd="/work", values={"model": "gpt", "mode": "host"}, argv=["host"],
+                 env={}, posture="operator", session_id=None, slot="3")
+    store.learn_session(conn, "r1", SID, "startup")
+    conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'",
+                 (f"{ident.pid}@{ident.started:.6f}",))
+    session = FakeSession(capabilities=("compact",))
+    session.endpoint_pid = session.pid = child.pid
+    return child, conn, session
+
+
+def test_a_quiet_codex_session_exits_by_its_host_stopping(tmp_path):
+    child, conn, session = _host(tmp_path)
+    slots_api = FakeSlots()
+    try:
+        result = exits.exit_session(
+            SID, conn=conn, turns=FakeTurns(session), slots_api=slots_api,
+            settings=SETTINGS, caller_env=dict(os.environ))
+        assert result.exit_code == 0 and result.data["outcome"] == "exited"
+        assert child.wait(PROC_WAIT_S) is not None and session.commands == []
+        assert slots_api.calls == []                  # no dialog: the pane ends with it
+        [row] = logged(conn)
+        assert row.verdict == "exited" and "Codex host was stopped" in row.detail
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_codex_host_still_running_at_the_bound_is_not_exited(tmp_path):
+    child, conn, session = _host(tmp_path, ignores_term=True)
+    try:
+        result = go(conn, session=session)
+        assert result.data["outcome"] == "not-exited" and child.poll() is None
+        assert logged(conn)[0].word == "still-running"
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_codex_session_not_quiet_is_held_and_its_host_left(tmp_path):
+    child, conn, session = _host(tmp_path)
+    session.facts_seq = [facts(turn_open=True)]
+    try:
+        assert go(conn, session=session).data["outcome"] == "held"
+        assert child.poll() is None
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_dry_run_says_it_would_stop_the_codex_host(tmp_path):
+    child, conn, session = _host(tmp_path)
+    try:
+        result = go(conn, session=session, dry_run=True)
+        assert result.lines == (f"would exit session {SID} by stopping its Codex host",)
+        assert child.poll() is None and logged(conn) == []
+    finally:
+        child.kill()
+        child.wait()
+        conn.close()
+
+
+def test_a_codex_launch_without_the_host_offers_no_exit():
+    row = store.LaunchRow(**{**dict.fromkeys(store.COLUMNS), "request_id": "r1",
+                             "harness": "codex", "values_json": '{"mode": "interactive"}',
+                             "endpoint": me()})
+    assert exits.codex_host(row) is None
+
+
 def test_an_exit_loses_at_insert_to_an_open_run_whose_job_lives(conn):
     other = store.insert_run(conn, kind="keep-warm", mode="ask", request_id="r1",
                              session_id=SID, by="cache", job=f"proc:{me()}")
@@ -494,6 +595,80 @@ def test_the_newest_id_after_a_clear_is_the_one_exited(conn):
     assert logged(conn)[0].session_id == OTHER
 
 
+# -- background shells ------------------------------------------------------------------------
+# Exit-session holds while a background shell or Monitor runs, unless the session has
+# been idle an hour; only then does it answer the exit dialog with "Exit and stop tasks".
+
+
+def idle(age_s):
+    return SimpleNamespace(read=lambda harness, session_id, **kw: SimpleNamespace(
+        kind="cold", age_s=age_s))
+
+
+@pytest.mark.parametrize("cache", [idle(600), None], ids=["idle-10-minutes", "no-cache"])
+def test_background_shells_hold_an_exit_until_the_session_is_idle_an_hour(conn, cache):
+    session, slots_api = FakeSession(), FakeSlots(ended=True)
+    result = go(conn, session=session, slots_api=slots_api, cache=cache,
+                read_shells=lambda pid: [4101, 4102])
+    assert result.exit_code == 75 and result.data["word"] == "shells"
+    assert "2 background shells or Monitors run (pid 4101, 4102)" in result.data["detail"]
+    assert session.commands == [] and slots_api.calls == []
+    [row] = logged(conn)
+    assert (row.verdict, row.word) == ("held", "shells")
+
+
+def test_background_shells_of_a_session_idle_an_hour_stop_at_the_exit_dialog(conn):
+    seen = []
+    session, slots_api = FakeSession(exits=(Result("failed", "not-exited"),)), \
+        FakeSlots(ended=False, answer="ended")
+    result = go(conn, session=session, slots_api=slots_api, cache=idle(3600),
+                read_shells=lambda pid: seen.append(pid) or [4101])
+    assert result.data["outcome"] == "exited" and seen == [session.pid]
+    assert session.commands == [("exit", 4)] and ("answer", 0) in slots_api.calls
+    [shells] = [e for e in store.run_events(conn, result.run.run_id) if e.kind == "shells"]
+    assert shells.detail == {"pids": [4101], "idle_s": 3600.0}
+
+
+def test_shells_that_cant_be_read_hold_the_exit(conn):
+    def broken(pid):
+        raise OSError("no such process")
+    session = FakeSession()
+    result = go(conn, session=session, read_shells=broken)
+    assert result.data["word"] == "unreadable" and session.commands == []
+    assert "background shells can't be read: no such process" in result.data["detail"]
+
+
+def test_a_dry_run_says_shells_hold_or_would_be_stopped(conn):
+    held = go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert held.exit_code == 75 and held.data["word"] == "shells"
+    cold = go(conn, dry_run=True, cache=idle(4000), read_shells=lambda pid: [4101])
+    assert cold.exit_code == 0 and cold.data["shells"] == [4101]
+    assert cold.lines[0].endswith("stopping its 1 background shell or Monitor (idle an hour "
+                                  "or more)")
+    assert store.runs(conn) == [] and logged(conn) == []
+
+
+def test_a_tool_shell_is_one_that_sources_a_claude_shell_snapshot():
+    snapshot = "source /home/u/.claude/shell-snapshots/snapshot-bash-1-x.sh 2>/dev/null"
+    assert exits.is_tool_shell(["/bin/bash", "-c", snapshot + " && sleep 60"])
+    assert exits.is_tool_shell(["/bin/zsh", "-c", snapshot])
+    assert not exits.is_tool_shell(["/bin/bash", "-c", "sleep 60"])
+    assert not exits.is_tool_shell(["python", "-m", "moxi_turns"])
+
+
+def test_background_shells_reads_the_children_of_the_process(tmp_path):
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert exits.background_shells(os.getpid()) == []
+    finally:
+        child.kill()
+        child.wait()
+    with pytest.raises(OSError):
+        exits.background_shells(2 ** 22 + 17)
+
+
 # -- the exit log ---------------------------------------------------------------------------
 
 
@@ -538,3 +713,152 @@ def test_retention_ages_out_exits_with_their_runs_and_those_with_none(conn):
 def test_the_exit_run_is_a_relaunch_job_whose_outcomes_are_verdicts():
     assert issubclass(exits.ExitRun, job.RelaunchJob)
     assert set(exits.EXIT_CODES) == set(store.VERDICTS)
+
+
+def test_an_exit_to_a_gone_endpoint_keeps_the_target_its_caller_found(conn, monkeypatch):
+    # `claude` runs and a new endpoint has claimed the session, but the verb's caller owns
+    # and closes the target it found, so the exit goes on to the pane with it. The run's
+    # own turns, were it to look the session up again, are the same fake.
+    ident = proc.identity(os.getpid())
+    store.set_facts(conn, "r1", pid=ident.pid, pid_started=ident.started)
+    old, new = FakeSession(exits=(Result("refused", "gone"),)), FakeSession()
+    new.endpoint_pid = os.getppid()
+    finds = []
+
+    def find(**kw):
+        finds.append(kw)
+        if len(finds) == 1:
+            return old
+        parent = proc.identity(os.getppid())
+        conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'",
+                     (f"{parent.pid}@{parent.started:.6f}",))
+        return new
+
+    turns = SimpleNamespace(find=find)
+    monkeypatch.setattr(first, "turns_api", lambda quiet=False: turns)
+    result = go(conn, turns=turns)
+    assert result.data["outcome"] == "exited" and len(finds) == 1
+    assert old.commands == [("exit", 4)] and new.commands == [] and old.closed == 1
+    kinds = [e.kind for e in store.run_events(conn, result.run.run_id)]
+    assert "moved" not in kinds and "pane-ended" in kinds
+
+
+# -- park's exit ------------------------------------------------------------------------------
+
+
+def park_go(conn, **kw):
+    """`go` as park's exit: mode `park`, waiting for quiet up to 30 s on the fake clock."""
+    return go(conn, mode="park", deadline=30.0, **kw)
+
+
+ACTIVE = dict(pane_id="%9", pane_in_mode=False, client_activity=1e9 - 5,
+              pane_activity=1e9 - 5)
+
+
+def test_parks_exit_waits_for_an_open_turn_to_end(conn):
+    session = FakeSession(facts_seq=[facts(turn_open=True), facts(turn_open=True), facts()])
+    result = park_go(conn, session=session)
+    assert result.data["outcome"] == "exited" and session.commands == [("exit", 4)]
+    assert result.run.mode == "park"
+    waits = [e.detail["word"] for e in store.run_events(conn, result.run.run_id)
+             if e.kind == "wait"]
+    assert waits == ["turn"]
+
+
+def test_parks_exit_ignores_a_clients_activity_that_holds_exit_session(conn):
+    # The quiet read takes the time from the clock, not the job's wall.
+    now = time.time()
+    pane = SimpleNamespace(**{**ACTIVE, "client_activity": now - 5, "pane_activity": now - 5})
+    held = go(conn, slots_api=FakeSlots(ended=True, pane=pane))
+    assert (held.data["outcome"], held.run.word) == ("held", "person")
+    parked = park_go(conn, slots_api=FakeSlots(ended=True, pane=pane))
+    assert parked.data["outcome"] == "exited"
+
+
+@pytest.mark.parametrize("cache", [idle(60), None], ids=["idle-a-minute", "no-cache"])
+def test_parks_exit_does_not_wait_on_background_shells_that_hold_exit_session(conn, cache):
+    held = go(conn, cache=cache, read_shells=lambda pid: [4101])
+    assert (held.data["outcome"], held.run.word) == ("held", "shells")
+    seen, session = [], FakeSession(exits=(Result("failed", "not-exited"),))
+    slots_api = FakeSlots(ended=False, answer="ended")
+    parked = park_go(conn, session=session, slots_api=slots_api, cache=cache,
+                     read_shells=lambda pid: seen.append(pid) or [4101])
+    assert parked.data["outcome"] == "exited" and seen == []
+    assert session.commands == [("exit", 4)] and ("answer", 0) in slots_api.calls
+    kinds = [e.kind for e in store.run_events(conn, parked.run.run_id)]
+    assert "wait" not in kinds and "shells" not in kinds
+
+
+def test_parks_dry_run_does_not_count_background_shells(conn):
+    held = go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert held.exit_code == 75 and held.data["word"] == "shells"
+    parked = park_go(conn, dry_run=True, cache=idle(60), read_shells=lambda pid: [4101])
+    assert parked.exit_code == 0 and parked.data["shells"] == []
+    assert parked.lines == (f"would exit session {SID} through its exit dialog in slot 3",)
+    assert store.runs(conn) == [] and logged(conn) == []
+
+
+def test_parks_exit_ignores_a_client_at_the_dialog(conn):
+    client = SimpleNamespace(**{**ACTIVE, "pane_activity": None})
+    slots_api = DrawingSlots(then=client)
+    result = park_go(conn, slots_api=slots_api,
+                     session=FakeSession(exits=(Result("failed", "not-exited"),)))
+    assert result.data["outcome"] == "exited" and ("answer", 0) in slots_api.calls
+
+
+def test_copy_mode_at_the_dialog_still_holds_parks_exit(conn):
+    copy = SimpleNamespace(pane_id="%9", pane_in_mode=True, client_activity=None,
+                           pane_activity=None)
+    slots_api = DrawingSlots(then=copy)
+    result = park_go(conn, slots_api=slots_api)
+    assert result.data["outcome"] == "at-dialog" and result.run.word == "person"
+    assert ("answer", 0) not in slots_api.calls
+
+
+@pytest.mark.parametrize("session, pane, word", [
+    (FakeSession(facts_seq=[facts(draft=True)]), None, "draft"),
+    (FakeSession(), SimpleNamespace(pane_id="%9", pane_in_mode=True, client_activity=None,
+                                    pane_activity=None), "person"),
+], ids=["draft", "copy-mode"])
+def test_parks_exit_still_held_when_its_wait_runs_out(conn, session, pane, word):
+    result = park_go(conn, session=session, slots_api=FakeSlots(ended=True, pane=pane))
+    assert (result.data["outcome"], result.run.word) == ("held", word)
+    assert session.commands == []
+    [row] = logged(conn)
+    assert row.verdict == "held"
+
+
+def test_parks_exit_goes_back_to_its_wait_on_a_refusal_that_clears(conn):
+    session = FakeSession(exits=(Result("refused", "busy-turn"), Result("ran")))
+    result = park_go(conn, session=session)
+    assert result.data["outcome"] == "exited" and len(session.commands) == 2
+
+
+def test_parks_exit_tries_again_a_launch_another_run_holds(conn):
+    other = store.insert_run(conn, kind="relaunch", mode="self", request_id="r1",
+                             session_id=SID, by="ann", state="waiting",
+                             job=exits.own_job())
+    clock = Clock()
+
+    def sleep(seconds):
+        clock.sleep(seconds)
+        store.end_run(conn, other.run_id, "expired")
+
+    result = exits.park_exit(
+        SID, deadline=30.0, conn=conn, turns=FakeTurns(FakeSession()),
+        slots_api=FakeSlots(ended=True), settings=SETTINGS, caller_env=dict(os.environ),
+        clock=clock, wall=lambda: 1e9, sleep=sleep)
+    assert result.data["outcome"] == "exited"
+    assert [r.verdict for r in reversed(logged(conn))] == ["refused", "exited"]
+
+
+def test_parks_exit_gives_up_on_a_launch_another_run_holds_past_its_wait(conn):
+    store.insert_run(conn, kind="relaunch", mode="self", request_id="r1", session_id=SID,
+                     by="ann", state="waiting", job=exits.own_job())
+    clock = Clock()
+    with pytest.raises(store.RunOpen):
+        exits.park_exit(SID, deadline=10.0, conn=conn, turns=FakeTurns(FakeSession()),
+                        slots_api=FakeSlots(ended=True), settings=SETTINGS,
+                        caller_env=dict(os.environ), clock=clock, wall=lambda: 1e9,
+                        sleep=clock.sleep)
+    assert {r.verdict for r in logged(conn)} == {"refused"}

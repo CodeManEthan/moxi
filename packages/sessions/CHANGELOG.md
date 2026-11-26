@@ -2,6 +2,108 @@
 
 ## Unreleased
 
+- With cache installed, a row of `Active recently` ends its first line in `warm until
+  <time>` or `cold`, from cache's clock record for the session, and turns cold at its
+  time; opened, it has a `Cache` line linking cache's page. A day's rows say nothing of
+  cache. On a running launch launcher's cache fact
+  wins, and cache's is used only where launcher gives none. The page reads cache's
+  `/api/clocks` and follows its topic `clocks` at the desk; without cache, and on the
+  phone, nothing of it is drawn and cache is not read.
+- The list's find reads the list again through moxi-ui's `readLater`, so the page root's
+  `data-reading` mark counts that read from the keystroke until the list it brings is
+  drawn, and a test's press waits for it. A user sees no change. The `ui` extra asks for
+  moxi-ui 0.2.8 or later.
+- With turns installed, a running row on the page says its live state, in the words turns'
+  Live sessions panel uses: `working` while a turn is open, what is busy (`1 subagent
+  busy`, `2 shells running`), and a dim line when turns can't read the session. An opened
+  running row adds turns' `Now`, `Agents` and `Prompt box` lines. The page reads turns'
+  `/api/sessions` and follows its topic `sessions` at the desk; without turns, and on the
+  phone, nothing of it is drawn and turns is not read. turns' `Live sessions` leaves the
+  band of pages while sessions is installed, and the list links it beside its count.
+- sessions' connector tools need the secrets release with `chat_redact` (and its
+  `between` step) and the connector release with `Limit`. No released version of the two
+  carries them yet; the floors rise when they are released.
+- The folder's last-part cut runs inside `chat_redact` between its two passes too, so a
+  secret that holds `/` can't be split by it; a folder the first pass ends inside a
+  placeholder shows the placeholder. In the path cut, a redaction placeholder counts as
+  part of the path, so `/home/you/[REDACTED:x]/dir/name` shows `name`. A refusal, an
+  `unlisted` root or its reason, and `unknown-session`'s archive folders cut each path
+  sessions holds (the root, the archive folder, the session's file and its folder) to its
+  last part wherever it occurs, and a path under its top folder, so a path outside the
+  cut's roots (`/data/sessions`) no longer leaves whole.
+- `read_session` cuts every local path it shows to its last segment and every loopback
+  origin to `local`: message text, tool-call lines (`Read(/home/you/x.md)` shows as
+  `Read(x.md)`), the title, the folder and refusal texts. The cut runs inside secrets'
+  `chat_redact`, between its two passes, so the last redaction sees the text sent; the
+  secret-path test still reads the raw input. Interface 7 gains `cut_local`, the one
+  cut, which `list_sessions`' refusal reasons use too, the same way. The folder keeps its own
+  last-part cut. The gate refuses `redaction-off` when secrets' `chat_redact` takes no `between`.
+- `read_session` on the connector: part of one session's transcript, the last turns or
+  the turns around a time, a subagent's own transcript with `agent`. A message's text
+  shows only where its record names the person at the prompt, the model's own turn or
+  another agent's session as its writer, or where the writer isn't recorded and the text
+  opens with no tag; a text that opens with an output wrapper never shows. Every other
+  message is one line of its kind and size, a tool result its size and whether it failed,
+  and a tool call its redacted summary, or its tool and path only when its input names a
+  secret path. Text goes through secrets' `chat_redact` whole, then is cut at 4,000
+  characters; an answer holds at most 40,000, the oldest turns going first. The redaction
+  gate now also needs secrets' `secret_path`, and refuses `redaction-off` without it.
+  The README's "In the Claude apps" section covers both tools and the install line,
+  `moxi install sessions --with connector,secrets`.
+- A `connector` extra and a `moxi.connector.providers` entry: the public MCP host serves
+  `list_sessions` to the Claude apps. Each row gives the session, harness, kind (`main`
+  or `program`), start and last change in UTC, the name, and the last part of its folder
+  only; names and folders go through secrets' `chat_redact`, and roots that couldn't be
+  listed are named by their last part with every path in their reason cut the same way.
+  Every tool refuses `redaction-off` when secrets or a chat set can't run, and runs
+  under the host's shared limit. The `secrets` extra now brings personal-data's
+  validators too. `moxi sessions read` finds a session through the new `locate` and
+  reads turns through `view.turns_last` and `view.turns_around`, unchanged in what it
+  prints.
+- Interface 7: `writer(record)`, who a message's harness says wrote it, and `OPENING`
+  with `opening(text)`, the characters every test of what a message opens with skips
+  first, with `OUTPUT_WRAPPERS`, `opens_with_output` and `opens_with_tag`. A message
+  record gains `origin_kind`, the kind its line's own `origin` object names (None when it
+  has none), which never falls back to `userType`. Claude Code's and Codex's wrapper tests
+  skip the opening set rather than `str.lstrip()`'s, so a wrapper after a zero-width or
+  other format character now marks the message injected too.
+
+## 0.2.10 (2026-11-20)
+
+- `records_since`'s batch names the Claude prompt ids its lines moved the turn to,
+  in order (`Batch.prompt_ids`), a prompt that drew no request included, whatever kinds
+  the read keeps and with no line decoded beyond those a filtered read decodes now. The
+  batches of a transcript from no cursor name every prompt id it wrote. A Codex or
+  OpenCode batch's is empty.
+- `read` and `list --text` redact a secret beside a `gitleaks:allow` mark or on a line a
+  rule's allowlist names, and a token an invisible character splits, through secrets'
+  `redact`, which no longer keeps either. sessions' code is unchanged; tests pin it.
+- The page's list keeps its filters, find text and how far each group was paged in its
+  own address (`/m/sessions/?harness=claude&when=7d&more=recent:1`), so Back from a
+  transcript, a reload and a shared link bring it back as it was; Back and a reload also
+  keep the rows opened and the scroll. A list change rewrites the address and adds no
+  history entry. A transcript opened from the list carries the query, and its link back
+  uses it. What an address holds that the list does not take is named above the list.
+- With launcher installed, the page's list starts with the sessions launcher runs now,
+  under `N running`, named, placed and ordered as Home draws them, each with its cache
+  fact, and `Keep warm` at the desk for a waiting session whose cache a press would
+  cover. The page reads launcher's `/api/running` with each list read, follows its topic
+  `running` at the desk, and posts to `/api/keep-warm`. A running session is not drawn
+  again in the other groups. A Claude Code transcript reads launcher's
+  `/api/state?session=<id>` once, and its start line says `Started ... by hand` where
+  launcher refuses the session as never launched and its head names an entrypoint that
+  isn't a program's. `by_program` in `/api/list`, `/api/session` and `Details` is now
+  false for such a head (it was null), true for a program's, and null where the head
+  wasn't read and for Codex and OpenCode. Without launcher the page is as before.
+
+- With the `ui` and `projects` extras, a `project-facts` component reports to the
+  Projects page each project's last activity and sessions active recently, the opened
+  project's `Sessions` row and Remove's `Stays` line, and the folders worked in this week
+  that no project holds. Its read is the page server's new `/api/projects`, which folds
+  the sessions into projects through projects' read API. The new optional extra
+  `projects` takes `moxi-projects` 0.1.4 or later; one without interface 2 reads as
+  absent.
+
 - Archive folders (interface 6): `claude.archives` and `codex.archives` name folders of
   older transcripts, laid out as the harness's root, read after the live root in order;
   a session an earlier folder holds is read from there only. `archives.answer_wait_s`

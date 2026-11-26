@@ -1,14 +1,17 @@
 """`moxi-dev check`: the checks a change must pass before it merges.
 
 Run from the repository's root as
-`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`.
+`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`, or as
+`uv run --locked moxi-dev check --static` for step 2 alone, or as
+`uv run --locked moxi-dev check --pick [--base REV]` to print what step 3 picks (see
+the end).
 It first reads the worker count and the memory figures, and runs the check in a memory
 scope of its own (`moxi_dev.scope`): the `moxi-dev` the caller started stays outside
 the scope and watches it, and the steps below run in the scope, as `python -m moxi_dev
 check` with the same arguments. A bad worker count or figure stops it there. Where no
 scope is made (`MOXI_TEST_MEMORY_MAX_MIB=none`, not Linux, CI, no systemd user manager
 with the memory controller) the steps run in place, and the summary's memory field says
-why. `--only` runs no tests and makes no scope.
+why. `--only`, `--static` and `--pick` run no tests and make no scope.
 
 The check then reads the workspace and the changed paths; a bad workspace or base stops
 it there, before any step runs. Then, in order:
@@ -32,14 +35,30 @@ it there, before any step runs. Then, in order:
    requirement one member places on another admits that member's version, and each
    member has the metadata, the CHANGELOG entry and the README links PyPI needs. Each
    problem's line names the member, the field and the fix.
+   Then the pronoun step (`moxi_dev.pronouns`): the text each package shows or ships
+   (its Python string literals and docstrings, its web sources' strings and comments,
+   its README, docs and bundled skills) names the operator neutrally. Each refused word
+   is printed as `path:line: word`, with the fix: reword it, or mark a genuine use.
+   Then the machine-text step (`moxi_dev.machine_text`): the repository's shipped code,
+   docs and tests name no one's machine: no path into one user's home folder in shipped
+   text, no name from the running contributor's own private-names list (secrets'), and
+   no package-manager command. Each hit is printed as `path:line: machine text: ...`,
+   with the fix; the private name itself is never printed.
 3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
-   tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`;
-   any other path (the root files, the lock, the workflow) picks every package. Then
-   every package that depends on a picked one, by its declared dependencies, optional
-   dependencies or dependency groups, is picked too, and so on until nothing is added:
-   a plain path filter would skip a dependent's tests and its contract check. `--full`
-   picks every package.
+   tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`,
+   and one under `packages/moxi-dev/`, the check itself, picks every package; its
+   rename table, which the renames step above reads whatever the pick, picks only
+   `moxi-dev`. A root path a package's tests read picks that package (`READ_BY`):
+   `README.md` picks `memory`, publishing's two workflow files pick `publishing`, and
+   `ci.yml` and `queue.yml` pick `moxi-dev` alone, whose tests read them.
+   The other workflows (`.github/`), `docs/` and `CONTRIBUTING.md` pick nothing; any
+   other path (the lock, the root `pyproject.toml`, the other root files) picks every
+   package. Then every package that depends on a picked one, by its declared
+   dependencies, optional dependencies or dependency groups, is picked too, and so on
+   until nothing is added: a plain path filter would skip a dependent's tests and its
+   contract check. An edge to `moxi-dev` is left out of that, since every package lists
+   it in its dev group. `--full` picks every package.
 4. Check the build stamps of the picked packages that have a web page
    (`moxi-dev stamp`, on the working tree): built files that lag their sources fail here,
    with no Node.
@@ -61,6 +80,22 @@ it there, before any step runs. Then, in order:
    `PYTEST_XDIST_AUTO_NUM_WORKERS` (which can turn `-n auto` into a serial run) and the
    caller's `PYTEST_ADDOPTS` are dropped from the suites' environment, and an option that
    would undo the workers (`--pdb`) makes pytest refuse the run.
+
+   Each package's run has a wall-clock bound, `SUITE_BOUND_S` (900 s) unless
+   `MOXI_TEST_SUITE_BOUND_S` sets another number of seconds. At the bound the check ends
+   the run and every process under it (`moxi.proc.run`: its process group on Linux and
+   macOS, its job on Windows), prints a line naming the package and the bound, and fails
+   that package; the other packages still run. `STACKS_LEAD_S` (10 s) before the bound,
+   each process of the run still going writes every thread's stack to a file of its own
+   in `.moxi-dev/run/<package>.stacks/` (the test kit's `MOXI_TEST_STACKS`), and the
+   line names that folder. A run that ends in time leaves no such folder.
+
+   A check ended by SIGINT, SIGTERM or SIGHUP (Ctrl-Break on Windows) ends the run under
+   way with its tree before it exits, with 128 plus the signal's number for the others
+   than SIGINT; a signal the check was started ignoring (as nohup leaves SIGHUP) stays
+   ignored. One killed outright (SIGKILL, or TerminateProcess on Windows) can do
+   nothing, so the run watches it (the kit's `MOXI_TEST_PARENT_PID`) and ends itself and
+   every process under it within a few seconds.
 
    What runs is the package's plain `pytest` (its `-m` deselects the `browser`, `slow`,
    `build` and `live` tiers), and besides it, through the test kit's variables
@@ -85,64 +120,119 @@ it there, before any step runs. Then, in order:
    (`MOXI_TEST_TIMED=hold`), the kit names them in the suite's durations, and
    `moxi-dev timed` runs them on their own. A package whose pass ran nothing because
    every test it chose was timed counts as `none`.
+
+   A check keeps its tests' temp on disk, whatever `MOXI_TEST_TEMP` says
+   (`moxi_dev.temp.for_check`): with `ram` on Linux, or with the setting unset and a
+   `PYTEST_DEBUG_TEMPROOT` in memory, the suites get `MOXI_TEST_TEMP=disk`; off Linux
+   `ram` reaches them as it is and each suite runs it as `disk`. Otherwise both reach
+   the suites as the caller set them. No step passes `--basetemp`. Outside a test the
+   check sweeps what earlier runs left in memory or in the short roots
+   (`moxi_dev.temp.sweep`) at its start, after each suite's pytest returns and at its
+   end, and prints a line for each sweep that removed something.
 8. Read each suite's durations (the kit writes them), keep the commit's record and find
    the newest record on `main` to compare with (`moxi_dev.durations`).
 9. Print one summary line, the last line of the output: the commit, the packages, the
-   lock, tag, reference, name, Ruff, renames, release, stamp, web, sync and lint
+   lock, tag, reference, name, Ruff, renames, release, pronoun, machine-text, stamp, web,
+   sync and lint
    results, each package's tests and seconds (and `without its browser tests` where
    Chromium couldn't start), `timed held <n>` with the number of timed tests the suites
    held back (`timed none` when they held none, `timed not run` when the suites never
    ran), the tests' own seconds with the slowest 5 %'s share of them and the delta
-   against main, the memory field, the total and the exit code. Before it, the check
-   ends any process it left running in its scope and says how many, and it warns when it
-   held 90 % of its line or more, or waited on memory for 10 s or more.
+   against main, where the tests kept their temp (`temp disk`, with the reason when the
+   check moved a memory choice to disk; `temp PYTEST_DEBUG_TEMPROOT` when the caller's
+   root on disk was kept; and how many suites kept it in memory after all, read from
+   their durations, with why), the memory field, the total and the exit code. Before it,
+   the check ends any process it left running in its scope and says how many, and it
+   warns when it held 90 % of its line or more, or waited on memory for 10 s or more.
 
    The memory field names the scope's peak, the most memory it held that it couldn't
    give back (`held`), its line (95 % of MemoryHigh), MemoryHigh, MemoryMax and the
    seconds it stalled on memory; or `not capped (<why>)`; or how a memory end ended it:
    `ended past its line (...)`, `killed at its cap (...)`, `killed while the machine ran
-   short (...)`. A caller's SIGINT, SIGTERM or SIGHUP prints the scope's memory state at
-   once and ends the check by that signal, with no summary.
+   short (...)`; or `not run` under `--static`. A caller's SIGINT, SIGTERM or SIGHUP
+   prints the scope's memory state at once and ends the check by that signal, with no
+   summary.
 
-The tags, references, names, Ruff, renames and release steps, each package's lint and each
-package's tests all run even when one before them failed, so one run shows every failure.
+The tags, references, names, Ruff, renames, release, pronoun and machine-text steps, each
+package's lint and each package's tests all run even when one before them failed, so one
+run shows every failure.
 
 The exit code is 0 only when every step passed, 1 when one failed or the check was ended
 for memory, and 2 when the check could not start or a step could not be run (not in a
 workspace, a member with no readable `pyproject.toml` or no project name, no merge base, a
-bad `MOXI_TEST_WORKERS`, `MOXI_TEST_MEMORY_HIGH_MIB`, `MOXI_TEST_MEMORY_MAX_MIB` or
-`--finding`, a memory scope that could not be made where one was expected, `uv` not on
-PATH). The summary line is printed in every case but a caller's signal.
+bad `MOXI_TEST_WORKERS`, `MOXI_TEST_MEMORY_HIGH_MIB`, `MOXI_TEST_MEMORY_MAX_MIB`,
+`MOXI_TEST_TEMP` or `--finding`, a memory scope that could not be made where one was
+expected, `uv` not on PATH, a private-names list secrets can't read). The summary line is
+printed in every case but a caller's signal.
+
+`--static` reads the workspace and runs step 2 alone, over the whole repository: the
+tag, comment-reference, naming, Ruff, renames, release, pronoun and machine-text steps,
+with the same printed lines, the same summary line (every other step `not run`,
+`packages: none`, `temp not run`, `memory not run`) and the same exit codes. It reads no
+changed paths and no worker count, makes no memory scope and runs no lock check, so no
+step needs the network. It starts no test, so it reads no `MOXI_TEST_TEMP`, chooses no
+temp root and sweeps nothing.
+
+`--pick` reads the workspace and the changed paths as step 3 does, prints one line,
+the JSON object `{"packages": [...]}` with the picked packages' folders under
+`packages/` in the workspace's order, and runs no step: a workflow reads it to run
+only the picked packages' jobs. It exits 0, or 2 with the reason on stderr and nothing
+on stdout when the workspace or the base can't be read.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import json
+import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Iterator, Mapping, Protocol, Sequence
 
-from . import durations, lint, naming, refs, release, rename, ruff_check, scope, stamp, tags
+from moxi import proc
+
+from . import (durations, lint, machine_text, naming, pronouns, refs, release, rename,
+               ruff_check, scope, stamp, tags, temp)
 from .scope import SCOPE_ENV, WORKERS_ENV
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
-                      LEAVE_OUT_ENV, TIERS_ENV, TIMED_ENV)
+                      LEAVE_OUT_ENV, PARENT_PID_ENV, STACKS_AT_ENV, STACKS_ENV, TIERS_ENV,
+                      TIMED_ENV)
 
 PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
+#: Seconds one package's test run may take before the check ends it, in place of
+#: `SUITE_BOUND_S`.
+SUITE_BOUND_ENV = "MOXI_TEST_SUITE_BOUND_S"
+#: How long one package's test run may take, wall clock, before the check ends it: well
+#: under an hour, and a few times the slowest package's run on a 16-CPU machine.
+SUITE_BOUND_S = 900.0
+#: How long before a run's bound its processes write their stacks (the kit's
+#: `MOXI_TEST_STACKS_AT`); at most half the bound.
+STACKS_LEAD_S = 10.0
 #: How many of the renames step's unsettled rows and leftovers a failure prints.
 RENAMES_SHOWN = 10
 
-# A step's command, run from `cwd` with `env`; returns the exit code. Tests replace it.
-Run = Callable[[Sequence[str], Path, Mapping[str, str]], int]
+class Run(Protocol):
+    """A step's command, run from `cwd` with `env`; returns the exit code. With
+    `timeout_s`, past that many seconds it ends the command and everything it started and
+    raises `subprocess.TimeoutExpired`. Tests replace it."""
+
+    def __call__(self, cmd: Sequence[str], cwd: Path, env: Mapping[str, str], /, *,
+                 timeout_s: float | None = None) -> int: ...
+
+
 # The lint's commands for a package: (package dir, work dir, every member's dir).
 Plan = Callable[[Path, Path, Sequence[Path]], list[lint.Command]]
 
@@ -256,21 +346,55 @@ def load_workspace(root: Path) -> list[Package]:
             for path, dist, requires, browser in loaded]
 
 
+# The check's own distribution. Every package lists it in its dev group, so picking
+# ignores edges to it; a change to it picks every package, but for its rename table,
+# which only the renames step reads, and that runs whatever the pick.
+CHECK_DIST = "moxi-dev"
+CHECK_TABLE = "packages/moxi-dev/renames.tsv"
+
+# Root paths that hold no package's code, tests or declarations: a change to one picks
+# no package (the whole-tree steps still read it), unless `READ_BY` names it. Any other
+# path outside a package, the lock and the root pyproject.toml among them, picks every
+# package.
+PICKS_NOTHING = frozenset({".github", "docs", "CONTRIBUTING.md", "README.md"})
+
+# Root paths a package's tests read, each with that package's folder in `packages/`: a
+# change to one picks the package. memory's contract test reads the package table in the
+# root README; publishing's tests hold its workflow files equal to its templates; the
+# check's own tests hold the full check's workflow and the merge queue's.
+READ_BY = {"README.md": "memory",
+           ".github/workflows/publishing.yml": "publishing",
+           ".github/workflows/release.yml": "publishing",
+           ".github/workflows/ci.yml": "moxi-dev",
+           ".github/workflows/queue.yml": "moxi-dev"}
+
+
 def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
-    """The packages the changed paths pick, with every package that depends on them."""
+    """The packages the changed paths pick, with every package that depends on them.
+
+    A dependent is found through every edge a package declares but one to `CHECK_DIST`;
+    a path in `CHECK_DIST` itself picks every package (`CHECK_TABLE` picks it alone),
+    a root path in `READ_BY` picks the package whose tests read it, and any other root
+    path in `PICKS_NOTHING` picks none."""
     by_dir = {package.dir: package for package in packages}
     picked: set[str] = set()
     for path in paths:
         parts = path.split("/")
         if len(parts) >= 3 and parts[0] == "packages" and parts[1] in by_dir:
-            picked.add(by_dir[parts[1]].dist)
-        else:
+            dist = by_dir[parts[1]].dist
+            if dist == CHECK_DIST and path != CHECK_TABLE:
+                return list(packages)
+            picked.add(dist)
+        elif path in READ_BY:
+            if READ_BY[path] in by_dir:
+                picked.add(by_dir[READ_BY[path]].dist)
+        elif parts[0] not in PICKS_NOTHING:
             return list(packages)
     grew = True
     while grew:
         grew = False
         for package in packages:
-            if package.dist not in picked and package.requires & picked:
+            if package.dist not in picked and (package.requires - {CHECK_DIST}) & picked:
                 picked.add(package.dist)
                 grew = True
     return [package for package in packages if package.dist in picked]
@@ -325,9 +449,30 @@ def worker_args(env: Mapping[str, str], cpus: int | None = None) -> list[str]:
     return ["-n", str(count)]
 
 
-def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str]) -> int:
+def suite_bound(env: Mapping[str, str]) -> float:
+    """The seconds one package's test run may take: `MOXI_TEST_SUITE_BOUND_S`, else
+    `SUITE_BOUND_S`; a value that is not a finite number above 0 stops the check."""
+    raw = env.get(SUITE_BOUND_ENV, "").strip()
+    if not raw:
+        return SUITE_BOUND_S
     try:
-        return subprocess.run(list(cmd), cwd=cwd, env=dict(env)).returncode
+        bound_s = float(raw)
+    except ValueError:
+        bound_s = math.nan
+    if not math.isfinite(bound_s) or bound_s <= 0:
+        raise CheckError(f"{SUITE_BOUND_ENV} must be a number of seconds above 0; "
+                         f"it is {raw!r}")
+    return bound_s
+
+
+def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str], /, *,
+         timeout_s: float | None = None) -> int:
+    try:
+        if timeout_s is None:
+            return subprocess.run(list(cmd), cwd=cwd, env=dict(env)).returncode
+        # Its own process group (a job on Windows), so the whole tree ends at the bound.
+        return proc.run(list(cmd), timeout_s=timeout_s, env=dict(env), cwd=cwd,
+                        capture=False).returncode
     except OSError as exc:
         raise CheckError(f"could not run {cmd[0]} ({exc})") from exc
 
@@ -370,6 +515,8 @@ except Exception as exc:
 # Why Chromium can't start in the check's environment, or None when it starts; given the
 # environment's python and the suites' environment. Tests replace it.
 Probe = Callable[[Path, Mapping[str, str]], str | None]
+#: The sweep of what earlier test runs left; `moxi_dev.temp.sweep` outside a test.
+Sweep = Callable[[], temp.Swept]
 
 
 def chromium_probe(python: Path, env: Mapping[str, str]) -> str | None:
@@ -399,6 +546,8 @@ class Result:
     ruff: str = "not run"
     renames: str = "not run"
     release: str = "not run"
+    pronouns: str = "not run"
+    machine: str = "not run"
     stamps: str = "not run"
     web: str = "not run"
     sync: str = "not run"
@@ -408,16 +557,41 @@ class Result:
     suites: list[tuple[str, bool | None, float]] = field(default_factory=list)
     #: The packages whose browser tests were left out, Chromium not starting.
     no_browser: list[str] = field(default_factory=list)
+    #: The packages whose test run the check ended at its bound.
+    cut: list[str] = field(default_factory=list)
     #: How many timed tests the suites held back; None when the suites never ran.
     timed: int | None = None
     durations: durations.Summary | None = None
     delta: durations.Delta | None = None
     kept: Path | None = None             # the commit's durations record, when kept
+    #: Why the check moved its tests' temp to disk or left a memory choice to the suites
+    #: (`moxi_dev.temp.for_check`), None when it did neither.
+    temp_why: str | None = None
+    #: Whether the suites keep their temp where the caller's PYTEST_DEBUG_TEMPROOT says.
+    is_temproot_given: bool = False
+    #: Whether the check chose its tests' temp; False under --static, which runs none.
+    is_temp_chosen: bool = True
+    #: (package, root, why) for each suite whose temp was in memory after all.
+    temp_in_memory: list[tuple[str, str, str | None]] = field(default_factory=list)
     #: The memory scope's field (`moxi_dev.scope`): what the scope held, how it ended,
     #: or why there was none.
     memory: str = "not run"
     seconds: float = 0.0
     code: int = 0
+
+    def temp_text(self) -> str:
+        """The summary's temp field."""
+        if not self.is_temp_chosen:
+            return "temp not run"
+        notes = [self.temp_why] if self.temp_why else []
+        if self.temp_in_memory:
+            count = len(self.temp_in_memory)
+            roots = ", ".join(sorted({root for _, root, _ in self.temp_in_memory}))
+            text = f"{count} suite{'' if count == 1 else 's'} in memory at {roots}"
+            whys = sorted({why for _, _, why in self.temp_in_memory if why})
+            notes.append(text + (": " + "; ".join(whys) if whys else ""))
+        word = temp.TEMPROOT_ENV if self.is_temproot_given else temp.DISK
+        return f"temp {word}" + (f" ({'; '.join(notes)})" if notes else "")
 
     def timing(self) -> str:
         if self.durations is None:
@@ -436,6 +610,7 @@ class Result:
         word = {True: "pass", False: "fail", None: "none"}
         suites = ", ".join(f"{name} {word[ok]} {secs:.1f}s"
                            + (" without its browser tests" if name in self.no_browser else "")
+                           + (" ended at its bound" if name in self.cut else "")
                            for name, ok, secs in self.suites) or "no suites run"
         if self.timed is None:
             timed = "not run"
@@ -451,11 +626,12 @@ class Result:
         return (f"moxi-dev check: commit {self.commit} | packages: {names} | "
                 f"lock {self.lock} | tags {self.tags} | refs {self.refs} | "
                 f"names {self.names} | ruff {self.ruff} | renames {self.renames} | "
-                f"release {self.release} | "
-                f"stamps {self.stamps} | "
+                f"release {self.release} | pronouns {self.pronouns} | "
+                f"machine {self.machine} | stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
-                f"memory {self.memory} | total {self.seconds:.1f}s | exit {self.code}")
+                f"{self.temp_text()} | memory {self.memory} | "
+                f"total {self.seconds:.1f}s | exit {self.code}")
 
 
 def _commit(root: Path) -> str:
@@ -473,34 +649,121 @@ def check_findings(findings: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(findings))
 
 
+def _sweep() -> temp.Swept:
+    """The sweep of what earlier test runs left (`moxi_dev.temp.sweep`), in a check that
+    is not nested in a test."""
+    return temp.sweep()
+
+
+def _swept(sweep: Sweep) -> None:
+    removed = sweep().line()
+    if removed:
+        print(f"moxi-dev check: {removed}", flush=True)
+
+
+def temp_env(env: Mapping[str, str]) -> tuple[dict[str, str], str | None, bool]:
+    """The check's environment with its tests' temp kept on disk
+    (`moxi_dev.temp.for_check`), the reason it gives, and whether the suites keep their
+    temp where the caller's PYTEST_DEBUG_TEMPROOT says. A bad MOXI_TEST_TEMP raises
+    CheckError."""
+    try:
+        checked, why = temp.for_check(env)
+        given = temp.choose(checked).source == temp.BY_TEMPROOT
+    except temp.TempError as exc:
+        raise CheckError(str(exc)) from exc
+    return checked, why, given
+
+
+#: The signals that end the check as an interrupt does, so a package's run under way is
+#: ended with its tree before the check exits: Python's default for each ends the
+#: process at once, leaving the run, in a process group of its own, running.
+END_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP", "SIGBREAK")
+                    if hasattr(signal, name))
+
+
+def _ended_by(signum: int, frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def _signals_end_the_check() -> Iterator[None]:
+    """While the check runs, a signal of `END_SIGNALS` raises `SystemExit` (128 plus its
+    number) in it, as Ctrl-C raises KeyboardInterrupt, and each handler it replaced is put
+    back after. Only a signal still at its default is taken: one the check was started
+    ignoring (as nohup leaves SIGHUP) stays ignored, and one with a handler of its own,
+    Python's or not, keeps it. Off the main thread, where Python takes no handler,
+    nothing changes."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    taken = [one for one in END_SIGNALS if signal.getsignal(one) == signal.SIG_DFL]
+    replaced = {}
+    try:
+        for one in taken:
+            replaced[one] = signal.signal(one, _ended_by)
+        yield
+    finally:
+        for one, handler in replaced.items():
+            signal.signal(one, handler)
+
+
 def check(root: Path, *, full: bool = False, base: str | None = None,
-          finding: Sequence[str] = (), env: Mapping[str, str] | None = None,
-          run: Run | None = None, plan: Plan | None = None,
-          probe: Probe | None = None) -> Result:
-    """Run the check's steps on the workspace at `root`; the result holds the exit code."""
+          finding: Sequence[str] = (), static: bool = False,
+          env: Mapping[str, str] | None = None, run: Run | None = None,
+          plan: Plan | None = None, probe: Probe | None = None,
+          sweep: Sweep | None = None) -> Result:
+    """Run the check's steps on the workspace at `root`; the result holds the exit code.
+    With `static`, run only the whole-tree static steps (`_Steps.static`), which start no
+    test, so it chooses no temp and sweeps nothing."""
     env = os.environ if env is None else env
     run = run or _run
     plan = plan or lint.plan
     probe = probe or chromium_probe
+    sweep = sweep or _sweep
     started = time.monotonic()
-    result = Result()
-    try:
-        findings = check_findings(finding)
-        result.commit = _commit(root)
-        packages = load_workspace(root)
-        workers = worker_args(env)
-        changed = None if full else changed_paths(root, base or "main")
-        chosen = list(packages) if changed is None else pick(packages, changed)
-        result.packages = [package.dir for package in chosen]
-        steps = _Steps(root, packages, workers, env, run, plan, result,
-                       changed=changed, findings=findings, base=base or "main",
-                       probe=probe)
-        result.code = 0 if steps.all(chosen) else 1
-    except CheckError as exc:
-        print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
-        result.code = 2
-    result.seconds = time.monotonic() - started
-    return result
+    result = Result(is_temp_chosen=not static)
+    with _signals_end_the_check():
+        try:
+            if not static:
+                env, result.temp_why, result.is_temproot_given = temp_env(env)
+                _swept(sweep)
+            findings = check_findings(finding)
+            result.commit = _commit(root)
+            packages = load_workspace(root)
+            if static:
+                result.packages = []
+                steps = _Steps(root, packages, (), env, run, plan, result, probe=probe)
+                result.code = 0 if steps.static() else 1
+                result.seconds = time.monotonic() - started
+                return result
+            workers = worker_args(env)
+            bound_s = suite_bound(env)
+            changed = None if full else changed_paths(root, base or "main")
+            chosen = list(packages) if changed is None else pick(packages, changed)
+            result.packages = [package.dir for package in chosen]
+            steps = _Steps(root, packages, workers, env, run, plan, result,
+                           changed=changed, findings=findings, base=base or "main",
+                           probe=probe, suite_bound_s=bound_s,
+                           sweep=lambda: _swept(sweep))
+            result.code = 0 if steps.all(chosen) else 1
+        except CheckError as exc:
+            print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
+            result.code = 2
+        finally:
+            if not static:
+                _swept(sweep)
+        result.seconds = time.monotonic() - started
+        return result
+
+
+def stacks_said(written: int, stacks_dir: Path) -> str:
+    """The cut line's last part: how many of the run's processes wrote their stacks into
+    `stacks_dir` at the stacks time."""
+    if written == 0:
+        return "none of its processes wrote its stacks"
+    if written == 1:
+        return f"the one process still running then wrote its stacks to {stacks_dir}"
+    return f"the {written} processes still running then wrote their stacks to {stacks_dir}"
 
 
 @dataclass
@@ -516,6 +779,8 @@ class _Steps:
     findings: Sequence[str] = ()
     base: str = "main"
     probe: Probe = chromium_probe
+    suite_bound_s: float = SUITE_BOUND_S
+    sweep: Callable[[], None] = lambda: None
 
     def all(self, chosen: Sequence[Package]) -> bool:
         """The lock, the tags, the stamps, the sync, the lint and the suites, recorded in
@@ -526,12 +791,7 @@ class _Steps:
         result.lock = "pass" if ok else "fail"
         if not ok:
             return False
-        ok = self.tags()
-        ok = self.references() and ok
-        ok = self.names() and ok
-        ok = self.ruff() and ok
-        ok = self.renames() and ok
-        ok = self.release() and ok
+        ok = self.static()
         if not chosen:
             result.stamps = result.web = result.sync = "skipped"
             return ok
@@ -553,6 +813,19 @@ class _Steps:
         for package in chosen:
             ok = self.lint(package, venv, suite_env) and ok
         return self.suites(chosen, venv, suite_env) and ok
+
+    def static(self) -> bool:
+        """The tag, comment-reference, naming, Ruff, renames, release, pronoun and
+        machine-text steps over the whole tree, each run even when one before it failed;
+        True when all passed."""
+        ok = self.tags()
+        ok = self.references() and ok
+        ok = self.names() and ok
+        ok = self.ruff() and ok
+        ok = self.renames() and ok
+        ok = self.release() and ok
+        ok = self.pronouns() and ok
+        return self.machine() and ok
 
     def selection_env(self, work: Path) -> dict[str, str]:
         """The kit's variables for what the suites run besides the plain run."""
@@ -586,10 +859,26 @@ class _Steps:
         for package in chosen:
             where = work / f"{package.dir}.durations.json"
             where.unlink(missing_ok=True)
+            stacks_dir = work / f"{package.dir}.stacks"
+            shutil.rmtree(stacks_dir, ignore_errors=True)
             began = time.monotonic()
             args, extra = browsers.get(package.dir, ((), {}))
-            code = run([python, "-m", "pytest", *self.workers, *args], package.path,
-                       {**env, **extra, TIMED_ENV: "hold", DURATIONS_ENV: str(where)})
+            code: int | None
+            try:
+                code = run([python, "-m", "pytest", *self.workers, *args], package.path,
+                           {**env, **extra, TIMED_ENV: "hold", DURATIONS_ENV: str(where),
+                            **self.stacks_env(stacks_dir)},
+                           timeout_s=self.suite_bound_s)
+            except subprocess.TimeoutExpired:
+                code = None
+                self.cut(package, stacks_dir)
+            else:
+                shutil.rmtree(stacks_dir, ignore_errors=True)
+            self.sweep()
+            chosen_temp = durations.load_temp(where) or {}
+            if chosen_temp.get("is_in_memory"):
+                result.temp_in_memory.append((package.dir, str(chosen_temp.get("root")),
+                                              chosen_temp.get("why")))
             tests = durations.load_run(where)
             held = durations.load_held(where)
             passed: bool | None = code == 0
@@ -624,6 +913,34 @@ class _Steps:
         self.timings({name: one for name, (_, one) in timed.items()},
                      {name: one for name, (passed, one) in timed.items() if passed})
         return ok
+
+    def stacks_env(self, stacks_dir: Path) -> dict[str, str]:
+        """The kit's variables that have each process of a package's run write its stacks
+        `STACKS_LEAD_S` before the run's bound (at most half the bound), and end the run
+        when this process is gone."""
+        bound_s = self.suite_bound_s
+        at = time.time() + max(bound_s - STACKS_LEAD_S, bound_s / 2)
+        return {STACKS_ENV: str(stacks_dir), STACKS_AT_ENV: f"{at:.3f}",
+                PARENT_PID_ENV: str(os.getpid())}
+
+    def cut(self, package: Package, stacks_dir: Path) -> None:
+        """Say that a package's run was ended at its bound, and where its processes'
+        stacks are; record it in the result."""
+        self.result.cut.append(package.dir)
+        written = []
+        if stacks_dir.is_dir():
+            for path in sorted(stacks_dir.iterdir()):
+                try:
+                    if path.stat().st_size:
+                        written.append(path)
+                    else:
+                        path.unlink()
+                except OSError:
+                    continue
+        where = stacks_said(len(written), stacks_dir)
+        print(f"moxi-dev check: {package.dir}: its tests ran past their "
+              f"{self.suite_bound_s:g} s bound, so the check ended the run and every "
+              f"process under it and fails the package; {where}", flush=True)
 
     def browsers(self, chosen: Sequence[Package], venv: Path, suite_env: Mapping[str, str]
                  ) -> dict[str, tuple[Sequence[str], Mapping[str, str]]]:
@@ -678,6 +995,28 @@ class _Steps:
             print(f"moxi-dev check: {problem}", flush=True)
         self.result.release = "fail" if problems else "pass"
         return not problems
+
+    def pronouns(self) -> bool:
+        try:
+            hits = pronouns.scan(self.root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"the pronoun check could not list the files ({exc})") from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.pronouns = "fail" if hits else "pass"
+        return not hits
+
+    def machine(self) -> bool:
+        try:
+            hits = machine_text.scan(self.root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise CheckError(f"the machine-text step could not list the files ({exc})") from exc
+        except machine_text.SetUnavailable as exc:
+            raise CheckError(machine_text.unreadable(exc)) from exc
+        for hit in hits:
+            print(f"moxi-dev check: {hit}", flush=True)
+        self.result.machine = "fail" if hits else "pass"
+        return not hits
 
     def references(self) -> bool:
         try:
@@ -815,8 +1154,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="moxi-dev check",
         description="Run the checks a change must pass before it merges: the lock, the "
-                    "tag, comment-reference, naming and Ruff checks, the renames step "
-                    "and the release step, "
+                    "tag, comment-reference, naming and Ruff checks, the renames step, "
+                    "the release step, the pronoun step and the machine-text step, "
                     "then the import rules and the tests "
                     "of every package the change touches and of every package that "
                     "depends on one, in an environment of the check's own. Run it from "
@@ -830,11 +1169,30 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
-    parser.add_argument("--only", choices=("refs", "names", "ruff", "renames"),
+    parser.add_argument("--static", action="store_true",
+                        help="run only the tag, comment-reference, naming, Ruff, renames, "
+                             "release, pronoun and machine-text steps, over the whole "
+                             "repository")
+    parser.add_argument("--pick", action="store_true",
+                        help="print the packages the change picks, as one JSON line, and "
+                             "run nothing")
+    parser.add_argument("--only", choices=("refs", "names", "ruff", "renames", "pronouns",
+                                           "machine"),
                         help="run only this whole-tree code check")
     parser.add_argument("paths", nargs="*", metavar="PATH",
                         help="with --only, print findings only under these paths")
     return parser
+
+
+def print_pick(root: Path, base: str) -> int:
+    """Print the packages the changes since HEAD left `base` pick, as `--pick` does."""
+    try:
+        chosen = pick(load_workspace(root), changed_paths(root, base))
+    except CheckError as exc:
+        print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
+        return 2
+    print(json.dumps({"packages": [package.dir for package in chosen]}), flush=True)
+    return 0
 
 
 def _shown(path: str, selected: Sequence[str]) -> bool:
@@ -849,11 +1207,15 @@ def _shown(path: str, selected: Sequence[str]) -> bool:
 def only(root: Path, step: str, paths: Sequence[str] = ()) -> int:
     """Run one whole-tree code check and print its selected findings."""
     scanner = {"refs": refs.scan, "names": naming.scan, "ruff": ruff_check.scan,
-               "renames": _renames_scan}[step]
+               "renames": _renames_scan, "pronouns": pronouns.scan,
+               "machine": machine_text.scan}[step]
     try:
         hits = scanner(root)
     except (rename.RenameError, OSError, subprocess.SubprocessError) as exc:
         print(f"moxi-dev check: {step} could not read the tree ({exc})", file=sys.stderr)
+        return 2
+    except machine_text.SetUnavailable as exc:
+        print(f"moxi-dev check: {machine_text.unreadable(exc)}", file=sys.stderr)
         return 2
     shown = [hit for hit in hits if _shown(hit.path, paths)]
     for hit in shown:
@@ -867,6 +1229,12 @@ def main(argv: list[str]) -> int:
         _parser().error("PATH may be given only with --only")
     if args.only and (args.full or args.base or args.finding):
         _parser().error("--only cannot be combined with --full, --base or --finding")
+    if args.static and (args.only or args.full or args.base or args.finding):
+        _parser().error("--static cannot be combined with --only, --full, --base or "
+                        "--finding")
+    if args.pick and (args.only or args.full or args.finding or args.static):
+        _parser().error("--pick cannot be combined with --only, --full, --finding or "
+                        "--static")
     try:
         root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     except CheckError as exc:
@@ -876,6 +1244,13 @@ def main(argv: list[str]) -> int:
         return result.code
     if args.only:
         return only(root, args.only, args.paths)
+    if args.pick:
+        return print_pick(root, args.base or "main")
+    if args.static:
+        # The static steps start no test, so they run in place, with no scope.
+        result = check(root, static=True)
+        print(result.line(), flush=True)
+        return result.code
     unit = scope.inner_unit(os.environ)
     if unit is None:
         # A marker that names no scope this process is in counts for nothing: the outer
@@ -932,6 +1307,8 @@ def _outer(root: Path, args: argparse.Namespace, argv: list[str],
         # The inner printed no summary: the outer's is the last line.
         result = Result(commit=_commit_or_unknown(root), code=outcome.code,
                         memory=outcome.memory, seconds=time.monotonic() - started)
+        with contextlib.suppress(CheckError):
+            _, result.temp_why, result.is_temproot_given = temp_env(env)
         print(result.line(), flush=True)
     return outcome.code
 

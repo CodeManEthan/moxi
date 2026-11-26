@@ -24,7 +24,7 @@ from moxi.units._backend import Backend, RenderError, Schedule, Spec, UnitRef
 from moxi.units._fence import Fence
 from moxi.units._schtasks import BACKEND, NS, SchtasksBackend
 from moxi.units._types import UnitChange
-from moxi_dev.testing import console_script
+from moxi_dev.testing import PROC_WAIT_S, console_script
 
 #: Unit names here are the default home's, which carry no tag (`moxi.units.home_tag`).
 pytestmark = pytest.mark.usefixtures("default_home")
@@ -1601,7 +1601,7 @@ def test_a_real_foreign_task_read_as_a_daemon_tracks_its_process(tmp_path, recor
             wrong.append(f"before any run it read {state.state} ({state.detail})")
         # 2. start runs it; a second start leaves one copy.
         assert other.act("start", unit, fence).ok
-        state, _ = until(lambda s: s.state == "active", 10.0)
+        state, _ = until(lambda s: s.state == "active", PROC_WAIT_S)
         if state.state != "active":
             pytest.skip(needs)
         if state.since is None:
@@ -1615,7 +1615,7 @@ def test_a_real_foreign_task_read_as_a_daemon_tracks_its_process(tmp_path, recor
             subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
                             f"Stop-Process -Id {pid} -Force"], capture_output=True,
                            timeout=60)
-        state, _ = until(lambda s: s.state != "active", 10.0)
+        state, _ = until(lambda s: s.state != "active", PROC_WAIT_S)
         keep("killed_result", code(state))
         if state.state != "failed":
             wrong.append(f"a killed process read {state.state} ({state.detail})")

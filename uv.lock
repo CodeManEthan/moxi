@@ -814,7 +814,7 @@ dev = [
 
 [[package]]
 name = "moxi-comms"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/comms" }
 dependencies = [
     { name = "keyring" },
@@ -847,6 +847,7 @@ dev = [
     { name = "httpx2" },
     { name = "moxi-cache" },
     { name = "moxi-dev" },
+    { name = "moxi-projects" },
     { name = "moxi-ui", extra = ["testing"] },
     { name = "playwright" },
     { name = "pytest" },
@@ -874,6 +875,7 @@ dev = [
     { name = "httpx2", specifier = ">=2.16,<3" },
     { name = "moxi-cache", editable = "packages/cache" },
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-projects", editable = "packages/projects" },
     { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
     { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
@@ -935,7 +937,9 @@ dependencies = [
     { name = "import-linter" },
     { name = "moxi" },
     { name = "moxi-publishing" },
+    { name = "moxi-secrets" },
     { name = "packaging" },
+    { name = "psutil" },
     { name = "pytest" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
@@ -953,7 +957,9 @@ requires-dist = [
     { name = "import-linter" },
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-publishing", editable = "packages/publishing" },
+    { name = "moxi-secrets", editable = "packages/secrets" },
     { name = "packaging" },
+    { name = "psutil", specifier = ">=5.9" },
     { name = "pytest" },
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
@@ -969,6 +975,7 @@ version = "0.1.3"
 source = { editable = "packages/launcher" }
 dependencies = [
     { name = "moxi" },
+    { name = "psutil" },
 ]
 
 [package.optional-dependencies]
@@ -977,6 +984,9 @@ cache = [
 ]
 comms = [
     { name = "moxi-comms" },
+]
+memory = [
+    { name = "moxi-memory" },
 ]
 notes = [
     { name = "moxi-notes" },
@@ -1013,6 +1023,7 @@ requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-cache", marker = "extra == 'cache'", editable = "packages/cache" },
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
+    { name = "moxi-memory", marker = "extra == 'memory'", editable = "packages/memory" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-sessions", marker = "extra == 'sessions'", editable = "packages/sessions" },
@@ -1020,8 +1031,9 @@ requires-dist = [
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "moxi-usage", marker = "extra == 'usage'", editable = "packages/usage" },
+    { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions"]
+provides-extras = ["turns", "comms", "projects", "slots", "ui", "notes", "cache", "usage", "sessions", "memory"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1092,8 +1104,18 @@ dependencies = [
 comms = [
     { name = "moxi-comms" },
 ]
+connector = [
+    { name = "moxi-connector" },
+    { name = "python-stdnum" },
+]
 launcher = [
     { name = "moxi-launcher" },
+]
+notes = [
+    { name = "moxi-notes" },
+]
+secrets = [
+    { name = "moxi-secrets", extra = ["personal-data"] },
 ]
 
 [package.dev-dependencies]
@@ -1106,12 +1128,16 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
+    { name = "moxi-connector", marker = "extra == 'connector'", editable = "packages/connector" },
     { name = "moxi-launcher", marker = "extra == 'launcher'", editable = "packages/launcher" },
+    { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-secrets", editable = "packages/secrets" },
+    { name = "moxi-secrets", extras = ["personal-data"], marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-sessions", editable = "packages/sessions" },
     { name = "moxi-turns", editable = "packages/turns" },
+    { name = "python-stdnum", marker = "extra == 'connector'", specifier = ">=2.2" },
 ]
-provides-extras = ["comms", "launcher"]
+provides-extras = ["comms", "launcher", "notes", "connector", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1131,8 +1157,15 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+connector = [
+    { name = "moxi-connector" },
+    { name = "python-stdnum" },
+]
 projects = [
     { name = "moxi-projects" },
+]
+secrets = [
+    { name = "moxi-secrets", extra = ["personal-data"] },
 ]
 
 [package.dev-dependencies]
@@ -1144,12 +1177,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-connector", marker = "extra == 'connector'", editable = "packages/connector" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
     { name = "moxi-repo", editable = "packages/repo" },
     { name = "moxi-secrets", editable = "packages/secrets" },
+    { name = "moxi-secrets", extras = ["personal-data"], marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-turns", editable = "packages/turns" },
+    { name = "python-stdnum", marker = "extra == 'connector'", specifier = ">=2.2" },
 ]
-provides-extras = ["projects"]
+provides-extras = ["projects", "connector", "secrets"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1270,7 +1306,7 @@ dev = [
 
 [[package]]
 name = "moxi-rounds"
-version = "0.1.0"
+version = "0.1.5"
 source = { editable = "packages/rounds" }
 dependencies = [
     { name = "moxi" },
@@ -1279,32 +1315,44 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+comms = [
+    { name = "moxi-comms" },
+]
 notes = [
     { name = "moxi-notes" },
 ]
 turns = [
     { name = "moxi-turns" },
 ]
+ui = [
+    { name = "moxi-ui" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "moxi-dev" },
+    { name = "moxi-ui", extra = ["testing"] },
+    { name = "playwright" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
+    { name = "moxi-comms", marker = "extra == 'comms'", editable = "packages/comms" },
     { name = "moxi-notes", marker = "extra == 'notes'", editable = "packages/notes" },
     { name = "moxi-projects", editable = "packages/projects" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
+    { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["notes", "turns"]
+provides-extras = ["notes", "turns", "comms", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "moxi-dev", editable = "packages/moxi-dev" },
+    { name = "moxi-ui", extras = ["testing"], editable = "packages/ui" },
+    { name = "playwright", specifier = ">=1.56,<2" },
     { name = "pytest" },
 ]
 
@@ -1361,6 +1409,9 @@ dependencies = [
 projects = [
     { name = "moxi-projects" },
 ]
+slots = [
+    { name = "moxi-slots" },
+]
 ui = [
     { name = "moxi-ui" },
 ]
@@ -1378,10 +1429,11 @@ dev = [
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
     { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-slots", marker = "extra == 'slots'", editable = "packages/slots" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
     { name = "psutil", specifier = ">=5.9" },
 ]
-provides-extras = ["projects", "ui"]
+provides-extras = ["projects", "slots", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1394,15 +1446,22 @@ dev = [
 
 [[package]]
 name = "moxi-sessions"
-version = "0.2.9"
+version = "0.2.10"
 source = { editable = "packages/sessions" }
 dependencies = [
     { name = "moxi" },
 ]
 
 [package.optional-dependencies]
+connector = [
+    { name = "moxi-connector" },
+    { name = "python-stdnum" },
+]
+projects = [
+    { name = "moxi-projects" },
+]
 secrets = [
-    { name = "moxi-secrets" },
+    { name = "moxi-secrets", extra = ["personal-data"] },
 ]
 turns = [
     { name = "moxi-turns" },
@@ -1422,11 +1481,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "moxi", editable = "packages/moxi" },
-    { name = "moxi-secrets", marker = "extra == 'secrets'", editable = "packages/secrets" },
+    { name = "moxi-connector", marker = "extra == 'connector'", editable = "packages/connector" },
+    { name = "moxi-projects", marker = "extra == 'projects'", editable = "packages/projects" },
+    { name = "moxi-secrets", extras = ["personal-data"], marker = "extra == 'secrets'", editable = "packages/secrets" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
+    { name = "python-stdnum", marker = "extra == 'connector'", specifier = ">=2.2" },
 ]
-provides-extras = ["ui", "secrets", "turns"]
+provides-extras = ["ui", "secrets", "turns", "projects", "connector"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1438,7 +1500,7 @@ dev = [
 
 [[package]]
 name = "moxi-slots"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/slots" }
 dependencies = [
     { name = "moxi" },
@@ -1520,7 +1582,7 @@ dev = [
 
 [[package]]
 name = "moxi-turns"
-version = "0.2.4"
+version = "0.2.8"
 source = { editable = "packages/turns" }
 dependencies = [
     { name = "moxi" },
@@ -1564,7 +1626,7 @@ dev = [
 
 [[package]]
 name = "moxi-ui"
-version = "0.2.3"
+version = "0.2.8"
 source = { editable = "packages/ui" }
 dependencies = [
     { name = "h11" },
@@ -1627,6 +1689,7 @@ source = { editable = "packages/usage" }
 dependencies = [
     { name = "moxi" },
     { name = "moxi-sessions" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -1655,6 +1718,7 @@ requires-dist = [
     { name = "moxi-sessions", editable = "packages/sessions" },
     { name = "moxi-turns", marker = "extra == 'turns'", editable = "packages/turns" },
     { name = "moxi-ui", marker = "extra == 'ui'", editable = "packages/ui" },
+    { name = "tzdata", marker = "sys_platform == 'win32'", specifier = ">=2025.2" },
 ]
 provides-extras = ["turns", "projects", "ui"]
 
@@ -2386,6 +2450,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a3/26/b09b8010994eccc3c09092e6b34058f36a460eea2d4c3e8b910c695975a0/typing_inspection-0.4.4.tar.gz", hash = "sha256:547274fa6b0a561ccf549cc9524b999a578e737d015d8709d021f9d0d13bea47", size = 76928, upload-time = "2026-08-12T12:37:25.997Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl", hash = "sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147", size = 14750, upload-time = "2026-08-12T12:37:24.648Z" },
+]
+
+[[package]]
+name = "tzdata"
+version = "2026.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/29/6a1391d31cd00ff9e927215a224a880e1e84e826b64ba80a499e51c074d8/tzdata-2026.6.tar.gz", hash = "sha256:85d2cd9c09f81f0bb29db27759fc83af4f1e620efb814f8c5bf8b4cc4feece6d", size = 201017, upload-time = "2026-10-28T09:57:09.137Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0a/66/9a06c2227fedfd4919f0eaaa8b94377d9730882a7e4f95823c9a331ab5e1/tzdata-2026.6-py2.py3-none-any.whl", hash = "sha256:0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec", size = 348210, upload-time = "2026-10-28T09:57:07.276Z" },
 ]
 
 [[package]]

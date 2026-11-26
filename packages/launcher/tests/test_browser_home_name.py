@@ -1,10 +1,10 @@
 """The session name in Home's Options panel in a browser, through a real shell that starts
-the launcher's real page server: the name the template gives, following the model; a name
-typed over it, a change that reaches the launch; the template's editor rendering each edit
-unsaved, refusing a template the page server would refuse, and saving through the shell's
-own settings route, after which the next read names the saved template; a folder inside a
-project named, and its template kept, as that project's; and the save refused on a shell
-started with the template's key locked.
+the launcher's real page server: the name the shipped template gives, which a model picked
+leaves as it is; a name typed over it, a change that reaches the launch; the template's
+editor rendering each edit unsaved, refusing a template the page server would refuse, and
+saving through the shell's own settings route, after which the next read names the saved
+template; a folder inside a project named, and its template kept, as that project's; and
+the save refused on a shell started with the template's key locked.
 
 The shell's clock is real, so a name holding the date is matched by its pattern. The shell
 runs the fake slots in slots' place and a fake `claude` first on its `PATH`, so a launch
@@ -23,16 +23,16 @@ from playwright.sync_api import expect
 
 import launcher_page_kit as kit
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' picker is checked in a browser on Linux")]
 
 PREVIEW = "/m/launcher/api/preview"
 SAVE = "/m/ui/api/settings/set"
 UNSET = "/m/ui/api/settings/unset"
-#: The shipped template's date, as the browser shell's real clock renders it.
-DATE = r"[A-Z][a-z]{2}-\d{2} \d{2}:\d{2}"
-SHIPPED = "<project>-<model>-<date:mmm-dd hh:mm>"
+#: The shipped template's date and time, as the browser shell's real clock renders them.
+DATE = r"\d{8}-\d{4}"
+SHIPPED = "<date>-<time>-<project>-<agent>"
 TYPE_OVER = "type over it to name this launch yourself."
 LOCKED = "launcher name.template is locked for this run of the shell, so it can't be changed from a page"
 
@@ -157,22 +157,23 @@ def saved(page, found) -> dict:
     return json.loads(sent.value.post_data)
 
 
-def test_the_name_follows_the_model_and_a_typed_name_is_a_change_until_the_template_is_taken(
+def test_the_name_is_the_shipped_templates_and_a_typed_name_is_a_change_until_the_template_is_taken(
         page, shell, work_dir):
     piece = kit.open_home(page)
     panel = name_row(piece)
     name = field(panel)
     expect(name).to_have_value("")
-    expect(name).to_have_attribute("placeholder", re.compile(rf"^{work_dir.name}-{DATE}$"))
+    expect(name).to_have_attribute("placeholder", re.compile(rf"^{DATE}-{work_dir.name}$"))
     expect(note(panel)).to_have_text(
-        f"From the template for every launch. It follows the project, the model and the clock; {TYPE_OVER}")
+        f"From the template for every launch. It follows the clock, the project and the seat; {TYPE_OVER}")
     kit.assert_colour(note(panel), "text-dim")
+    # The shipped template holds no model, so a model picked leaves the name as it is.
     pick_model(page, piece, "opus")
-    expect(name).to_have_attribute("placeholder", re.compile(rf"^{work_dir.name}-opus-{DATE}$"))
+    expect(name).to_have_attribute("placeholder", re.compile(rf"^{DATE}-{work_dir.name}$"))
     # A launch with no name typed leaves it out, and takes the template's.
     body = launch(page, piece, "name this launch from its template")
     assert "name" in body["leave_out"] and "name" not in body["values"], body
-    assert re.fullmatch(rf"{work_dir.name}-opus-{DATE}", kit.newest_launch(shell).values["name"])
+    assert re.fullmatch(rf"{DATE}-{work_dir.name}", kit.newest_launch(shell).values["name"])
     # Typed over, it is a change like any row, and the launch takes it.
     name.fill("orders-skeleton")
     expect(note(panel)).to_have_text("Typed for this launch. Use the template")
@@ -184,7 +185,7 @@ def test_the_name_follows_the_model_and_a_typed_name_is_a_change_until_the_templ
     # `Use the template` lets go of it.
     note(panel).get_by_role("button", name="Use the template").click()
     expect(name).to_have_value("")
-    expect(name).to_have_attribute("placeholder", re.compile(rf"^{work_dir.name}-opus-{DATE}$"))
+    expect(name).to_have_attribute("placeholder", re.compile(rf"^{DATE}-{work_dir.name}$"))
     expect(piece.locator('[data-line="changed"]')).to_have_count(0)
     expect(note(panel)).to_contain_text("From the template for every launch.")
 
@@ -194,19 +195,20 @@ def test_an_edited_template_renders_unsaved_is_refused_then_saved_and_the_next_r
     piece = kit.open_home(page)
     panel = name_row(piece)
     found = editor(panel)
-    expect(found.locator(".tok")).to_have_text(["project", "model", "date"])
+    expect(found.locator(".tok")).to_have_text(["date", "time", "project", "agent"])
     expect(written(found)).to_have_value(SHIPPED)
-    expect(found.get_by_role("button", name=re.compile(r"^Date "))).to_have_text(re.compile(rf"^{DATE}▾$"))
+    expect(found.get_by_role("button", name=re.compile(r"^Date "))).to_have_text(re.compile(r"^\d{8}▾$"))
     # The line names a folder, so there is no project to keep it for.
     expect(found.get_by_role("group", name="Keep for")).to_have_count(0)
     found.get_by_role("button", name="add", exact=True).click()
     expect(found.locator('[data-menu="name-add"] [data-piece]')).to_have_text(
-        ["agent", "identity", "scope", "instance", "time"])
-    found.locator('[data-menu="name-add"] [data-piece="agent"]').click()
-    expect(written(found)).to_have_value(f"{SHIPPED}-<agent>")
+        ["model", "identity", "scope", "instance"])
+    found.locator('[data-menu="name-add"] [data-piece="model"]').click()
+    expect(written(found)).to_have_value(f"{SHIPPED}-<model>")
     # Each edit is rendered unsaved.
     found.get_by_role("button", name="Take out date").click()
-    expect(written(found)).to_have_value("<project>-<model>-<agent>")
+    found.get_by_role("button", name="Take out time").click()
+    expect(written(found)).to_have_value("<project>-<agent>-<model>")
     expect(field(panel)).to_have_attribute("placeholder", work_dir.name)
     # A template the page server would refuse says why, and can't be saved.
     written(found).fill("<project>-<n>")
@@ -290,6 +292,6 @@ def test_on_a_shell_started_with_the_template_locked_the_save_is_refused_in_the_
     # Nothing was written: the name is still the shipped template's.
     found.get_by_role("button", name="Cancel").click()
     expect(panel.locator("[data-editor]")).to_have_count(0)
-    expect(field(panel)).to_have_attribute("placeholder", re.compile(rf"^{place_dir.name}-{DATE}$"))
+    expect(field(panel)).to_have_attribute("placeholder", re.compile(rf"^{DATE}-{place_dir.name}$"))
     written_file = locked_shell.config_file("launcher")
     assert not written_file.exists() or "<project>-locked" not in written_file.read_text()

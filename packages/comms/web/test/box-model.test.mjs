@@ -67,6 +67,16 @@ test("the box checks as it opens, with back and forth and nothing held", async (
   assert.equal(view.quote, null);
 });
 
+test("the dry-run line says the recipient is working while its session's turn is open", async () => {
+  const stub = poster(ok(answer("would-send", "live")));
+  const { box } = boxOf(stub);
+  await box.check();
+  assert.equal(box.view({ when, working: (qualified) => qualified === "reviewer" }).line.text,
+               "Delivered. reviewer is working; it reads this when its turn ends.");
+  assert.equal(box.view({ when, working: () => false }).line.text, "Delivered. reviewer reads it at its next turn boundary.");
+  assert.equal(box.view({ when }).line.text, "Delivered. reviewer reads it at its next turn boundary.");
+});
+
 test("Send takes the accent only with text and a clean check, and the text is capped", async () => {
   const stub = poster(ok(answer("would-send")), ok(answer("cache-unread", null)));
   const { box } = boxOf(stub);

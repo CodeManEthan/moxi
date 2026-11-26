@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+from moxi_dev.testing import PROC_WAIT_S
 import moxi_turns as turns
 from fake_harness import FakeHarness
 import listener_targets
@@ -217,6 +218,13 @@ def test_the_after_tool_usage_and_codex_limits_events_load():
     assert listeners.RESERVED == ("tool",)
 
 
+def test_a_row_naming_load_registers_beside_ready_and_gone():
+    reg = registry(Entry("launcher", [(("ready", "load", "gone"),
+                                       "listener_targets:silent")]))
+    assert reg.broken == () and reg.notices == ()
+    assert [ls.module for ls in reg.naming("load")] == ["launcher"]
+
+
 def test_a_two_item_row_has_no_floor_and_a_third_item_carries_one():
     reg = registry(Entry("comms", [("start", "listener_targets:comms")]),
                    Entry("usage", [("after-tool", "listener_targets:silent",
@@ -257,17 +265,57 @@ def test_a_listener_written_for_the_first_events_reads_the_longer_event():
     ev = event("prompt")
     assert (ev.cwd, ev.text, ev.origin, ev.agent_id, ev.record_path, ev.usage,
             ev.received_at, ev.payload, ev.kind, ev.is_error, ev.point, ev.tool,
-            ev.tool_use_id) == (None,) * 13
+            ev.tool_use_id, ev.own, ev.delivery_by, ev.delivery_senders,
+            ev.opens) == (None,) * 17
     names = [f.name for f in dataclasses.fields(turns.SessionEvent)]
     assert names[:8] == ["event", "harness", "session_id", "env", "source", "turn_id",
                          "outcome", "reason"]
     assert names[8:] == ["cwd", "agent_id", "tool", "tool_use_id", "is_error", "point",
                          "record_path", "text", "origin", "usage", "received_at",
-                         "payload", "kind"]
+                         "payload", "kind", "own", "delivery_by", "delivery_senders",
+                         "opens"]
     full = turns.SessionEvent("after-tool", "claude", "s-1", {}, None, None, None, None,
                               "/w", "a-1", "Bash", "tu-1", is_error=False, point="after", record_path="/r.jsonl")
     assert (full.cwd, full.agent_id, full.point, full.record_path) == (
         "/w", "a-1", "after", "/r.jsonl")
+
+
+def test_a_prompt_rows_wait_ms_lengthens_the_sessions_prompt_bound(caplog):
+    reg = registry(
+        Entry("comms", [("prompt", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:hold_ms"})]),
+        Entry("alpha", [("prompt", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:bad_wait"}),
+                        ("prompt", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:broken_wait"}),
+                        ("start", "listener_targets:silent",
+                         {"wait_ms": "listener_targets:hold_ms"})]))
+    assert [ls.wait_ms for ls in reg.listeners if ls.module == "comms"] == [
+        "listener_targets:hold_ms"]
+    assert not reg.notices
+    assert listeners.prompt_wait_ms(reg, {"HOLD_MS": "9000"}, 2000) == 9000
+    assert listeners.prompt_wait_ms(reg, {"HOLD_MS": "500"}, 2000) == 2000
+    assert listeners.prompt_wait_ms(reg, {}, 2000) == 2000       # None adds nothing
+    assert "bad_wait" in caplog.text and "broken_wait" in caplog.text
+    broken = registry(Entry("comms", [("prompt", "listener_targets:silent",
+                                       {"wait_ms": 9000})]))
+    assert broken.broken and "wait_ms" in broken.broken[0].reason
+
+
+def test_the_endpoint_asks_a_prompt_within_its_prompt_bound(turns_env):
+    from conftest import write_config
+    from moxi_turns.endpoint import Endpoint
+
+    reg = registry(Entry("comms", [("prompt", "listener_targets:slow",
+                                    {"wait_ms": "listener_targets:hold_ms"})]))
+    ep = Endpoint(FakeHarness(), registry=reg, env=dict(os.environ, HOLD_MS="1500"))
+    assert (ep.listen_wait_s, ep.prompt_wait_s) == (2.0, 2.0)
+    ep = Endpoint(FakeHarness(), registry=reg, env=dict(os.environ, HOLD_MS="3000"))
+    assert ep.prompt_wait_s == 3.0
+    write_config(turns_env, "[listen]\nwait_ms = 200\n")
+    ep = Endpoint(FakeHarness(), registry=reg, env=dict(os.environ, HOLD_MS="1500"))
+    assert (ep.listen_wait_s, ep.prompt_wait_s) == (0.2, 1.5)
+    assert ep.prompt("hi", "composer") == "too late"     # slow answers in 1 s
 
 
 # -- after-tool rows and floors ------------------------------------------------------------
@@ -636,7 +684,7 @@ def test_at_the_bound_turns_stops_waiting_and_kills_the_programs_group(tmp_path)
     assert listeners.ask(reg, ev, 0.8) == "comms at start"
     assert time.monotonic() - began < 3
     program, child = map(int, pids.read_text().split())
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + PROC_WAIT_S
     while (_alive(program) or _alive(child)) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not _alive(program) and not _alive(child)
@@ -652,7 +700,7 @@ def test_a_detached_child_outlives_the_bound(tmp_path):
         "time.sleep(30)"))
     reg = registry(order=(f"run:{starter}",))
     assert listeners.ask(reg, event("start", source="startup"), 0.5) is None
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while not done.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert done.read_text() == "ran"
@@ -683,7 +731,7 @@ def test_a_program_that_exits_while_its_child_holds_stdout_is_logged_as_exited(
             return dict(m.removeprefix("start list entry ").split(" adds nothing: ", 1)
                         for m in (r.message for r in caplog.records) if "adds nothing" in m)
 
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + PROC_WAIT_S
         while len(logged()) < 3 and time.monotonic() < deadline:
             time.sleep(0.05)
         assert logged() == {

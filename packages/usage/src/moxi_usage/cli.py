@@ -4,7 +4,7 @@
     moxi usage prices update [--dry-run] [--revert] [--json]
     moxi usage limits [--harness H] [--no-pull] [--json]
     moxi usage context SESSION [--harness H] [--agent ID] [--json]
-    moxi usage restart-point [--measure] [--json]
+    moxi usage restart-point [--measure [--days N]] [--json]
     moxi usage marks [SESSION] [--harness H] [--json]
     moxi usage daily|monthly|sessions|models|projects [--since DATE] [--until DATE]
         [--harness H] [--project P] [--model M] [--utc] [--no-pass] [--json]
@@ -25,14 +25,16 @@ when it is filling, when it reaches 100% at the recent rate, then the age of the
 reading on the line. A window it cannot state says why. It exits 0 whatever the states.
 
 `context SESSION` prints how full the session's context is, or with `--agent` one of its
-agents', with its denominator: `context 412,330 / 1,000,000 (41%)`. It exits 1 when the
-session, the agent or a request with its input tokens cannot be found, and 2 with no
-SESSION.
+agents', with its denominator: `context 412,330 / 1,000,000 (41%)`. Without `--harness`
+it asks every harness and refuses a session more than one holds, naming them. It exits 0
+whenever it names the context's state, an unknown context included, and 2 with no
+SESSION, or a session or agent it cannot find or a session in more than one harness.
 
 `restart-point` prints the measured restart point per model and population and each
 warn-at mark's threshold in tokens, or why a mark is unavailable; it exits 1 when there
 is no measure to read. `--measure` runs the index's pass and the measure first and writes
-it (`moxi_usage.measure`).
+it (`moxi_usage.measure`); `--days N` measures that once over the last N days in place of
+`restart_point.days`, and exits 2 when N is below 1 or given without `--measure`.
 
 `marks SESSION` prints the session's warn-at marks: its context, the notice's and the
 crossing's mark with its threshold and state (armed, or fired and when), and its agents'
@@ -408,13 +410,16 @@ def _context(args: argparse.Namespace, prog: str) -> int:
               "current session", file=sys.stderr)
         return codes.USAGE
     found = context(args.session, harness=args.harness, agent_id=args.agent)
+    if not found.found:
+        print(f"{prog} context: {found.reason}", file=sys.stderr)
+        return codes.USAGE
     if args.json:
         print(json.dumps(found.as_dict(), indent=2))
     else:
         print(found.text())
         if found.known and found.reason:
             print(f"note: {found.reason}")
-    return codes.OK if found.known else codes.ERROR
+    return codes.OK
 
 
 # --- marks ------------------------------------------------------------------------------
@@ -481,6 +486,9 @@ def _restart_parser(verbs: Any) -> None:
                     "again from the token index first.")
     restart.add_argument("--measure", action="store_true",
                          help="run the index's pass and the measure, and write it")
+    restart.add_argument("--days", type=int, metavar="N",
+                         help="with --measure, measure over the last N days, this once "
+                              "(default restart_point.days)")
     restart.add_argument("--json", action="store_true", help="print one JSON object")
 
 
@@ -489,10 +497,17 @@ def _restart_point(args: argparse.Namespace, prog: str) -> int:
 
     from . import measure
 
+    if args.days is not None and not args.measure:
+        print(f"{prog} restart-point: --days sets the window of a measure; give --measure "
+              "too", file=sys.stderr)
+        return codes.USAGE
+    if args.days is not None and args.days < 1:
+        print(f"{prog} restart-point: --days must be 1 or more", file=sys.stderr)
+        return codes.USAGE
     done = None
     if args.measure:
         try:
-            done = measure.run()
+            done = measure.run(days=args.days)
         except moxi.store.StoreTooNew as exc:
             print(f"{prog} restart-point: {exc}", file=sys.stderr)
             return codes.REFUSED
@@ -517,7 +532,8 @@ def _restart_point(args: argparse.Namespace, prog: str) -> int:
 
 def restart_lines(found: Any) -> list[str]:
     """The text of `moxi usage restart-point`: when and over what it was measured, then
-    one line per model and population with S, P, g and each mark."""
+    one line per model and population with S, P, g and each mark, a borrowed row naming
+    its lender."""
     from .thresholds import MARKS
 
     if found.doc is None:
@@ -536,6 +552,9 @@ def restart_lines(found: Any) -> list[str]:
             each = marks[mark]
             cells.append(f"{mark} {each.tokens:,}" if each.available else f"{mark} -")
         said = "" if "fallback" not in row else ", its main row"
+        if row.get("borrowed_from"):
+            said = (f", borrowed from {row['borrowed_from']}"
+                    + ("'s main row" if "fallback" in row else ""))
         w = row.get("w")
         line = (f"  {model:<24} {population:<8} n {row.get('n')}{said}: S {row.get('S'):,.0f}"
                 f", P {row.get('P'):,.0f}, g {row.get('g'):,.0f}, "
@@ -544,10 +563,14 @@ def restart_lines(found: Any) -> list[str]:
         reasons = dict.fromkeys(each.reason for each in marks.values() if not each.available)
         for reason in reasons:
             lines.append(f"  {'':<24} {'':<8} unavailable: {reason}")
+    borrowed = {(model, population): row["borrowed_from"]
+                for model, population, row, _ in found.rows if row.get("borrowed_from")}
     for model, populations in sorted((doc.get("thin") or {}).items()):
         for population, count in sorted(populations.items()):
+            lender = borrowed.get((model, population))
             lines.append(f"  {model:<24} {population:<8} {count} files, under the 20 a "
-                         "row needs")
+                         "row needs"
+                         + (f"; borrows {lender}'s row" if lender else ""))
     for model, why in sorted((doc.get("no_w") or {}).items()):
         lines.append(f"  {model:<24} {'':<8} no row: {why}")
     return lines

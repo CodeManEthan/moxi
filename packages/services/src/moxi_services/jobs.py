@@ -38,6 +38,8 @@ import moxi.exit
 KEEP = 1024
 #: The states a job has; `unknown` is a status read's answer for an id with no record.
 STATES = ("running", "done", "failed", "refused")
+#: How long `close` waits for the jobs queued before it to end.
+CLOSE_WAIT_S = 10.0
 #: The busy hold's name.
 HOLD = "act"
 #: What an act that raised, rather than ending in its outcome, is recorded with.
@@ -119,10 +121,19 @@ class Jobs:
             self._trim()
         return record, True
 
-    def close(self) -> None:
-        """End the thread once the jobs queued before it have run. For tests: a page
-        server's thread lasts its life."""
+    def close(self, *, wait_s: float = CLOSE_WAIT_S) -> None:
+        """End the thread once the jobs queued before it have run, and wait for it to
+        end. For tests, so that no job runs on into the next test: a page server's thread
+        lasts its life. Raises `TimeoutError` when a job still runs after `wait_s`."""
         self._queue.put(_STOP)
+        with self._lock:
+            thread = self._thread
+        if thread is None:
+            return
+        thread.join(wait_s)
+        if thread.is_alive():
+            raise TimeoutError(f"the jobs thread still runs a job {wait_s} s after close; "
+                               "the job a test started never ended")
 
     def _trim(self) -> None:
         ended = [j for j, r in self._jobs.items() if r.state != "running"]
@@ -155,4 +166,4 @@ class Jobs:
                 "lines": (*outcome.said, *outcome.lines), "fix": outcome.fix}
 
 
-__all__ = ["HOLD", "KEEP", "RAISED", "STATES", "Job", "Jobs", "state_of"]
+__all__ = ["CLOSE_WAIT_S", "HOLD", "KEEP", "RAISED", "STATES", "Job", "Jobs", "state_of"]

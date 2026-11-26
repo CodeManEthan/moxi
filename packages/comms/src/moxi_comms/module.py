@@ -4,7 +4,8 @@ Standard library only, and imports nothing of comms: the umbrella reads it to li
 module, dispatch `moxi comms`, offer its extras and check its contract.
 """
 
-INTERFACES = frozenset({2})
+#: Interface 3 is interface 2 plus scoped senders (`api.send_scoped` and its reads).
+INTERFACES = frozenset({2, 3})
 #: The module other code calls: sending, the reads, the names, `api.tokens`.
 API = "moxi_comms.api"
 #: What `moxi comms` runs, in process, as `main(argv, prog="moxi comms")`.
@@ -29,7 +30,10 @@ INTERNAL_ENV = {
     "MOXI_COMMS_NAME": "wrapper stamp: the session's chosen identity name",
     "MOXI_COMMS_SCOPE": "wrapper stamp: the session's identity scope",
     "MOXI_COMMS_GLOBAL": "wrapper stamp: the identity is the global one",
-    "MOXI_COMMS_DIRECTORS": "wrapper stamp: the directors this launch grants",
+    "MOXI_COMMS_DIRECTORS": "wrapper stamp: the session's directors, those its launch "
+                            "declared then the box's policy directors it takes",
+    "MOXI_COMMS_POLICY_DIRECTORS": "wrapper stamp: the session's directors that only the "
+                                   "box's [policy] directors gave",
     "MOXI_COMMS_SOCKET": "wrapper stamp: the daemon socket the session was launched "
                          "against",
     "MOXI_COMMS_CLAIM_SOCKET": "wrapper stamp: the claim socket the session's adapter "

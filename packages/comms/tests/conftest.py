@@ -28,6 +28,7 @@ import io
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -38,6 +39,7 @@ from pathlib import Path
 import pytest
 
 from moxi_comms import cli, config, machine_line, reserved, tokens as tokens_mod
+from moxi_comms import scoped as scoped_mod
 from moxi_comms.adapters.claude_shim import ACTIVITY_METHODS, ClaudeShim
 from moxi_comms.claimfile import HOLDS
 from moxi_comms.claimhold import CLAIM_SOCKET_ENV, ClaimServer
@@ -50,6 +52,7 @@ from moxi_comms.provision import NAMES, provision
 from moxi_comms.scoping import is_auto_name, project_key
 from moxi_comms.sender import MalformedStamp, SenderIdentity, sender_from_env
 from moxi_comms.tokens import TokenStore
+from moxi_dev.testing import PROC_WAIT_S
 
 
 class FakeClock:
@@ -81,20 +84,41 @@ def write_config(env, text: str) -> Path:
     return path
 
 
+#: The mark of a test of the token store's POSIX modes (0600 files in 0700 directories).
+POSIX_MODES = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="file mode bits mean nothing on Windows, where the token store's rule is the "
+           "user's profile, which has tests of its own")
+
+#: Whether a test checks a file's POSIX mode bits. On Windows they mean nothing (`os.chmod`
+#: sets only the read-only flag), so a test that also checks other things skips only its
+#: mode-bit assertion there and runs the rest.
+CHECKS_MODE_BITS = sys.platform != "win32"
+
+
+@pytest.fixture
+def profile(fence) -> Path:
+    """A directory of the test's own inside its profile (the fence's home, `USERPROFILE`
+    on Windows), where a token store passes Windows's rule that credentials stay inside
+    the user's profile. A test whose store is read back makes it here."""
+    return fence.profile_dir("profile")
+
+
 @pytest.fixture(autouse=True)
-def env(monkeypatch, tmp_path, fence):
+def env(monkeypatch, profile, fence):
     """All five roots under tmp. RUNTIME gets a SHORT path (unix socket name limit).
 
     The fence has already emptied the environment, so no variable of the session running
     the suite reaches a test: not its comms sockets or launch stamps, which would let a
     test that pointed at nothing find the real daemon, not its token store or operator
     lane, and not a variable that overrides a config key. `MOXI_COMMS_HOME` collapses the
-    roots under a tmp home of comms' own, beside the fence's HOME, so a test can see that
-    comms wrote nothing there; the device and the runtime directory are set beside it.
+    roots under a tmp home of comms' own, in the test's profile (`profile`), so a test can
+    see that comms wrote nothing there and the token store under it is inside the profile;
+    the device and the runtime directory are set beside it.
     Both temp directories below are in the fence's short directory, which goes with it.
     """
     runtime = Path(tempfile.mkdtemp(prefix="cmx", dir=fence.short))
-    home = tmp_path / "comms-home"
+    home = profile / "comms-home"
     monkeypatch.setenv("MOXI_COMMS_HOME", str(home))
     monkeypatch.setenv("MOXI_COMMS_DEVICE", "testbox")
     monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(runtime))
@@ -151,6 +175,9 @@ def files_under(root_dir: Path) -> dict:
 
 #: The reserve step's own read of the modules installed, before `installs` scopes it.
 _DECLARED_NAMES = reserved.declared_names
+#: comms' own read of the words modules declare for scoped senders, kept before any
+#: test scopes it.
+_SCOPED_LOAD = scoped_mod.load
 
 
 @pytest.fixture(autouse=True)
@@ -184,13 +211,25 @@ def installs(monkeypatch) -> set:
     meet it. A test that installs a module says so by adding its name to the set; a test
     that fakes the core's scan adds the fakes' names. The `whole_workspace` fixture lets
     the reserve step see every module installed. A daemon run in a child process takes
-    the same view from `RESERVED_NONE_PATCH`."""
+    the same view from `RESERVED_NONE_PATCH`. The words modules declare for scoped
+    senders are scoped the same way: memory's `subconscious`, say, is seen only where the
+    test adds memory."""
     seen: set = set()
 
     def scoped(gone=None):
         return {m: n for m, n in _DECLARED_NAMES(gone).items() if m in seen}
 
+    def words(gone=None, **kwargs):
+        found = _SCOPED_LOAD(gone, **kwargs)
+        if kwargs.get("entries") is not None or kwargs.get("found") is not None:
+            return found
+        found.words = {m: w for m, w in found.words.items() if m in seen}
+        found.broken = [b for b in found.broken if b.module in seen]
+        found.kept &= {b.word for b in found.broken}
+        return found
+
     monkeypatch.setattr(reserved, "declared_names", scoped)
+    monkeypatch.setattr(scoped_mod, "load", words)
     return seen
 
 
@@ -199,6 +238,7 @@ def whole_workspace(installs, monkeypatch) -> None:
     """The reserve step sees every module this environment installs, as a real install
     has it."""
     monkeypatch.setattr(reserved, "declared_names", _DECLARED_NAMES)
+    monkeypatch.setattr(scoped_mod, "load", _SCOPED_LOAD)
 
 
 #: The entry-point group turns reads launch additions from.
@@ -236,7 +276,9 @@ ADDITIONS_COMMS_ONLY_PATCH = (
 #: Python a child process runs first, so the reserve step in it sees no module's names,
 #: as `installs` gives a test that adds none.
 RESERVED_NONE_PATCH = ("import moxi_comms.reserved as _rs; "
-                       "_rs.declared_names = lambda gone=None: {}; ")
+                       "_rs.declared_names = lambda gone=None: {}; "
+                       "import moxi_comms.scoped as _sc; "
+                       "_sc.load = lambda gone=None, **k: _sc.Declared(); ")
 
 
 #: Suites that run on both backends. A module here has every one of its rig-using tests
@@ -499,7 +541,7 @@ class Rig:
             bound_here = server.holder.ever_held
             server.stop()
             if bound_here:
-                deadline = time.monotonic() + 5.0
+                deadline = time.monotonic() + PROC_WAIT_S
                 while (sender.qualified in self.daemon.bindings
                        and time.monotonic() < deadline):
                     time.sleep(0.01)
@@ -694,20 +736,13 @@ def write_transcript(session_id: str, age: float | None = 0, *, root: Path | Non
     return path
 
 
-#: How long a wait gives a daemon, shim or wrapper thread to act. The suite runs with
-#: 16 workers, and often beside other 16-worker runs, so a thread can go seconds
-#: without the CPU; a wait returns as soon as its condition holds, so the deadline
-#: costs time only when a test is failing. A wait that expects nothing to happen passes
-#: its own short timeout.
-WAIT = 10.0
-
 #: How long a wait gives something that must happen: a bind after a reconnect, a post,
 #: a frame. The test proves that it happens, not how fast, so the bound is long; it
 #: costs time only when a test is failing.
 LIVE_S = 30.0
 
 
-def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):
+def wait_until(predicate, timeout: float = PROC_WAIT_S, interval: float = 0.01):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = predicate()
@@ -717,12 +752,12 @@ def wait_until(predicate, timeout: float = WAIT, interval: float = 0.01):
     return predicate()
 
 
-def wait_for_queue(shim, count: int, timeout: float = WAIT):
+def wait_for_queue(shim, count: int, timeout: float = PROC_WAIT_S):
     wait_until(lambda: len(shim.queue) >= count, timeout)
     return shim.queue
 
 
-def wait_for_payload(shim, message_id: str, timeout: float = WAIT) -> dict:
+def wait_for_payload(shim, message_id: str, timeout: float = PROC_WAIT_S) -> dict:
     """The payload of `message_id` in the shim's queue, once it is there. Other mail
     (a replay, an earlier send) can reach the queue first, so a count says nothing
     about which payload has arrived."""

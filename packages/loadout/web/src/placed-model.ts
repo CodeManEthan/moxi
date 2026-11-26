@@ -295,10 +295,10 @@ export function verdictLine(problems: readonly Problem[]): string {
 /** Placed as the page draws it. */
 export interface PlacedView {
   verdict: string;
-  /** The verdict is heavy: something needs him. */
+  /** The verdict is heavy: something needs the user. */
   heavy: boolean;
   problems: Problem[];
-  /** The counts line: at the verdict's right with nothing needing him, else the dim line
+  /** The counts line: at the verdict's right with nothing needing the user, else the dim line
    * under the problems. */
   counts: string;
   /** Where `Install all` sits: at the verdict's right when two or more problems' act is

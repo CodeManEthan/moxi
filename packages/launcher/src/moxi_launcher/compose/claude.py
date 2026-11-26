@@ -15,17 +15,18 @@ Without comms (`print` adds `-p` after `claude`):
 
 With comms and an identity, comms' wrapper runs claude, with the claude argv after `--`:
 
-    moxi comms claude --name N [--scope S] [--director D ...] --session-id <U>
-      [--native-name L] -- [<opening prompt>] --append-system-prompt-file <F> ...
+    moxi comms claude --name N [--scope S] [--director D ...] [--no-policy-directors]
+      --session-id <U> [--native-name L] -- [<opening prompt>]
+      --append-system-prompt-file <F> ...
 
 The claude argv then carries neither `-n` (the native name goes to `--native-name`) nor
 turns' launch additions, which the wrapper asks for itself. A headless launch (`print`)
 gives the wrapper its headless flags and carries its opening prompt on `--brief`, not in
 the claude argv, which then holds no `-p` either:
 
-    moxi comms claude --name N [--scope S] [--director D ...] --session-id <U>
-      [--native-name L] --headless [--exit W ...] --brief <opening prompt>
-      -- --append-system-prompt-file <F> ...
+    moxi comms claude --name N [--scope S] [--director D ...] [--no-policy-directors]
+      --session-id <U> [--native-name L] --headless [--exit W ...]
+      --brief <opening prompt> -- --append-system-prompt-file <F> ...
 
 **The display name** (`-n`, or the wrapper's `--native-name`) is the `native_name` row
 when `[defaults]`, a preset or a flag set it, else the launch's own `name`. The launch
@@ -34,6 +35,10 @@ records each row as it was resolved, so a `native_name` nothing set stays unset 
 A resume (`Context.resume`) passes `--resume <U>` where `--session-id` goes and no
 `--session-id` to claude, so the session keeps the id it resumes. With comms the wrapper
 still names that same id with its own `--session-id`, which it takes from `--resume`.
+
+A fork (`Context.fork_of`, the session it forks) passes `--session-id <U>`, the id minted
+for it, then `--resume <parent> --fork-session`: Claude Code starts the new session from a
+copy of the parent's conversation and leaves the parent as it is.
 
 **The bypass warning's skip key.** A slot launch in `bypassPermissions` (the mode its
 argv passes) carries `skipDangerousModePermissionPrompt: true` for that launch only, in a
@@ -68,6 +73,8 @@ ORDER = ("session_id", "resume", "append_system_prompt_file", "agent", "model", 
          "add_dir", "native_name", "remote_control", "permission_mode")
 #: Rows the comms wrapper sets itself: they leave the claude argv.
 WRAPPER_ROWS = frozenset({"session_id", "native_name"})
+#: The flag that makes a resume a fork: a new session from a copy of the conversation.
+FORK_FLAG = "--fork-session"
 
 
 def comms_identity(values: Mapping[str, object], ctx: Context) -> str | None:
@@ -135,6 +142,10 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
 
     owned = {"resume" if ctx.resume else "session_id": ctx.session_id,
              "append_system_prompt_file": prompt_file.path}
+    if ctx.fork_of:
+        if ctx.resume:
+            raise ValueError("a launch is a resume or a fork, not both")
+        owned["resume"] = ctx.fork_of
     shown_as = display_name(values)
     fit = catalog.fit(HARNESS, mode_, {**values, "native_name": shown_as, **owned},
                       ctx.chosen)
@@ -154,6 +165,8 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
             flags += list(additions.argv) if additions is not None else []
         elif name in fit.applied and not (identity and name in WRAPPER_ROWS):
             flags += rows[name].tokens(mode_, fit.applied[name], cwd=cwd)
+            if name == "resume" and ctx.fork_of:
+                flags.append(FORK_FLAG)
     if settings_file is not None:
         flags += [catalog.SETTINGS_FLAG, settings_file.path]
     headless = bool(identity) and mode_ == "print"
@@ -163,8 +176,7 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
         argv = [ctx.moxi, "comms", HARNESS, "--name", identity]
         if scope:
             argv += ["--scope", scope]
-        for director in values.get("director") or ():
-            argv += ["--director", str(director)]
+        argv += common.director_words(values, ctx)
         argv += ["--session-id", ctx.session_id]
         if shown_as:
             argv += ["--native-name", shown_as]
@@ -192,5 +204,6 @@ def compose(values: Mapping[str, object], ctx: Context) -> Composition:
                        warnings=tuple(warnings))
 
 
-__all__ = ["ADDITIONS", "HARNESS", "ORDER", "WRAPPER_ROWS", "comms_identity", "compose",
+__all__ = ["ADDITIONS", "FORK_FLAG", "HARNESS", "ORDER", "WRAPPER_ROWS", "comms_identity",
+           "compose",
            "display_name", "mode"]

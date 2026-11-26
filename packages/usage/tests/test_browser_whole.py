@@ -34,9 +34,9 @@ from playwright.sync_api import expect
 
 from test_browser_questions import (AGENTS, CODEX, PANEL, READINGS, SONNET, THREAD, WEEK, filter_of,
                                     installs, key, limit, on_both, open_page, opened, pick, place_words,
-                                    rows_of, run, section, session_id, settle, write)
+                                    run, section, session_id, settle, write)
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(240),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(240, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="usage's page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
@@ -107,12 +107,12 @@ def check_colours_and_headings(page, what: str) -> None:
     alone, and from the text tokens at least.
 
     It is checked once every read of the page has answered: no part says it is still
-    reading, and all six groups under the filter line are drawn (a closed section is
+    reading, and all seven groups under the filter line are drawn (a closed section is
     absent until its read answers). A read that answers during the sweep draws its part
     again, and each node that takes away changes every colour the sweep compares."""
     panel = page.locator(PANEL)
     expect(panel.locator("[data-part=reading], [data-opened=reading]")).to_have_count(0)
-    expect(panel.locator("[data-part=below] > section")).to_have_count(6)
+    expect(panel.locator("[data-part=below] > section")).to_have_count(7)
     expect(panel.get_by_role("heading")).to_have_count(0)
     seen = panel.evaluate(f"(el) => ({REACHED})()")
     assert seen["tokens"] > len(ALLOWED), seen
@@ -128,7 +128,7 @@ def addresses_of(shell) -> list[tuple[str, str, str]]:
         ("", "", "[data-group=chart] svg[data-part=chart]"),
         ("limit/claude/plan/300", "limit/claude/plan/300", "[data-part=opened] [data-opened=window]"),
         ("limit/codex/codex/300", "limit/codex/codex/300", "[data-part=opened] [data-opened=window]"),
-        ("sessions", "sessions", f'section[data-group=sessions] [data-list=first] moxi-ui-row[data-key="{key(WEEK[0])}"]'),
+        ("sessions", "sessions", f'section[data-group=sessions] table[data-table=sessions] tr[data-row="{key(WEEK[0])}"]'),
         (f"sessions/codex/{THREAD}", f"sessions/codex/{THREAD}",
          f'[data-list=placed] moxi-ui-row[open][data-key="{key(CODEX)}"] [data-part=session]'),
         (f"sessions/claude/{TYPED_ID}/{AGENTS[1]}", f"sessions/claude/{TYPED_ID}/{AGENTS[1]}",
@@ -182,9 +182,12 @@ def open_every_piece(page, shell):
     page.keyboard.press("Escape")
     chart = section(panel, "chart")
     panel.locator("[data-part=measure]").get_by_role("button", name="Tokens").click()
-    chart.get_by_role("button", name="Table").click()
-    expect(chart.locator("table")).to_be_visible()
-    yield "the chart's Table under Tokens"
+    # Each chart has its own Table: the cache reads' and the billable work's.
+    for name in ("Cache reads", "Billable work"):
+        chart.locator(f'[data-chart="{name}"]').get_by_role("button", name="Table").click()
+    expect(chart.locator("table")).to_have_count(2)
+    expect(chart.locator("table").last).to_be_visible()
+    yield "the chart's Tables under Tokens"
     panel.locator("[data-part=measure]").get_by_role("button", name="Cost").click()
     for which in ("claude/plan/300", "codex/codex/300"):
         panel = open_page(page, f"limit/{which}")
@@ -192,13 +195,9 @@ def open_every_piece(page, shell):
         yield f"the limit {which}"
     panel = open_page(page, "sessions")
     sessions = section(panel, "sessions")
-    expect(rows_of(sessions)).to_have_count(10)
-    sessions.locator("[data-more=first]").get_by_role("button", name="Show").click()
-    sessions.locator("[data-more=earlier]").get_by_role("button", name="Show").click()
-    expect(rows_of(sessions, "earlier")).to_have_count(2)
-    sessions.get_by_role("button", name="Table").last.click()
-    expect(sessions.locator("table[data-part=table]")).to_be_visible()
-    yield "Sessions shown whole with its Table"
+    # Every session of the 30 days: the week's, the Codex thread and the two before them.
+    expect(sessions.locator("table[data-table=sessions] tbody tr[data-row]")).to_have_count(16)
+    yield "Sessions with its table"
     panel = open_page(page, f"sessions/claude/{TYPED_ID}")
     body = panel.locator("[data-part=session]")
     acts = body.locator("[data-part=session-acts]")
@@ -252,8 +251,8 @@ def test_the_filters_are_kept_across_a_trip_to_sessions_and_back(installs, on_bo
         settle(panel, "model", SONNET)
         panel.locator("[data-part=measure]").get_by_role("button", name="Tokens").click()
         sessions = section(panel, "sessions")
-        row = sessions.locator(f'moxi-ui-row[data-key="{key(WEEK[0])}"]')
-        row.get_by_role("link", name="Open").click()
+        sessions.locator(f'tr[data-row="{key(WEEK[0])}"]').get_by_role("link").click()
+        row = sessions.locator(f'[data-list=placed] moxi-ui-row[data-key="{key(WEEK[0])}"]')
         body = row.locator("[data-part=session]")
         body.get_by_role("link", name="Open in Sessions").click()
         expect(page).to_have_url(re.compile(rf"/m/sessions/claude/{TYPED_ID}$"))
@@ -280,6 +279,9 @@ def test_the_filters_are_kept_across_a_trip_to_sessions_and_back(installs, on_bo
 def test_a_range_with_nothing_under_the_filters_says_so_in_the_charts_place(installs, ui_contexts):
     page = ui_contexts(installs["full"]).pages[0]
     panel = settled_page(page)
+    used = section(panel, "heat").locator("svg[data-part=heat] rect[data-used=true]")
+    expect(used.first).to_be_attached()
+    every = used.count()
     pick(panel, "harness", "Codex")
     expect(filter_of(panel, "harness").locator("button.pick")).to_have_text("Codex▾")
     pick(panel, "range", "Today")
@@ -287,7 +289,12 @@ def test_a_range_with_nothing_under_the_filters_says_so_in_the_charts_place(inst
     # The thread is three days old: nothing of Codex today.
     expect(chart.locator("[data-part=none]")).to_have_text("Nothing was used in this range.")
     expect(chart.locator("svg[data-part=chart]")).to_have_count(0)
-    expect(panel.locator("[data-part=below] section[data-group]")).to_have_count(1)
+    # No section is drawn; the heat map, which follows neither the range nor the
+    # harness, still holds every used day.
+    groups = panel.locator("[data-part=below] section[data-group]")
+    expect(groups).to_have_count(2)
+    assert groups.evaluate_all("nodes => nodes.map((node) => node.dataset.group)") == ["chart", "heat"]
+    expect(used).to_have_count(every)
     expect(panel.locator("[data-group=cost] [data-cost]")).to_have_count(3)
     expect(filter_of(panel, "harness").locator("button.pick")).to_have_text("Codex▾")
     expect(panel.locator("[data-part=foot]")).to_be_visible()
@@ -304,7 +311,7 @@ def test_without_projects_dirs_and_the_dir_menu_fit_a_phone(installs, ui_context
     expect(dirs_section.locator("table[data-part=table]")).to_be_visible()
     ui_width_check(page)
     filter_of(panel, "place").locator("button.pick").click()
-    expect(filter_of(panel, "place").get_by_role("menuitemradio", name="~/work/scratch")).to_be_visible()
+    expect(filter_of(panel, "place").get_by_role("menuitemcheckbox", name="~/work/scratch")).to_be_visible()
     ui_width_check(page)
 
 

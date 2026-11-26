@@ -13,8 +13,9 @@ the lower row id.
 **What is searched.** Tier 1 (`rows`: main-session messages and tool calls) always; tier 2
 (`tails`: the end of each tool result) only with `results`; subagent rows only with
 `subagents` (they exist only when config `index.include_subagents` is on). A session whose launch
-kind is `scratch` is left out of every tier unless `scratch` is asked. The kind is read
-from the session table, attached read-only beside the index, so a kind learned after the
+kind is `scratch` is left out of every tier unless `scratch` is asked, and one whose kind
+is `fork` (a launch that copied another session's transcript) unless `forks` is asked.
+The kind is read from the session table, attached read-only beside the index, so a kind learned after the
 rows were written applies at the next search with no rewrite of the index.
 
 **What a search can see that leaves its answer incomplete**, and returns beside the hits:
@@ -39,6 +40,7 @@ from datetime import datetime
 
 from . import index
 from .index import IndexMissing, IndexUnreadable, StateUnreadable
+from .table import FORK, SCRATCH
 
 #: The most tokens a query keeps; the rest are dropped.
 MAX_TOKENS = 64
@@ -177,7 +179,7 @@ class _Filters:
     """The WHERE clauses and parameters shared by the hit query and the count."""
 
     def __init__(self, alias: str, *, project, since, harness, subagents, scratch,
-                 with_state: bool, has_agent: bool):
+                 with_state: bool, has_agent: bool, forks: bool = False):
         self.alias = alias
         self.clauses: list[str] = []
         self.params: list[object] = []
@@ -192,15 +194,20 @@ class _Filters:
             self.params.append(since)
         if has_agent and not subagents:
             self.clauses.append(f"{alias}.agent_id IS NULL")
-        self.scratch_out = with_state and not scratch
+        #: The launch kinds whose sessions this search leaves out.
+        self.kinds_out: tuple[str, ...] = () if not with_state else tuple(
+            kind for kind, asked in ((SCRATCH, scratch), (FORK, forks)) if not asked)
 
-    def where(self, *, scratch: bool = True) -> str:
+    def _kinds(self) -> str:
+        return ", ".join(f"'{kind}'" for kind in self.kinds_out)
+
+    def where(self, *, kinds: bool = True) -> str:
         clauses = list(self.clauses)
-        if scratch and self.scratch_out:
+        if kinds and self.kinds_out:
             clauses.append(
                 f"NOT EXISTS (SELECT 1 FROM {STATE}.sessions AS s WHERE "
                 f"s.harness = {self.alias}.harness AND s.session_id = {self.alias}.session_id "
-                f"AND s.kind = 'scratch')")
+                f"AND s.kind IN ({self._kinds()}))")
         return " AND ".join(clauses) if clauses else "1"
 
 
@@ -233,15 +240,16 @@ def _hits(conn, table: str, expr: str, filters: _Filters, limit: int) -> list[Hi
 
 def _count(conn, table: str, filters: _Filters) -> int:
     """The rows `filters` let through in `table`: those its plain clauses admit, less
-    those of scratch-kind sessions, counted from the session table's few scratch rows
-    so the count never looks a kind up row by row."""
+    those of the sessions whose kind it leaves out (scratch, fork), counted from the
+    session table's few rows of those kinds so the count never looks a kind up row by
+    row."""
     total = conn.execute(f"SELECT count(*) FROM {table} AS r WHERE "
-                         f"{filters.where(scratch=False)}", filters.params).fetchone()[0]
-    if filters.scratch_out:
+                         f"{filters.where(kinds=False)}", filters.params).fetchone()[0]
+    if filters.kinds_out:
         total -= conn.execute(
             f"SELECT count(*) FROM {STATE}.sessions AS s JOIN {table} AS r "
             f"ON r.harness = s.harness AND r.session_id = s.session_id "
-            f"WHERE s.kind = 'scratch' AND {filters.where(scratch=False)}",
+            f"WHERE s.kind IN ({filters._kinds()}) AND {filters.where(kinds=False)}",
             filters.params).fetchone()[0]
     return int(total)
 
@@ -273,13 +281,14 @@ def rebuilding(env: Mapping[str, str] | None = None) -> float | None:
 def search(query: str, *, project: str | None = None,
            since: float | int | datetime | None = None, harness: str | None = None,
            results: bool = False, subagents: bool = False, scratch: bool = False,
-           limit: int = 10, env: Mapping[str, str] | None = None) -> Result:
+           forks: bool = False, limit: int = 10, env: Mapping[str, str] | None = None) -> Result:
     """Search the index for `query` and return the best `limit` hits.
 
     `project` keeps hits of that project label, `since` those at or after that time
     (seconds since the epoch, or a datetime), `harness` those of that harness
     (`claude`, `codex` or `opencode`). `results` searches tier 2, the ends of tool
-    results, too; `subagents` subagent rows too; `scratch` scratch-kind sessions too.
+    results, too; `subagents` subagent rows too; `scratch` scratch-kind sessions too;
+    `forks` fork-kind sessions too.
 
     Raises `IndexMissing` when there is no index, `IndexUnreadable` when there is one
     that can't be read, and `StateUnreadable` (an `IndexUnreadable`) when the index reads
@@ -307,7 +316,7 @@ def search(query: str, *, project: str | None = None,
             for table in tables:
                 filters = _Filters("r", project=project, since=since_at, harness=harness,
                                    subagents=subagents, scratch=scratch,
-                                   with_state=with_state, has_agent=table == "rows")
+                                   forks=forks, with_state=with_state, has_agent=table == "rows")
                 if tokens:
                     found += _hits(conn, table, match(tokens), filters, limit)
                 rows += _count(conn, table, filters)

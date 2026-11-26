@@ -14,7 +14,7 @@ computed by the same functions:
 
 - `rounds(project=None, status="open")`: the rounds of every project, or of one, as
   `moxi rounds list [PROJECT] [--closed] --json` gives them.
-- `round(name)`: one round's whole state, as `moxi rounds show ROUND --json` gives it.
+- `round_data(name)`: one round's whole state, as `moxi rounds show ROUND --json` gives it.
 - `waiting()`: what waits on the operator across every project, as `moxi rounds list
   --waiting --json` gives it.
 - `questions(name, view=None)`: the questions of one round or one project written
@@ -52,8 +52,10 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
     ones, with `"closed"` the ones that have ended.
 
     Gives `{"computed", "project", "ended", "rounds", "unreadable", "no_folder"}`.
-    Each of `rounds` is `{"name", "project", "folder", "status", "flow", "step",
-    "counts", "standing", "ended"}`, where `step` is the step the round is at as
+    Each of `rounds` is `{"name", "project", "folder", "status", "flow", "lead",
+    "step", "counts", "standing", "ended"}`, where `lead` is the round's lead as
+    `{"name", "from"}`, `from` being `"round"` for the round's own and `"project"` for
+    its project's, or None with neither, and `step` is the step the round is at as
     `{"step", "stage", "state"}`, or None for a round at no step. A round whose log
     can't be read is `{"name", "project", "folder", "unreadable": {"reason", "fix"}}`;
     such a round is in both listings, since nothing says which it belongs in. `unreadable` names each project whose own log can't be
@@ -71,13 +73,14 @@ def rounds(project: str | None = None, status: str = _OPEN) -> dict:
 
 def round_data(name: str) -> dict:
     """The round `name`, `<project>/<slug>`: its head (`name`, `project`, `slug`,
-    `folder`, `notice`, `status`, `ended`, `description`, `parent`, `flow`, `steps`,
-    `step`, `close`, `skips`, `stages`, `versions`, `standing`, `trace`, `threads`,
-    `register_unreadable`) and its records (`builds`, `waits`, `decisions`,
+    `folder`, `notice`, `status`, `ended`, `description`, `lead`, `parent`,
+    `inherits`, `flow`, `steps`, `step`, `close`, `skips`, `stages`, `versions`,
+    `standing`, `trace`, `threads`, `register_unreadable`) and its records (`builds`, `waits`, `decisions`,
     `questions`, `rulings`, `verdicts`, `history`). `close` is None for a round that has ended;
     for an open one it is `{"waits"}`, what its close waits for, a line each. The
     record `waits` holds the round's waiting items, open and done, and `decisions`
-    its decisions, open and ruled.
+    its decisions, open and ruled. `lead` is the round's lead as `rounds()` gives
+    it: `{"name", "from"}`, or None.
 
     A round whose log can't be read is `{"name", "project", "slug", "folder",
     "notice", "unreadable": {"file", "line", "problem", "reason", "fix"}}` and nothing
@@ -98,7 +101,7 @@ def waiting() -> dict:
     gives it; `waits` each open waiting item of an open round, with its round;
     `decisions` each major decision of an open round not yet ruled, as its entry;
     `not_shown` holds, for each project that has any, its rulings not yet shown to
-    him; `builds` each open build to look at. `unreadable` names each log that can't
+    the operator; `builds` each open build to look at. `unreadable` names each log that can't
     be read, whose rows are not here."""
     return listing.waiting(refresh=False).data()
 
@@ -107,7 +110,9 @@ def questions(name: str, view: str | None = None) -> dict:
     """The questions of the round or the project `name`, written out: `{"of",
     "project", "round", "view", "computed", "entries", "ratify", "covers", "later",
     "ended", "left", "unreadable", "read_back"}`, the open entries first, the parked
-    ones after, then a round's decisions to ratify. For a round that
+    ones after, then a round's decisions to ratify. A question's entry carries
+    `prepared`, the newest answer prepared for it with whether it is `current`, when
+    one was. For a round that
     has ended, `ended` says how and `left` holds its questions whose records still
     read as open or parked: they wait for a new round and are no entries. `view` is for a round, and is
     `"docket"`, `"ratify"` (the decisions not yet ruled of its finished builds, which
@@ -141,8 +146,10 @@ def builds(repo: str | None = None) -> dict:
     is true for a `building` build whose head is older than its round's `idle_days`.
     `drop_by` says who may drop it: `lead` for one with no work a drop could lose, else
     `operator`, as for one that can't be read.
-    `shares` holds `{"round", "stage"}` for each open build of the same repo and
-    target that shares commits with it. A build that can't be read has its
+    `shares` holds `{"round", "stage", "relation"}` for each open build of the same
+    repo and target that shares commits with it, `relation` being this build's to it:
+    `inside` (its range is a strict part of the other's), `contains` (the other's is a
+    strict part of its own) or `overlaps` (neither, equal ranges among them). A build that can't be read has its
     `{"reason", "fix"}` in `problem`, and None for each field of its state.
     `unreadable` names each round whose log can't be read, whose builds are not here,
     and `no_folder` each project whose rounds folder can't be worked out.

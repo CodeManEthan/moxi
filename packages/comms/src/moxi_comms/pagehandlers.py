@@ -3,8 +3,9 @@
 The roster and its stream answer from one `api.roster_rows(with_roster=True)`, the rows
 `moxi comms agents --json` prints and the `Roster` they were joined from, so a gather asks
 the daemon for `agents` once; such a handler cuts each row to the route's declared keys,
-adds every name in the roster's `waiting`, and on the read adds the server's `now` and
-local date. The mail read, Home's Comms row, answers from one `api.roster()`: the names
+adds to each live row the harness its adapter kind is a session of (from comms' kinds,
+read once per process), adds every name in the roster's `waiting`, and on the read adds
+the server's `now` and local date. The mail read, Home's Comms row, answers from one `api.roster()`: the names
 in its `waiting` that no live session holds. Each turns a failure into a `state`:
 
 - `DaemonOffline` is `offline` with no detail, since its text names the daemon's socket;
@@ -31,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import functools
 import logging
 import math
 import threading
@@ -39,7 +41,7 @@ from typing import Any
 
 from moxi import modules
 
-from . import api
+from . import api, kinds
 from .page import MAIL, ROSTER, ROW
 
 _ui = modules.load("ui", interface=3)
@@ -106,9 +108,25 @@ def _fits(value: Any, shape: Any) -> bool:
     return False
 
 
+@functools.cache
+def _kinds() -> kinds.Registry:
+    """The kinds this comms accepts, read once per process."""
+    return kinds.load()
+
+
+def _harness(row: api.RosterRow) -> str | None:
+    """The harness a live row's adapter kind is a session of; None for a standing row, a
+    person kind and a kind this comms doesn't accept."""
+    if not row.live or not isinstance(row.adapter, str):
+        return None
+    kind = _kinds().get(row.adapter)
+    return kind.harness if kind is not None else None
+
+
 def _row(row: api.RosterRow) -> dict:
     out = {key: getattr(row, key, None) for key in KEYS}
-    for key in ("directors", "awaiting"):
+    out["harness"] = _harness(row)
+    for key in ("directors", "policy_directors", "awaiting"):
         out[key] = list(out[key] or ())
     if out["cache"] is not None:
         out["cache"] = {key: getattr(out["cache"], key, None)

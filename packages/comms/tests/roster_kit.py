@@ -20,6 +20,7 @@ from typing import Any
 from moxi import paths as moxi_paths
 
 from moxi_comms.paths import daemon_socket
+from moxi_dev.testing import PROC_WAIT_S
 
 ROSTER = "/m/comms/api/roster"
 EVENTS = "/m/comms/api/events?topics=roster"
@@ -46,7 +47,7 @@ def point_at(shell: Any, monkeypatch: Any) -> None:
         assert daemon_socket() == runtime / "daemon.sock", daemon_socket()
 
 
-def server_gone(shell: Any, timeout: float = 10.0) -> None:
+def server_gone(shell: Any, timeout: float = PROC_WAIT_S) -> None:
     """Wait until the shell runs no comms page server: the next request starts one, whose
     poller gathers at once. A test that sets its daemon up first and then waits here sees
     its own roster at once, not after the running server's next period."""
@@ -68,7 +69,8 @@ def session(shell: Any) -> Any:
     return found
 
 
-def published(shell: Any, check: Callable[[dict], bool], *, timeout: float = 15.0) -> dict:
+def published(shell: Any, check: Callable[[dict], bool], *,
+              timeout: float = PROC_WAIT_S) -> dict:
     """Wait until comms' topic, as the shell's push channel hands it on, has a value that
     passes `check`, and return it. The shell keeps a topic's last value for the next
     subscriber, so after this a browser that subscribes gets no older value first."""

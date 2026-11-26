@@ -24,7 +24,8 @@ import pytest
 from conftest import wait_until
 
 from moxi import modules
-from moxi_comms import api, page, pagehandlers
+from moxi_comms import api, kinds, page, pagehandlers
+from moxi_dev.testing import PROC_WAIT_S
 
 from test_reply_enforcement import PLANNER, REVIEWER, P, R
 
@@ -51,9 +52,16 @@ def fresh_handlers(monkeypatch):
     monkeypatch.setattr(pagehandlers, "_current", None)
 
 
+#: The harness each of comms' own adapter kinds is a session of.
+HARNESS_OF = {"claude-shim": "claude", "codex": "codex", "opencode": "opencode"}
+
+
 def row(r: api.RosterRow) -> dict:
-    return json.loads(json.dumps({key: value for key, value in dataclasses.asdict(r).items()
-                                  if key in pagehandlers.KEYS}))
+    """`r` as the page sends it: its declared keys, with the harness of a live row's kind."""
+    out = {key: value for key, value in dataclasses.asdict(r).items()
+           if key in pagehandlers.KEYS}
+    out["harness"] = HARNESS_OF.get(r.adapter) if r.live else None
+    return json.loads(json.dumps(out))
 
 
 def up(rows, waiting=()) -> dict:
@@ -212,7 +220,10 @@ def test_no_route_but_the_mail_is_the_gateways():
 
 
 def test_a_row_is_the_reads_fields_and_no_shape_carries_a_path_or_a_token():
-    assert list(page.ROW.items) == list(api.RosterRow.__dataclass_fields__)
+    # Every field of `api.RosterRow`, and `harness`, which the page server adds.
+    assert "harness" not in api.RosterRow.__dataclass_fields__
+    assert [key for key in page.ROW.items if key != "harness"] == list(
+        api.RosterRow.__dataclass_fields__)
     keys = set(page.ROW.items) | set(page.ROSTER)
     assert not keys & {"cache_source", "cache_kind", "path", "socket", "token", "pid"}
 
@@ -415,6 +426,40 @@ def test_mail_waiting_adds_no_row_to_the_roster(rig):
     assert [w["qualified"] for w in body["waiting"]] == ["curator@proj-a"]
 
 
+class _Declared:
+    """An entry point of the kinds group, declaring `table` as `name`."""
+
+    def __init__(self, name, table):
+        self.name, self._table = name, table
+
+    def load(self):
+        return self._table
+
+
+def test_a_live_rows_harness_is_its_kinds(monkeypatch):
+    """`harness` is the harness comms' kinds give a live row's adapter kind, comms' own or
+    one a module declares; null for a person kind, a kind comms doesn't accept and a
+    standing row."""
+    declared = kinds.load([_Declared("my-codex", {"cache": "harness", "harness": "codex",
+                                                  "evidence": "some_package.kinds:read"})])
+    monkeypatch.setattr(pagehandlers, "_kinds", lambda: declared)
+
+    def live(name, adapter):
+        return api.RosterRow(qualified=name, name=name, scope="global", live=True, kind=None,
+                             module=None, tier="chosen", adapter=adapter)
+
+    standing = api.RosterRow(qualified="idle", name="idle", scope="global", live=False,
+                             kind="agent", module=None, tier=None, adapter=None)
+    stub_rows(monkeypatch, (live("shim", "claude-shim"), live("cx", "codex"),
+                            live("oc", "opencode"), live("mine", "my-codex"),
+                            live("app", "connector"), live("odd", "nobody-knows"), standing))
+    status, body = run(get(served(), "/api/roster"))
+    assert (status, body["state"]) == (200, "up")
+    assert {r["qualified"]: r["harness"] for r in body["rows"]} == {
+        "shim": "claude", "cx": "codex", "oc": "opencode", "mine": "codex", "app": None,
+        "odd": None, "idle": None}
+
+
 LEAD_ROW = api.RosterRow(qualified="lead", name="lead", scope="global", live=True,
                          kind=None, module=None, tier="chosen", adapter="claude-shim")
 
@@ -432,12 +477,26 @@ def test_a_send_only_rows_holder_reaches_the_page(monkeypatch):
                                                                    "lead": None}
 
 
+def test_comms_words_for_the_connectors_binding_reach_the_page(monkeypatch):
+    """`via` is the row's, as `roster_rows` gave it: the connector's words on its
+    binding, null on every other row."""
+    app = api.RosterRow(qualified="claude-app", name="claude-app", scope="global",
+                        live=True, kind="agent", module=None, tier="chosen",
+                        adapter="connector", via="Claude's apps, through the connector")
+    stub_rows(monkeypatch, (app, LEAD_ROW))
+    status, body = run(get(served(), "/api/roster"))
+    assert (status, body["state"]) == (200, "up")
+    assert {r["qualified"]: r["via"] for r in body["rows"]} == {
+        "claude-app": "Claude's apps, through the connector", "lead": None}
+
+
 @pytest.mark.parametrize("bad", [{"directors": (1,)}, {"directors": ({},)},
                                  {"awaiting": (7,)}, {"tier": 3},
                                  {"bound_at": float("inf")}, {"bound_at": 10 ** 400},
-                                 {"live": "yes"}, {"name": None}],
+                                 {"live": "yes"}, {"name": None}, {"via": 4}],
                          ids=["int-director", "object-director", "int-awaiting", "int-tier",
-                              "infinite", "overflowing", "string-live", "no-name"])
+                              "infinite", "overflowing", "string-live", "no-name",
+                              "int-via"])
 def test_a_value_its_declared_type_cannot_carry_is_state_error(monkeypatch, bad):
     """A row built from a hand-edited claim file, with one value of the wrong type, ends
     the read in `state` `error`, never a 500."""
@@ -546,7 +605,7 @@ def test_the_first_event_is_current_and_a_new_binding_comes_within_12_s(rig):
     async def go():
         stream = Stream(served())
         try:
-            name, data = await stream.next(3)
+            name, data = await stream.next(PROC_WAIT_S)
             assert stream.status == 200
             assert (name, data) == ("roster", up(api.roster_rows()))
             rig.shim(**PLANNER)
@@ -569,7 +628,7 @@ def test_two_gathers_with_no_change_publish_once(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("roster", up(rows))
+            assert await stream.next(PROC_WAIT_S) == ("roster", up(rows))
             assert await stream.none_within(0.6)
         finally:
             await stream.close()
@@ -599,7 +658,7 @@ def test_two_gathers_a_second_apart_publish_a_warm_cache_once(monkeypatch):
     async def go():
         stream = Stream(served())
         try:
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["rows"][0]["cache"] == {"kind": "warm",
                                                 "until": float(round(turned_at + 300.0))}
             assert await stream.none_within(2.5)
@@ -627,10 +686,10 @@ def test_the_topic_goes_offline_with_the_daemon_and_up_when_it_answers(rig, monk
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("roster", {"state": "offline", "detail": None,
-                                                       "rows": [], "waiting": []})
+            assert await stream.next(PROC_WAIT_S) == ("roster", {
+                "state": "offline", "detail": None, "rows": [], "waiting": []})
             offline[0] = False
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["state"] == "up" and data["rows"][0]["qualified"] == R
         finally:
             await stream.close()
@@ -653,16 +712,16 @@ def test_the_topic_publishes_the_error_and_then_up_once_the_read_recovers(monkey
         app = served()
         stream = Stream(app)
         try:
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data == {"state": "error", "rows": [], "waiting": [],
                             "detail": pagehandlers.DAEMON_ERROR.format("DaemonError")}
             raising.pop(0)
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data["detail"] == pagehandlers.UNEXPECTED.format("RuntimeError")
             status, body = await get(app, "/api/roster")
             assert status == 200 and body["state"] == "error"
             raising.pop(0)
-            _, data = await stream.next(3)
+            _, data = await stream.next(PROC_WAIT_S)
             assert data == {"state": "up", "detail": None, "rows": [], "waiting": []}
         finally:
             await stream.close()
@@ -685,8 +744,8 @@ def test_the_poller_outlives_a_gather_that_raises(monkeypatch, caplog):
     async def go():
         stream = Stream(served())
         try:
-            assert await stream.next(3) == ("roster", {"state": "up", "detail": None,
-                                                       "rows": []})
+            assert await stream.next(PROC_WAIT_S) == ("roster", {
+                "state": "up", "detail": None, "rows": []})
         finally:
             await stream.close()
 
@@ -702,7 +761,7 @@ def test_the_poller_starts_with_the_first_stream_and_keeps_running_after_it(monk
     async def go():
         assert pagehandlers._current is None
         stream = Stream(served())
-        await stream.next(3)
+        await stream.next(PROC_WAIT_S)
         feed = pagehandlers._current
         await stream.close()
         await asyncio.sleep(0.3)

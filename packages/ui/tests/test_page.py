@@ -10,6 +10,7 @@ import time
 import psutil
 import pytest
 from moxi.paths import python
+from moxi_dev.testing import PROC_WAIT_S
 
 from moxi_ui import doctor, health, page
 
@@ -56,7 +57,7 @@ def test_a_doctor_run_past_its_time_is_killed_with_what_it_started(tmp_path):
         asyncio.run(run())
     assert time.monotonic() - started < 5
     below = int((tmp_path / "below").read_text())
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + PROC_WAIT_S
     while time.monotonic() < deadline:
         try:
             if psutil.Process(below).status() == psutil.STATUS_ZOMBIE:

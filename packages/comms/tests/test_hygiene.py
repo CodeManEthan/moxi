@@ -7,7 +7,7 @@ import tokenize
 from collections import Counter
 from pathlib import Path
 
-from conftest import wait_for_queue
+from conftest import wait_for_queue, wait_until
 
 from moxi_comms.context import CONTEXT_BLOCK
 
@@ -20,10 +20,14 @@ def test_logs_carry_ids_never_bodies_or_urls(rig, caplog):
                       scope="proj-a")
     assert code == 0
     wait_for_queue(reviewer, 1)
+    message_id = reviewer.queue[0]["message_id"]
+    # The daemon logs a delivery on its own thread after it hands the message to the shim,
+    # so the shim can hold it before that line is written.
+    wait_until(lambda: any(message_id in r.getMessage() for r in list(caplog.records)))
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert secret_body not in text, "comms logs never carry message bodies"
     assert "discord.invalid" not in text and "/api/webhooks/" not in text
-    assert reviewer.queue[0]["message_id"] in text, "...but ids are logged"
+    assert message_id in text, "...but ids are logged"
 
 
 def test_context_block_stays_short_and_discord_free():
@@ -77,7 +81,8 @@ def test_the_verbs_that_act_stay_four():
     `claude` is the WRAPPER: it starts a Claude Code session with a comms identity and
     forks the session's adapter, which binds the name as any session binds it. The verb
     itself posts nothing and reaches no credential, so the acting four are still four.
-    `codex` is the same wrapper for a Codex session, through turns' Codex host.
+    `codex` is the same wrapper for a Codex session, through turns' Codex host, and
+    `opencode` for an OpenCode session, through its own server.
 
     `migrate` is the STORE verb: it moves comms 0.2's files into comms.db through the
     store's one opener, as the daemon's start does, or with `--dry-run` says what that
@@ -94,12 +99,13 @@ def test_the_verbs_that_act_stay_four():
            == "verb"][0]
     assert set(sub.choices) == {"send", "reply", "agents", "history", "help", "whois",
                                 "explain", "cache", "doctor", "owner", "whoami",
-                                "claude", "codex", "migrate", "remove", "reserved",
+                                "claude", "codex", "opencode", "migrate", "remove",
+                                "reserved",
                                 "send-only", "exit-session"}
     acting = {"send", "reply", "agents", "history"}
     reading = {"help", "whois", "explain", "cache", "doctor", "owner"}
     claim = {"whoami", "exit-session"}
-    wrapper = {"claude", "codex"}
+    wrapper = {"claude", "codex", "opencode"}
     store_verb = {"migrate", "reserved", "send-only"}
     # `remove` acts only on the sender's own message, taking back what it sent.
     withdraw = {"remove"}
@@ -117,20 +123,21 @@ def test_the_verbs_that_act_stay_four():
                                                                     cli.cmd_owner}
 
 
-def test_the_built_in_adapter_kinds_stay_three():
+def test_the_built_in_adapter_kinds_stay_five():
     """The compiled-in enum against a literal, in the shape `test_the_verbs_that_act_stay
     _four` uses: a closed set stays closed by being written down twice, in two places that
     have to be changed together.
 
-    comms' own register kinds are `claude-shim | codex | opencode`; any other kind comes
-    from a module's entry point in `moxi.comms.kinds` (test_kinds.py). An unknown kind is
-    refused at the frame, not discovered later at delivery time. A name that sends and
-    receives nothing is a reserved name, which binds as no kind.
+    comms' own register kinds are `claude-shim | codex | opencode | connector | speech`;
+    any other kind comes from a module's entry point in `moxi.comms.kinds`
+    (test_kinds.py). An unknown kind is refused at the frame, not discovered later at
+    delivery time. A name that sends and receives nothing is a reserved name, which binds
+    as no kind.
     """
     from moxi_comms.daemon import ADAPTER_KINDS
 
-    assert ADAPTER_KINDS == ("claude-shim", "codex", "opencode", "connector")
-    assert len(set(ADAPTER_KINDS)) == 4
+    assert ADAPTER_KINDS == ("claude-shim", "codex", "opencode", "connector", "speech")
+    assert len(set(ADAPTER_KINDS)) == 5
 
 
 def test_the_daemon_holds_no_posting_credential(rig):

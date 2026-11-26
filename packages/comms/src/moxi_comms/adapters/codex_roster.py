@@ -18,6 +18,7 @@ thread parameters `launch_options()` gives.
     writable_roots = ["/run/user/1000/moxi"]
     network_access = true              # see below
     directors      = ["main"]          # THIS agent's declared directors (authority)
+    takes_policy_directors = true      # false: none of the box's [policy] directors
     # thread_file  = ".../codex/planner@proj-a.json"   # default: STATE/comms/codex/<q>.json
     # model        = "<model id>"
 
@@ -35,7 +36,9 @@ schema refuses `sandbox` beside `permissions`.
 `planner@proj-a` says planner treats main's verified messages as directives, and says
 nothing about how anyone else sees main (the global main: a bare name is the global
 identity). Names are qualified once at load, one spelling per identity, and a malformed entry is refused like every other bad
-key here.
+key here. A launch's `load` adds the box's `[policy] directors` after them
+(`roster_rows.take_policy`), from the box's own comms config even when `--config` names
+another file, unless the row says `takes_policy_directors = false`.
 
 **Network access.** A row that names `network_access` gets it. A row that doesn't leaves
 it to the launch, which decides from one fact, whether it carries comms' tools (the
@@ -69,11 +72,13 @@ DEFAULT_SANDBOX = "workspace-write"
 SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 
 _ENTRY_KEYS = {"cwd", "thread_file", "sandbox", "permissions",
-               "profile", "writable_roots", "network_access", "model", "directors"}
+               "profile", "writable_roots", "network_access", "model", "directors",
+               "takes_policy_directors"}
 #: Keys that name one identity's own things, so `[codex.defaults]` may not hold them.
 _OWN_KEYS = {"thread_file"}
 #: What `[codex.defaults]` may hold: the sandbox mode alone. Every other key is set on
-#: each row, `directors` above all, since it is one recipient's authority grant.
+#: each row, `directors` and `takes_policy_directors` above all, since each is one
+#: recipient's authority grant.
 _DEFAULT_KEYS = {"sandbox"}
 #: One choice: a row naming any of them takes none of them from the defaults.
 _CONTAINMENT_KEYS = {"sandbox", "permissions", "profile"}
@@ -96,6 +101,10 @@ class CodexAgent:
     network_access: bool | None = None
     model: str | None = None
     directors: list = field(default_factory=list)   # qualified at load, one spelling
+    #: The part of `directors` only the box's `[policy] directors` gave (`load`).
+    policy_directors: list = field(default_factory=list)
+    #: The row's `takes_policy_directors`: false opts it out of the policy directors.
+    takes_policy_directors: bool = True
 
     # ---------------------------------------------------------------- app-server
     def env(self, base=None) -> dict:
@@ -224,10 +233,12 @@ def record_write_root(env=None, cwd=None) -> tuple:
 
 def load(env=None, path=None) -> Roster:
     """The roster from comms' config file (`config.load(env).codex`), or from the comms
-    config file `path` when a launch names one (`--config`). A file with no `[codex]`
-    table is an empty roster; a bad row is refused, loudly."""
+    config file `path` when a launch names one (`--config`), each row with the box's
+    policy directors merged after its own (`roster_rows.take_policy`). A file with no
+    `[codex]` table is an empty roster; a bad row is refused, loudly."""
     cfg = roster_rows.read_config(env, path)
-    return from_table(cfg.codex, cfg.source)
+    return roster_rows.take_policy(from_table(cfg.codex, cfg.source), cfg, env=env,
+                                   path=path)
 
 
 def from_table(table: dict, source: str = "defaults", *, check: bool = False) -> Roster:
@@ -295,6 +306,7 @@ def _entry(path, qualified: str, section, *, check: bool = False) -> CodexAgent:
         network_access=None if network_access is None else bool(network_access),
         model=section.get("model"),
         directors=declared,
+        takes_policy_directors=roster_rows.parse_takes_policy(where, section),
     )
     # A row with the network off is honored, and its launch says what that costs when
     # the launch carries no comms tools (`codex_wrapper.reach_note`): the roster can't

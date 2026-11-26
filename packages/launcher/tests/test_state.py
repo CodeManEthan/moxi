@@ -4,14 +4,15 @@ recycle and keep-warm parts show."""
 
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 
 import pytest
 from moxi import exit as codes
-from moxi import proc
+from moxi import modules, proc
 
-from moxi_launcher import keepwarm, state, store, target
+from moxi_launcher import catalog, keepwarm, slots, state, store, target
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 NEW = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -44,6 +45,13 @@ class FakeCache:
     def read(self, harness, session_id, **options):
         self.reads.append((harness, session_id))
         return SimpleNamespace(kind="warm", age_s=10.0, ttl_s=self.ttl)
+
+
+@pytest.fixture(autouse=True)
+def env_readable(monkeypatch):
+    """cache reads a session's environment here, as on Linux and macOS, so keep-warm can
+    act on a Claude launch whatever system the tests run on."""
+    monkeypatch.setattr(catalog, "session_env_readable", lambda: True)
 
 
 @pytest.fixture
@@ -80,7 +88,7 @@ def read(conn, which=SID, **kw):
 
 def test_a_session_no_launch_holds_is_refused(conn):
     with pytest.raises(target.NotLaunched):
-        read(conn, NEW)
+        read(conn, NEW, turns=SimpleNamespace(find=lambda **kw: None))
 
 
 def test_a_launch_with_no_runs_is_not_red_and_shows_its_options(conn):
@@ -219,22 +227,96 @@ def test_a_refused_notice_is_named_by_its_recipients(conn):
 # -- the recycle part --------------------------------------------------------------------
 
 
-def test_recycle_shows_its_options_last_run_pending_compact_and_the_last_telling(conn):
-    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
-                 ('{"recycle_on_expiry": "clear", "recycle_at_limit": "compact", '
-                  '"limit_at": "1.5x"}',))
+def test_recycle_shows_its_options_last_run_and_the_last_telling(conn):
+    conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
+                 ('{"recycle_on_expiry": "clear", "recycle_at_limit": "relaunch"}',
+                  '{"MOXI_USAGE_CROSSING_AT": "2x"}'))
     ran(conn, "cleared", kind="clear", mode="expiry", at=OLD)
     ran(conn, "nudged")
-    store.pend_compact(conn, "r1", f"{SID}|1.5x|1", at="2026-01-02T00:00:00.000000Z")
     store.add_event(conn, "recycle-told", {"crossing_key": "k"}, request_id="r1",
                     session_id=SID, at="2026-01-03T00:00:00.000000Z")
     got = read(conn).recycle
-    assert (got.on_expiry, got.at_limit, got.limit_at) == ("clear", "compact", "1.5x")
+    assert (got.on_expiry, got.at_limit) == ("clear", "relaunch")
     assert (got.last.kind, got.last.outcome) == ("clear", "cleared")
-    assert got.pending_compact == "2026-01-02T00:00:00.000000Z"
     assert got.told_at == "2026-01-03T00:00:00.000000Z"
     line = read(conn).lines()[2]
-    assert "on expiry clear, at limit compact (1.5x)" in line and "clear cleared" in line
+    assert "on expiry clear, at limit relaunch;" in line and "clear cleared" in line
+    assert "2x" not in line
+
+
+def test_an_old_compact_row_shows_it_no_longer_acts_and_no_mark(conn):
+    conn.execute("UPDATE launches SET values_json = ?, env_json = ? WHERE request_id = 'r1'",
+                 ('{"recycle_at_limit": "compact", "limit_at": "1.5x"}',
+                  '{"MOXI_USAGE_CROSSING_AT": "1.5x"}'))
+    store.insert_run(conn, kind="compact", mode="limit", request_id="r1", session_id=SID,
+                     by="launcher", job="proc:1@1.0")
+    store.prune(conn, 90)
+    got = read(conn)
+    assert got.recycle.at_limit == "compact (no longer acts)" == state.RETIRED_AT_LIMIT
+    assert (got.recycle.last.mode, got.recycle.last.outcome, got.recycle.last.word) == (
+        "limit", "failed", "retired")
+    assert "at limit compact (no longer acts); last: compact failed (retired)" in (
+        got.lines()[2])
+    assert "1.5x" not in got.lines()[2]
+
+
+@pytest.mark.parametrize("sources", [None, {"recycle_at_limit": "shipped"},
+                                     {"recycle_at_limit": "typed"},
+                                     {"recycle_at_limit": "left-out"}])
+def test_a_launch_at_off_shows_off_whatever_its_source(conn, monkeypatch, sources):
+    # recycle_at_limit ships off: show names the row's own value, never a shipped
+    # relaunch, even on a launch that could recycle itself had it been set to.
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+    values = {"recycle_at_limit": "off", "warn_at": "2x"}
+    if sources is not None:
+        values["sources"] = sources
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps(values),))
+    got = read(conn)
+    assert got.recycle.at_limit == "off"
+    assert "at limit off" in got.lines()[2] and "relaunch" not in got.lines()[2]
+
+
+@pytest.mark.parametrize("mark, shown", [
+    ("off", "relaunch (armed, no warning)"), ("", "relaunch (armed, no warning)"),
+    (None, "relaunch (armed, no warning)"), ("2x", "relaunch")])
+def test_a_relaunch_launch_with_no_mark_shows_it_is_armed_with_no_warning(
+        conn, monkeypatch, mark, shown):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+    values = {"recycle_at_limit": "relaunch"}
+    if mark is not None:
+        values["warn_at"] = mark
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps(values),))
+    got = read(conn)
+    assert got.recycle.at_limit == shown
+    assert f"at limit {shown}" in got.lines()[2]
+    assert got.recycle.mark == ("2x" if mark == "2x" else None)
+
+
+def test_a_relaunch_launch_told_at_its_mark_shows_the_mark_from_warn_at(conn, monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: True)
+    real = modules.available
+    monkeypatch.setattr(modules, "available", lambda name: name != "notes" and real(name))
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps({"recycle_at_limit": "relaunch", "warn_at": "1.5x"}),))
+    got = read(conn)
+    assert (got.recycle.at_limit, got.recycle.mark) == ("relaunch", "1.5x")
+    assert "recycle: on expiry off, at limit relaunch (1.5x)" in got.lines()[2]
+    assert got.as_json()["recycle"]["mark"] == "1.5x"
+
+
+def test_a_relaunch_launch_that_cannot_recycle_itself_shows_no_mark(conn, monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    conn.execute("UPDATE launches SET values_json = ? WHERE request_id = 'r1'",
+                 (json.dumps({"recycle_at_limit": "relaunch", "warn_at": "2x"}),))
+    got = read(conn)
+    assert (got.recycle.at_limit, got.recycle.mark) == ("relaunch", None)
+    assert "2x" not in got.lines()[2]
 
 
 # -- the keep-warm part ------------------------------------------------------------------
@@ -264,20 +346,41 @@ def test_keep_warm_says_a_short_lifetime_leaves_no_window(conn):
     assert read(conn, cache=FakeCache()).keep_warm.window is None
 
 
-def test_keep_warm_under_cover_alone_is_on_with_no_holds_listed(conn):
+def test_keep_warm_under_cover_alone_is_on_with_the_chain_s_holds_listed(conn):
     store.open_hold(conn, "r1", "port-cache")
     launched(conn, request_id="r2", session_id=NEW, relaunch_of="r1")
     keepwarm.cover_on(conn, store.get(conn, "r2"), NEW, turn_number=3,
                       waits={"kind": "subagents", "count": 1})
     got = read(conn, NEW).keep_warm
-    assert got.on and got.holds == ()
-    assert read(conn, NEW).lines()[3].startswith("keep warm: on; holds: none")
+    assert got.on and got.holds == ("port-cache",)
+    assert read(conn, NEW).lines()[3].startswith("keep warm: on; holds: port-cache")
 
 
 def test_cover_for_another_session_id_leaves_keep_warm_off(conn):
     keepwarm.cover_on(conn, store.get(conn, "r1"), NEW, turn_number=3,
                       waits={"kind": "subagents", "count": 1})
     assert not read(conn).keep_warm.on
+
+
+@pytest.mark.parametrize("missing", ["turns", "cache", "session environments"])
+def test_keep_warm_reads_off_where_keep_warm_can_t_act_on_this_install(conn, monkeypatch,
+                                                                       missing):
+    """Without turns or cache, or where cache can't read a session's environment, the
+    `keep_warm` row isn't offered and nothing nudges the session, so it reads off, as
+    its launch was stamped; holds and cache aren't read."""
+    conn.execute("UPDATE launches SET values_json = json_set(values_json, '$.keep_warm', "
+                 "'on') WHERE request_id = 'r1'")
+    assert read(conn).keep_warm.on
+    store.open_hold(conn, "r1", "port-cache")
+    if missing == "session environments":
+        monkeypatch.setattr(catalog, "session_env_readable", lambda: False)
+    else:
+        real = slots.links
+        monkeypatch.setattr(slots, "links", lambda name: name != missing and real(name))
+    cache = FakeCache()
+    got = read(conn, cache=cache)
+    assert got.keep_warm.on is False and got.keep_warm.holds == ()
+    assert got.lines()[3] == "keep warm: off" and cache.reads == []
 
 
 def test_keep_warm_off_reads_no_cache(conn):
@@ -305,3 +408,43 @@ def test_show_with_no_session_reads_the_caller_s_own(conn):
     turns = SimpleNamespace(find=lambda **kw: session)
     got = state.show(conn=conn, turns=turns, slots_api=FakeSlots(), cache=None)
     assert got.data["outcome"] == "ok" and got.lines[0].endswith("ok")
+
+
+def owned_by_parent(conn):
+    """The launch's own `claude` is this process's parent, as the launcher records it."""
+    ident = proc.identity(os.getppid())
+    conn.execute("UPDATE launches SET pid = ?, pid_started = ? WHERE request_id = 'r1'",
+                 (ident.pid, ident.started))
+
+
+def live(session_id):
+    """turns serving `session_id` from this process, a child of the launch's `claude`."""
+    session = SimpleNamespace(session_id=session_id, endpoint_pid=os.getpid(),
+                              pid=os.getppid(), close=lambda: None)
+    asked = []
+    return SimpleNamespace(find=lambda **kw: asked.append(kw) or session, asked=asked)
+
+
+def test_show_finds_an_id_the_launch_never_learned_by_its_claude_process(conn):
+    owned_by_parent(conn)
+    before = store.session_ids(conn, "r1")
+    turns = live(NEW)
+    got = state.show(NEW, conn=conn, turns=turns, slots_api=FakeSlots(), cache=None)
+    assert got.lines[0] == f"session {NEW} (launch r1): ok"
+    assert turns.asked == [{"session_id": NEW}]
+    assert store.session_ids(conn, "r1") == before
+
+
+def test_show_with_no_session_reads_the_caller_s_own_by_its_claude_process(conn):
+    owned_by_parent(conn)
+    ident = proc.identity(os.getpid())
+    conn.execute("UPDATE launches SET endpoint = ? WHERE request_id = 'r1'",
+                 (f"{ident.pid}@{ident.started:.6f}",))
+    got = state.show(conn=conn, turns=live(NEW), slots_api=FakeSlots(), cache=None)
+    assert got.lines[0] == f"session {NEW} (launch r1): ok"
+
+
+def test_show_of_an_id_whose_session_runs_in_another_claude_is_refused(conn):
+    # The row records no process of the launch, as a nested session's `claude` is none.
+    with pytest.raises(target.NotLaunched):
+        state.show(NEW, conn=conn, turns=live(NEW), slots_api=FakeSlots(), cache=None)

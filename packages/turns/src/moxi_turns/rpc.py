@@ -11,10 +11,13 @@ for params that break the contract, and turns' own: `gone` (the endpoint is endi
 `stop-handler-taken`. Every reason the session's state decides is a value instead.
 
 A handler on the loop never waits on the harness or on a blocking write. `session`,
-`deliver`, `steer`, `stops.handle`, `stops.answer` and a `wait` with `timeout_ms` 0 read or
-write the core's record and answer at once: `deliver` and `steer` record the delivery and
-put its hand-off on the endpoint's ordered worker in one locked step, before the handler's
-first `await`. `environ` reads the endpoint's own copy of the session's environment and answers at once.
+`deliver`, `steer`, `fork`, `fork.continue`, `stops.handle`, `stops.answer` and a `wait` with
+`timeout_ms` 0 read or write the core's record and answer at once: `deliver` and `steer`
+record the delivery and put its hand-off on the endpoint's ordered worker in one locked
+step, before the handler's first `await`, and so do `fork` and `fork.continue`. A kept
+end is written under that same step when a delivery settles there. `ack` reads and
+removes kept ends in the state folder on a thread of its own. `environ`
+reads the endpoint's own copy of the session's environment and answers at once.
 `usage.codex_limits` and `mcp.reload` (a Codex host's) run on a thread of their own: the
 first waits on one app-server request, the second on the host's MCP settle, which its
 deadline bounds. `usage.codex_limits` with `cached` answers from the host's record at once.
@@ -37,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from moxi import ipc
 
+from .kept import RefKept
 from .results import (CAPABILITIES, COMMAND_WAIT_S, COMMANDS, ENV_MAX_NAMES,
                       ERROR_CAPABILITY, ERROR_GONE, ERROR_STOP_HANDLER_TAKEN, REFUSED_GONE,
                       STOP_SHELLS_WAIT_S, Refused, check_ref)
@@ -48,6 +52,9 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 #: A name `environ` may ask: an environment variable's name.
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+#: The longest `round_timeout_ms` a fork or a round may ask: the longest timer a
+#: JavaScript runtime keeps (a runner's clock), about 24.8 days.
+ROUND_TIMEOUT_MAX_MS = 2**31 - 1
 
 
 def gone(reason: str | None) -> ipc.RpcError:
@@ -78,7 +85,10 @@ class Rpc:
             "agents": self._agents,
             "deliver": self._deliver,
             "steer": self._steer,
+            "fork": self._fork,
+            "fork.continue": self._fork_continue,
             "wait": self._wait,
+            "ack": self._ack,
             "command": self._command,
             "watch": self._watch,
             "stops.handle": self._stops_handle,
@@ -130,19 +140,53 @@ class Rpc:
             raise invalid("if_turn_number, refuse_draft and refuse_agents are valid only "
                           "with only_if_idle: true")
         self._needs("only-if-idle" if only_if_idle else "deliver")
+        keep = self._keep(params, ref)
         # Recorded, checked and handed to the worker before this handler's first await.
-        d = self.ep.deliver(text, ref=ref, only_if_idle=only_if_idle,
-                            if_turn_number=if_turn_number, refuse_draft=refuse_draft,
-                            refuse_agents=refuse_agents)
+        with _kept_ref_invalid():
+            d = self.ep.deliver(text, ref=ref, only_if_idle=only_if_idle,
+                                if_turn_number=if_turn_number, refuse_draft=refuse_draft,
+                                refuse_agents=refuse_agents, by=_by(params),
+                                senders=_senders(params), keep=keep)
         await self._hook("deliver", d)
         return self._handed(d)
 
     async def _steer(self, conn, params: dict) -> dict:
         text = _text(params)
         ref = _ref(params)
+        by, senders = _by(params), _senders(params)
         self._needs("steer")
-        d = self.ep.steer(text, ref=ref)
+        d = self.ep.steer(text, ref=ref, by=by, senders=senders)
         await self._hook("steer", d)
+        return self._handed(d)
+
+    async def _fork(self, conn, params: dict) -> dict:
+        text = _text(params)
+        ref = _ref(params)
+        by = _by(params)
+        if by is None:
+            raise invalid("by is the asking module's name, a non-empty string")
+        round_timeout_s = _round_timeout(params)
+        self._needs("fork")
+        keep = self._keep(params, ref)
+        with _kept_ref_invalid():
+            d = self.ep.fork(text, ref=ref, by=by, keep=keep,
+                             round_timeout_s=round_timeout_s)
+        await self._hook("fork", d)
+        return self._handed(d)
+
+    async def _fork_continue(self, conn, params: dict) -> dict:
+        of = params.get("delivery")
+        if not isinstance(of, str) or not of:
+            raise invalid("delivery is the fork's delivery id, a non-empty string")
+        text = _text(params)
+        ref = _ref(params)
+        round_timeout_s = _round_timeout(params)
+        self._needs("fork")
+        keep = self._keep(params, ref)
+        with _kept_ref_invalid():
+            d = self.ep.fork_continue(of, text, ref=ref, keep=keep,
+                                      round_timeout_s=round_timeout_s)
+        await self._hook("fork.continue", d)
         return self._handed(d)
 
     async def _in_thread(self, fn: Callable[..., Any], *args: Any) -> Any:
@@ -181,6 +225,24 @@ class Rpc:
         else:
             delivery, value = await self._in_thread(self.ep.wait_ref, ref, until, timeout)
         return {"delivery": delivery, **_waited(value)}
+
+    async def _ack(self, conn, params: dict) -> dict:
+        ref = _ref(params)
+        if ref is None:
+            raise invalid("ref is the kept delivery's ref, a string")
+        self._needs("keep")
+        # Reads and removes files in the state folder: on a thread, off the loop.
+        removed = await self._in_thread(self.ep.ack, ref)
+        return {"ref": ref, "removed": removed}
+
+    def _keep(self, params: dict, ref: str | None) -> bool:
+        """The `keep` param: true needs a `ref` and the `keep` capability."""
+        keep = _bool(params, "keep")
+        if keep and ref is None:
+            raise invalid("keep needs a ref: a kept end is read and acked by its ref")
+        if keep:
+            self._needs("keep")
+        return keep
 
     async def _command(self, conn, params: dict) -> dict:
         name = params.get("name")
@@ -317,6 +379,24 @@ def _ref(params: dict) -> str | None:
         raise invalid(str(exc)) from None
 
 
+def _by(params: dict) -> str | None:
+    """`by`: the module that asked, a non-empty string, or absent."""
+    value = params.get("by")
+    if value is not None and (not isinstance(value, str) or not value):
+        raise invalid("by is a non-empty string or null")
+    return value
+
+
+def _senders(params: dict) -> tuple[str, ...]:
+    """`senders`: the names the text speaks for, a list of non-empty strings."""
+    value = params.get("senders")
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        raise invalid("senders is a list of non-empty strings")
+    return tuple(value)
+
+
 def _bool(params: dict, key: str) -> bool:
     value = params.get(key, False)
     if not isinstance(value, bool):
@@ -339,6 +419,28 @@ def _timeout_ms(params: dict) -> float | None:
     if (isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value) or value < 0):
         raise invalid("timeout_ms is a number of milliseconds of at least 0, or null")
+    return value / 1000
+
+
+@contextlib.contextmanager
+def _kept_ref_invalid():
+    """A `keep` under a `ref` a kept end still holds is invalid params, its reason the
+    endpoint's."""
+    try:
+        yield
+    except RefKept as exc:
+        raise invalid(str(exc)) from None
+
+
+def _round_timeout(params: dict) -> float | None:
+    """`round_timeout_ms` in seconds: None when absent or null."""
+    value = params.get("round_timeout_ms")
+    if value is None:
+        return None
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or not 0 < value <= ROUND_TIMEOUT_MAX_MS):
+        raise invalid("round_timeout_ms is a number of milliseconds above 0 and at most "
+                      f"{ROUND_TIMEOUT_MAX_MS}, or null")
     return value / 1000
 
 

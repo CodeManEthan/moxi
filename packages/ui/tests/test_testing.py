@@ -8,14 +8,22 @@ import re
 import subprocess
 import sys
 import textwrap
+import warnings
 from pathlib import Path
 
 import pytest
 from moxi_dev.testing import short_dir, wait_for
+from moxi_ui.session import LIMIT
 from moxi_ui.testing import WAIT_S
+from moxi_ui.testing.shell import Session
 from playwright.sync_api import expect
 
 import fixture_kit
+
+#: The bound on a test that drives a page in this process, kept by a thread that ends the
+#: test's process past it. A test whose browser work runs in an inner pytest run is
+#: bounded by that run's own timeout instead, which kills the inner run and fails the test.
+IN_PAGE = pytest.mark.timeout(120, method="thread")
 
 
 def test_loading_the_plugin_imports_no_moxi_ui_submodule_and_no_playwright(tmp_path):
@@ -39,7 +47,7 @@ def test_browser_tests_and_asyncio_run_share_one_pytest_run(tmp_path, ui_browser
     # The last test uses no browser, so the browser closes in a teardown that runs with
     # Playwright's loop hidden. The child finds the browsers this run uses: under the
     # fence its home is a temporary one.
-    browsers = Path(ui_browser.browser_type.executable_path).parents[2]
+    browsers = _browsers_dir(ui_browser.browser_type.executable_path)
     (tmp_path / "test_mixed.py").write_text(textwrap.dedent("""
         import asyncio
 
@@ -89,6 +97,29 @@ def test_the_test_shell_serves_the_fixture_and_reaches_its_page_server(ui_shell)
         assert events.until(lambda name, data: name == "moxi.state"
                             and data["state"] == "up")[1]["module"] == "fixture"
     assert ui_shell.wait_server("fixture", lambda r: r["crashes"] >= 1)["crashes"] == 1
+
+
+def test_the_shells_reads_reuse_one_sign_in_so_a_browsers_session_outlives_them(ui_shell):
+    # A sign-in of its own stands in for a browser's, made after the shell's first.
+    browser = Session.sign_in(ui_shell.port, ui_shell.ticket())
+    first = ui_shell.session()
+    for _ in range(LIMIT + 5):
+        again = ui_shell.session(timeout=10)
+        assert again.get("/m/ui/api/modules")[0] == 200
+        assert again.timeout == 10
+    assert (again.cookie, again.key) == (first.cookie, first.key)
+    assert browser.get("/m/ui/api/modules")[0] == 200
+
+
+def test_the_shells_session_signs_in_again_once_the_shell_drops_it(ui_shells, fixture_site):
+    shell = ui_shells(site=[fixture_site])
+    kept = shell.session()
+    for _ in range(LIMIT):
+        Session.sign_in(shell.port, shell.ticket())
+    assert kept.get("/m/ui/api/modules")[0] != 200
+    again = shell.session()
+    assert again.cookie != kept.cookie
+    assert again.get("/m/ui/api/modules")[0] == 200
 
 
 def test_a_fixture_that_fails_its_start_is_a_502_naming_exit_3(ui_shells, fixture_site):
@@ -154,6 +185,7 @@ def test_a_left_out_module_is_not_in_the_snapshot(ui_shells, fixture_site):
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_fixture_components_keep_the_contract_and_fit_a_phone(ui_page, ui_component_check,
                                                                  ui_width_check):
     block = ui_component_check(ui_page, "fixture", "block")
@@ -191,6 +223,7 @@ def _settings_backdrop(page):
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_adds(
         ui_page, ui_component_check):
     # The push channel is one stream for the page, reopened with every topic the page
@@ -222,6 +255,7 @@ def test_the_contract_check_counts_against_a_component_only_the_push_topics_it_a
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
         ui_page, ui_component_check, monkeypatch):
     # Without a page's recent requests (Playwright before 1.56), a topic the page held
@@ -239,6 +273,7 @@ def test_the_contract_check_says_when_it_could_not_read_the_held_topics(
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_the_width_check_names_what_reaches_past_the_edge(ui_page, ui_width_check):
     ui_page.evaluate("""() => {
       const wide = document.createElement("div");
@@ -317,6 +352,7 @@ NOT_HELD = {
 
 
 @pytest.mark.browser
+@IN_PAGE
 @pytest.mark.parametrize("case", list(HELD))
 def test_the_width_check_passes_what_a_scroll_container_inside_the_edge_holds(
         ui_page, ui_width_check, case):
@@ -329,6 +365,7 @@ def test_the_width_check_passes_what_a_scroll_container_inside_the_edge_holds(
 
 
 @pytest.mark.browser
+@IN_PAGE
 @pytest.mark.parametrize("case", list(NOT_HELD))
 def test_the_width_check_names_what_no_scroll_container_inside_the_edge_holds(
         ui_page, ui_width_check, case):
@@ -339,6 +376,7 @@ def test_the_width_check_names_what_no_scroll_container_inside_the_edge_holds(
 
 
 @pytest.mark.browser
+@IN_PAGE
 def test_each_context_is_fresh_from_one_stored_sign_in_and_a_refused_one_signs_in_again(
         ui_shells, fixture_site, ui_contexts):
     shell = ui_shells(site=[fixture_site])
@@ -428,3 +466,145 @@ def test_a_failed_browser_test_keeps_its_trace_where_ui_traces_says(tmp_path, ui
     summary = done.stdout.strip().splitlines()[-1]
     assert "1 failed" in summary and "error" not in summary, done.stdout
     assert [p.suffix for p in traces_dir.iterdir()] == [".zip"]
+
+
+#: The inner run's bound on the fixtures' own calls, in seconds: `CALL_S`, shortened.
+_INNER_CALL_S = 5
+#: Seconds the inner run may take in all; past it the run is taken to hang.
+_INNER_RUN_S = 90
+
+
+@pytest.mark.browser
+def test_a_teardown_whose_browser_stops_answering_ends_at_the_bound(tmp_path, ui_browser):
+    # The inner test stops every process of its browser and fails, so its teardown keeps
+    # the trace and closes the context: calls to a browser that never answers, which
+    # Playwright gives no timeout. The plugin ends the browser's processes at the bound.
+    import psutil
+
+    stopped = tmp_path / "stopped"
+    (tmp_path / "test_stops_answering.py").write_text(textwrap.dedent(f"""
+        from types import SimpleNamespace
+
+        import psutil
+
+        import moxi_ui.testing
+
+        moxi_ui.testing.CALL_S = {_INNER_CALL_S}
+
+        def test_a_page_whose_browser_stops_answering(ui_contexts):
+            context = ui_contexts(SimpleNamespace(url="http://127.0.0.1:9/"), sign_in=False)
+            context.new_page().set_content("<p>here</p>")
+            # This process's one child is Playwright's driver; every process under it is
+            # the browser's.
+            browser = [found for driver in psutil.Process().children()
+                       for found in driver.children(recursive=True)]
+            with open({str(stopped)!r}, "w") as fh:
+                fh.write("\\n".join(f"{{p.pid}} {{p.create_time()}}" for p in browser))
+            for found in browser:
+                found.suspend()
+            assert False, "fails on purpose"
+    """))
+    browsers_dir = _browsers_dir(ui_browser.browser_type.executable_path)
+    try:
+        done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                               "--ui-browser", ui_browser.browser_type.name, str(tmp_path)],
+                              cwd=tmp_path, capture_output=True, text=True,
+                              timeout=_INNER_RUN_S,
+                              env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers_dir)})
+        left = [found for found in _stopped(stopped) if found.is_running()
+                and found.status() != psutil.STATUS_ZOMBIE]
+    finally:
+        for found in _stopped(stopped):
+            try:
+                found.kill()
+            except psutil.Error:
+                pass
+    out = done.stdout + done.stderr
+    assert stopped.read_text().split(), f"the inner test stopped no browser process:\n{out}"
+    assert done.returncode == 1, out
+    assert re.search(f"the browser stopped answering: (stopping a failed test's trace|closing a "
+                     f"context) took more than {_INNER_CALL_S} s, so its processes were ended",
+                     out), out
+    took = re.search(r"1 failed, 1 error in ([\d.]+)s", done.stdout)
+    assert took is not None and float(took.group(1)) >= _INNER_CALL_S, out
+    assert left == [], f"the plugin left stopped processes running: {left}"
+
+
+def test_a_call_that_returns_past_its_bound_leaves_one_warning_naming_it(monkeypatch):
+    import time
+
+    from moxi_ui import testing as kit
+
+    monkeypatch.setattr(kit, "CALL_S", 0.2)
+    driver = kit._Driver([])
+    with warnings.catch_warnings(record=True) as log:
+        warnings.simplefilter("error")
+        assert driver.call("stopping Playwright", lambda: time.sleep(0.6) or "stopped") \
+            == "stopped"
+    assert driver.ended == "stopping Playwright"
+    assert [(found.category, str(found.message)) for found in log] == [
+        (kit.BoundWarning, "the browser stopped answering: stopping Playwright took more "
+                           "than 0.2 s, so its processes were ended and the call went on")]
+
+
+def test_a_call_within_its_bound_leaves_no_warning(monkeypatch):
+    from moxi_ui import testing as kit
+
+    monkeypatch.setattr(kit, "CALL_S", 5.0)
+    driver = kit._Driver([])
+    with warnings.catch_warnings(record=True) as log:
+        warnings.simplefilter("always")
+        assert driver.call("closing a context", lambda: "returned") == "returned"
+    assert driver.ended is None and log == []
+
+
+def test_a_teardown_call_past_its_bound_shows_in_the_runs_summary_and_fails_nothing(tmp_path):
+    # A fake call that outlives a short bound, in a fixture's teardown, in a run under
+    # xdist that turns every other warning into an error.
+    (tmp_path / "test_outlives.py").write_text(textwrap.dedent("""
+        import time
+
+        import pytest
+
+        import moxi_ui.testing as kit
+
+        kit.CALL_S = 0.2
+
+        @pytest.fixture
+        def slow_stop():
+            driver = kit._Driver([])
+            yield
+            driver.call("stopping Playwright", time.sleep, 0.6)
+
+        def test_it(slow_stop):
+            pass
+    """))
+    done = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                           "-W", "error", "-n", "1", str(tmp_path)], cwd=tmp_path,
+                          capture_output=True, text=True, timeout=60)
+    out = done.stdout + done.stderr
+    assert done.returncode == 0, out
+    assert re.search(r"1 passed, 1 warning in", done.stdout), out
+    assert ("BoundWarning: the browser stopped answering: stopping Playwright took more "
+            "than 0.2 s, so its processes were ended and the call went on") in done.stdout, out
+
+
+def _stopped(listed: Path) -> list:
+    """The processes `listed` names (`<pid> <start time>` a line) that are still the ones
+    it named."""
+    import psutil
+
+    if not listed.exists():
+        return []
+    found = []
+    for entry in listed.read_text().split("\n"):
+        if not entry:
+            continue
+        pid, made = entry.split()
+        try:
+            process = psutil.Process(int(pid))
+            if process.create_time() == float(made):
+                found.append(process)
+        except psutil.Error:
+            pass
+    return found

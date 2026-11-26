@@ -26,7 +26,6 @@ import os
 import re
 import stat
 import subprocess
-import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +34,7 @@ from types import MappingProxyType
 from moxi import files, modules, names, paths
 
 from .. import catalog, store
+from ..catalog import TAKES_POLICY
 from ..codex_trust import Trust
 from ..listeners import RELAUNCH_ENV, REQUEST_ENV
 
@@ -49,8 +49,9 @@ COMMANDS = ("exit",)
 KEEP_WARM_ENV = "MOXI_LAUNCHER_KEEP_WARM"
 RECYCLE_ON_EXPIRY_ENV = "MOXI_LAUNCHER_RECYCLE_ON_EXPIRY"
 #: The identity block's line on a keep-warm launch.
-KEEP_WARM_LINE = ('on; open a hold with "moxi launcher keep-warm hold <name>" for each '
-                  "piece of work you hand out, and release it when the work is done")
+KEEP_WARM_LINE = ("on; subagents of yours and agents you direct at work keep you warm; "
+                  'for other work you hand out, open a hold with "moxi launcher keep-warm '
+                  'hold <name>" and release it when the work is done')
 #: What every scrub removes besides the modules' own session stamps: every `CLAUDE*`
 #: name but those in `CLAUDE_KEEP`, and the agent marker. A Claude Code session sets
 #: `CLAUDE*` names in what it starts, and new ones come with new versions, so the scrub
@@ -257,12 +258,16 @@ class Context:
     when it is not installed. `comms_codex` and `comms_headless` say whether comms takes
     its Codex wrapper's per-launch settings and its headless flags, and
     `comms_codex_resume` whether that wrapper resumes a thread it is told to (read only
-    for a resume). `is_windows` picks the command line limit.
+    for a resume). `comms_has_policy` says whether comms has policy directors, so its
+    wrappers take `--no-policy-directors` (`presets.comms_has_policy`). `is_windows` picks
+    the command line limit.
 
     A replay of a stored launch sets the rest. `posture` is the start posture the
     identity block shows in place of the values' own (a relaunch's), which the values,
     and so the new row's `values_json`, never carry; None keeps the values' posture.
     `resume` says the session id is one the launch resumes, not one minted for it.
+    `fork_of` is the session id a fork launch forks: the harness starts the launch's
+    session from a copy of that session's conversation.
     `relaunched` marks a relaunch, whose handoff header says so. `extra_stamps` are
     stamps the replay adds to the option rows' own (`RELAUNCH_ENV`).
     """
@@ -290,9 +295,11 @@ class Context:
     comms_codex: bool = False
     comms_codex_resume: bool = False
     comms_headless: bool = False
+    comms_has_policy: bool = False
     windows: bool = os.name == "nt"
     posture: str | None = None
     resume: bool = False
+    fork_of: str | None = None
     relaunched: bool = False
     extra_stamps: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
 
@@ -537,20 +544,27 @@ def first_turn(by: str, *, brief: str | None = None, handoff: str | None = None,
     return f"{header}\nstart posture: {posture}" + (f"\n{rest}" if rest else "")
 
 
+#: The folder this user's scratch parent is made in, where there is a uid. Fixed: `TMPDIR`
+#: is never read, since one under a folder notes keeps notes for would give every scratch
+#: folder a notes home.
+SCRATCH_TMP = Path("/tmp")
+
+
 def scratch_root() -> Path:
-    """The folder this user's scratch launches go under: `moxi-scratch-<uid>` in the
-    system's temporary folder (the user's name where there is no uid), always absolute.
-    One per user, so no other user owns it, and none can move a launch's folder out of it
-    and put their own in its place."""
+    """The folder this user's scratch launches go under: `/tmp/scratch-<uid>`, by the
+    numeric uid, one per user, so no other user owns it, and none can move a launch's
+    folder out of it and put their own in its place. Where there is no uid (Windows) it is
+    `scratch-<user name>` in the user's own temporary folder, `TEMP` or `TMP`."""
     if hasattr(os, "getuid"):
-        who = str(os.getuid())
-    else:
-        try:
-            who = getpass.getuser()
-        except Exception:  # noqa: BLE001  (no name to be had: one folder for all)
-            who = "user"
-        who = re.sub(r"[^A-Za-z0-9._-]", "_", who) or "user"
-    return Path(os.path.abspath(tempfile.gettempdir())) / f"moxi-scratch-{who}"
+        return SCRATCH_TMP / f"scratch-{os.getuid()}"
+    try:
+        who = getpass.getuser()
+    except Exception:  # noqa: BLE001  (no name to be had: one folder for all)
+        who = "user"
+    who = re.sub(r"[^A-Za-z0-9._-]", "_", who) or "user"
+    temp = (os.environ.get("TEMP") or os.environ.get("TMP")
+            or str(Path.home() / "AppData" / "Local" / "Temp"))
+    return Path(os.path.abspath(temp)) / f"scratch-{who}"
 
 
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9._-]+")
@@ -562,14 +576,24 @@ def plain_name(name: str) -> bool:
     return bool(_PLAIN_NAME.fullmatch(name)) and name not in (".", "..")
 
 
-def scratch_dir(request_id: str) -> Path:
-    """Where a scratch launch works: a folder named by its request id under
-    `scratch_root()`, always as an absolute path (a slot launch is refused a relative
-    one). Only the path: the launch makes the folder. Raises ValueError for a request id
-    that is not a plain name, which would put the folder outside `scratch_root()`."""
-    if not plain_name(request_id):
-        raise ValueError(f"request id {request_id!r} is not a plain name")
-    return scratch_root() / request_id
+_FOLD_UNSAFE = re.compile(r"[^a-z0-9-]+")
+
+
+def scratch_name(session_name: str) -> str:
+    """The name of a scratch launch's folder: the session name folded to lowercase
+    letters, digits and single dashes, at most 63 characters, or `launch` when nothing is
+    left, whatever the name (`Foo_Bar` works in `foo-bar`). A folded name holds no `.`,
+    `..` or separator, so the folder stays under `scratch_root()`."""
+    folded = re.sub(r"-{2,}", "-", _FOLD_UNSAFE.sub("-", session_name.lower())).strip("-")
+    return folded[:63].strip("-") or "launch"
+
+
+def scratch_dir(session_name: str) -> Path:
+    """Where a scratch launch works: a folder named by its session name, folded
+    (`scratch_name`), under `scratch_root()`, always as an absolute path (a slot launch is
+    refused a relative one). Only the path: the launch makes the folder, and a later
+    launch under the same name works in the same one."""
+    return scratch_root() / scratch_name(session_name)
 
 
 def scratch_root_problem(root: Path | None = None) -> str | None:
@@ -633,29 +657,78 @@ def headless_words(values: Mapping[str, object], brief: str) -> list[str]:
     return words + ["--brief", brief]
 
 
+def director_words(values: Mapping[str, object], ctx: Context) -> list[str]:
+    """The director flags of comms' wrapper: one `--director` per `director` value, in
+    order, then `--no-policy-directors` when the launch's `takes_policy_directors` is
+    false. A comms whose wrappers don't take that flag (`Context.comms_has_policy` false)
+    has no policy directors to opt out of, and such a launch is refused (`NotYet`)
+    rather than composed with a flag its wrapper refuses."""
+    words: list[str] = []
+    for director in values.get("director") or ():
+        words += ["--director", str(director)]
+    if values.get(TAKES_POLICY) is False:
+        if not ctx.comms_has_policy:
+            raise NotYet(TAKES_POLICY, "takes_policy_directors = false needs comms' "
+                         "policy directors, which this comms does not have",
+                         "upgrade moxi-comms, or leave takes_policy_directors out")
+        words.append("--no-policy-directors")
+    return words
+
+
 def commands(values: Mapping[str, object]) -> tuple[str, ...]:
     """The session commands a launch grants through turns: `exit`, then `clear` or
-    `compact` for `recycle_on_expiry`, and `compact` for `recycle_at_limit`."""
+    `compact` exactly when `recycle_on_expiry` is that value. `recycle_at_limit` grants
+    nothing: a relaunch exits through `exit`."""
     granted = list(COMMANDS)
     expiry = values.get("recycle_on_expiry")
     if expiry in ("clear", "compact"):
         granted.append(str(expiry))
-    if values.get("recycle_at_limit") in ("relaunch", "compact") and "compact" not in granted:
-        granted.append("compact")
     return tuple(granted)
 
 
 def option_stamps(values: Mapping[str, object]) -> dict[str, str]:
     """The stamps a launch's option rows set: keep-warm on, recycle on expiry's value,
-    and the crossing mark when it recycles at its limit. A row at `off` stamps nothing."""
+    and the crossing mark (`limit_mark`) for a `relaunch` launch only where it is told it
+    may recycle itself (`selfrecycle.missing` with `told`): its arm would be accepted and
+    it warns at a mark.
+    The subconscious row stamps its mode under memory's variable, and with it the route
+    row its route (`subagent` when the row is unset). A subconscious at `off` stamps
+    neither."""
     env: dict[str, str] = {}
     if values.get("keep_warm") == "on":
         env[KEEP_WARM_ENV] = "on"
     if values.get("recycle_on_expiry") in ("clear", "compact"):
         env[RECYCLE_ON_EXPIRY_ENV] = str(values["recycle_on_expiry"])
-    if values.get("recycle_at_limit") in ("relaunch", "compact") and values.get("limit_at"):
-        _stamp(env, "usage", 1, "CROSSING_AT_ENV", str(values["limit_at"]))
+    if relaunch_holds(values):
+        _stamp(env, "usage", 1, "CROSSING_AT_ENV", limit_mark(values))
+    if values.get("subconscious") in ("automatic", "on-demand"):
+        _stamp(env, "memory", 1, "SUBCONSCIOUS_ENV", str(values["subconscious"]))
+        _stamp(env, "memory", 1, "SUBCONSCIOUS_ROUTE_ENV",
+               str(values.get("subconscious_route") or "subagent"))
     return env
+
+
+def relaunch_holds(values: Mapping[str, object]) -> bool:
+    """Whether a launch of `values` (its `harness`, `target`, `cwd` and the rest, as the
+    composer has them) is set to `recycle_at_limit = relaunch`, can recycle itself and is
+    told it may at its warn-at mark, by `selfrecycle.missing` with `told`; a launch not yet
+    placed in a slot counts as in one when its target is a slot."""
+    from .. import selfrecycle
+
+    if values.get("recycle_at_limit") != "relaunch":
+        return False
+    target = values.get("target")
+    return selfrecycle.missing(
+        harness=str(values.get("harness") or "claude"), target=str(target or ""),
+        in_slot=target == "slot", cwd=str(values.get("cwd") or "") or None,
+        values=values, source=None, told=True) is None
+
+
+def limit_mark(values: Mapping[str, object]) -> str:
+    """The mark a launch that relaunches itself is stamped to cross at, read when the
+    launch is composed: its `warn_at`, the mark usage warns it at, so the relaunch line
+    rides on that warning. `relaunch_holds` has made sure it is a mark."""
+    return str(values.get("warn_at") or "")
 
 
 def stamps(request_id: str, *, turns: bool = False, additions: Additions | None = None,
@@ -691,11 +764,18 @@ def child_env(caller_env: Mapping[str, str], composition: Composition,
 
 
 #: The short list of names a launch records from its child's environment
-#: (`launches.base_env_json`): the ones slots' server keeps, and `TMPDIR`, the private
-#: temporary directory the harness and its tools write to. Besides these names, every
-#: name starting with one of `BASE_PREFIXES`. A row made before the base was recorded
-#: takes these alone from the replaying process (and on Windows `WINDOWS_BASE_NAMES`).
-BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR")
+#: (`launches.base_env_json`): the ones slots' server keeps, `TMPDIR`, the private
+#: temporary directory the harness and its tools write to, and `CALLER_FIRST_NAMES`.
+#: Besides these names, every name starting with one of `BASE_PREFIXES`. A row made
+#: before the base was recorded takes these alone from the replaying process (and on
+#: Windows `WINDOWS_BASE_NAMES`).
+BASE_NAMES = ("HOME", "USER", "LOGNAME", "SHELL", "PATH", "LANG", "TZ", "TMPDIR",
+              "DBUS_SESSION_BUS_ADDRESS")
+#: The recorded names a replay takes from the replaying process when it holds them, and
+#: from the record only when it doesn't: the user's session bus, which can move at each
+#: login. On Linux the system keychain is reached over it, so a session without it can't
+#: read a secret kept there. Elsewhere the name is absent and adds nothing.
+CALLER_FIRST_NAMES = ("DBUS_SESSION_BUS_ADDRESS",)
 BASE_PREFIXES = ("LC_", "XDG_")
 #: The names a launch on Windows records besides those: the system's own locations and
 #: names, which a process there needs to start (`SYSTEMROOT` above all), and the user's
@@ -770,11 +850,14 @@ def replay_env(base: Mapping[str, str | None], caller_env: Mapping[str, str],
                terminal: bool = False) -> dict[str, str]:
     """The environment a replay's child is built from, before the scrub and the stamps:
     `base` (the row's recorded values; a credential recorded as set has no value and
-    adds nothing), then each name `pass_env` lists that `environ`, the replaying
-    process's environment, holds; for a resume into the caller's own terminal
-    (`terminal`), the caller's terminal names it holds (`TERMINAL_NAMES`). Nothing else of
-    `environ` comes in."""
+    adds nothing), with each of `CALLER_FIRST_NAMES` that `environ`, the replaying
+    process's environment, holds taken from it instead; then each name `pass_env` lists
+    that `environ` holds; for a resume into the caller's own terminal (`terminal`), the
+    caller's terminal names it holds (`TERMINAL_NAMES`). Nothing else of `environ` comes
+    in."""
     env = {name: value for name, value in base.items() if value is not None}
+    env.update({name: caller_env[name] for name in CALLER_FIRST_NAMES
+                if caller_env.get(name)})
     if terminal:
         env.update({name: caller_env[name] for name in TERMINAL_NAMES if name in caller_env})
     env.update({name: caller_env[name] for name in pass_env if name in caller_env})
@@ -831,17 +914,20 @@ def check_sizes(argv: Sequence[str], *, values: Mapping[str, object],
             raise TooLong(what, size, WORD, "bytes")
 
 
-__all__ = ["BASE_NAMES", "BASE_PREFIXES", "CODEX_KEEP", "COMMANDS", "CREDENTIAL",
-           "ENV_CLASS", "HEADER", "KEEP_WARM_ENV", "KEEP_WARM_LINE",
+__all__ = ["BASE_NAMES", "BASE_PREFIXES", "CALLER_FIRST_NAMES", "CODEX_KEEP", "COMMANDS",
+           "CREDENTIAL", "ENV_CLASS", "HEADER", "KEEP_WARM_ENV", "KEEP_WARM_LINE",
            "PROVIDER_SWITCHES", "RECORDED", "RECORDED_PREFIXES", "RECYCLE_ON_EXPIRY_ENV",
            "RELAUNCH_ENV", "RELAUNCHED", "REQUEST_ENV", "SCRUB_NAMES", "SCRUB_PREFIXES",
            "TERMINAL_NAMES",
            "WINDOWS_BASE_NAMES", "WINDOWS_LINE", "WORD", "Additions", "Composition",
            "BYPASS", "Context", "NoBrief", "NotYet", "PromptFile", "SETTINGS_SUFFIX",
            "SKIP_BYPASS_WARNING", "SettingsFile", "TooLong", "TurnsAdditions",
-           "Unreadable", "agent_role", "base_env", "check_sizes", "commands", "encode",
+           "Unreadable", "agent_role", "base_env", "check_sizes", "commands",
+           "director_words", "encode",
            "env_class", "child_env", "first_turn", "headless_words", "identity_block",
-           "locator", "no_credentials", "option_stamps", "prompt_path", "read_settings",
-           "replay_env", "scratch_dir", "scratch_root", "scratch_root_problem", "scrub",
-           "seat_text", "settings_file", "settings_path", "settings_value", "short_env",
+           "limit_mark", "locator", "no_credentials", "option_stamps",
+           "prompt_path", "read_settings", "relaunch_holds",
+           "replay_env", "scratch_dir", "scratch_name", "scratch_root",
+           "scratch_root_problem", "scrub", "seat_text", "settings_file", "settings_path",
+           "settings_value", "short_env",
            "skip_key_owed", "stamps", "without_settings", "write_prompt", "write_settings"]

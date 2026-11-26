@@ -1,7 +1,7 @@
 """Corrections: replacing a ruling and taking one back.
 
-Any ruling of the operator's can be corrected by a later ruling of his, which carries
-its own pointer. A correction is one `ruling.recorded` event that names the earlier
+Any ruling of the operator's can be corrected by a later ruling of the operator's, which
+carries its own pointer. A correction is one `ruling.recorded` event that names the earlier
 ruling: `supersedes` when the same thing is ruled again, `revokes` when the ruling is
 taken back and nothing is put in its place. Both rulings stay in the log. The fold marks
 the earlier one (`Ruling.replaced_by`, `Ruling.revoked_by`), and every reader takes the
@@ -19,7 +19,7 @@ is the table, one `Kind` for each sort of ruling this code knows:
 - `undo` gives the fields that the ruling that takes one back carries beside `revokes`.
   A ruling that changed a question names the question, and the fold then reads the
   question from the changes that are left; an answer taken back also says the question
-  is open, whatever it was when he answered. None means the kind is never taken back,
+  is open, whatever it was when it was answered. None means the kind is never taken back,
   and `instead` then gives the refusal, with the command that is the way back.
 - `again` says whether the kind is ruled a second time at all.
 
@@ -49,8 +49,8 @@ MOVE = "move:"
 PARK = "park:"
 NARROW = "narrow:"
 WITHDRAW = "withdraw:"
-#: What starts the item of a read-back, the operator's word that he read the list of
-#: rulings not yet shown to him; the time he read it through follows.
+#: What starts the item of a read-back, the operator's word of having read the list of
+#: rulings not yet shown to the operator; the time the list was read through follows.
 READBACK = "readback="
 
 #: What starts the item of a skip, the ruling that a step is not done; the step's name
@@ -79,7 +79,7 @@ ALONE = ""
 ID = re.compile(r"[CS]([1-9][0-9]*)")
 
 _QUESTION = re.compile(r"[QP][1-9][0-9]*")
-#: The item of a ruling of a decision: its key, `=` and what he chose.
+#: The item of a ruling of a decision: its key, `=` and what the operator chose.
 _DECISION = re.compile(r"B[1-9][0-9]*\.M[1-9][0-9]*=[a-z]+")
 
 
@@ -190,7 +190,7 @@ def _mark_it_after(ruling: states.Ruling, state: states.State, name: str) -> Unm
 
 def _read_back_again(ruling: states.Ruling, state: states.State, name: str) -> Unmet:
     return Unmet(
-        f"{ruling.id} is his word that he read the list of rulings through "
+        f"{ruling.id} is the operator's word of having read the list of rulings through "
         f"{(ruling.rules or '')[len(READBACK):]}, and a read-back is neither taken "
         "back nor replaced: each one is a ruling of its own, and the newest covers "
         "every one before it",
@@ -268,6 +268,21 @@ def find(state: states.State, ruling_id: str) -> states.Ruling | None:
         if ruling.id == ruling_id:
             return ruling
     return None
+
+
+def newest_replacing(state: states.State, ruling_id: str) -> states.Ruling | None:
+    """The newest ruling of `state` that replaces `ruling_id`: the one that replaced
+    it, or the one that replaced that, and so on along `replaced_by`, since a ruling
+    replaced already is corrected no further and the next correction replaces the one
+    in its place. None when nothing replaced it."""
+    newest = None
+    ruling = find(state, ruling_id)
+    passed = {ruling_id}
+    while ruling is not None and ruling.replaced_by not in (None, *passed):
+        passed.add(ruling.replaced_by)
+        ruling = find(state, ruling.replaced_by)
+        newest = ruling or newest
+    return newest
 
 
 def standing(state: states.State, item: str) -> states.Ruling | None:
@@ -393,5 +408,6 @@ def _said(rules: str | None) -> str:
 __all__ = ["REVOKE", "MOVE", "PARK", "NARROW", "WITHDRAW", "READBACK", "SKIP",
            "SKIP_ACTION", "FLOW", "CREDIT", "UNSTAGE", "UNAFTER",
            "ALONE", "ID", "Kind",
-           "KINDS", "kind_of", "item_of", "stands", "live", "find", "standing", "put_by",
+           "KINDS", "kind_of", "item_of", "stands", "live", "find", "newest_replacing",
+           "standing", "put_by",
            "ended", "can_be_taken_back", "taking_back", "replaces"]

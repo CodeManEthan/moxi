@@ -246,15 +246,40 @@ def test_with_notes_a_launch_without_notes_dir_passes_no_override(notes):
     assert notes.calls == [("/work", True, None)]
 
 
-def test_notes_with_no_dir_falls_back_to_the_launchers_own(notes):
+def test_notes_with_no_dir_for_the_launch_gives_no_handoff_dir(notes):
+    # A launch with no notes directory has no handoffs/ to read from, and the launcher's
+    # own folder is not used in its place while notes is installed.
     notes.answer["folder"] = None
-    assert handoffs.handoff_dir("/work") == handoffs.own_handoffs_dir()
+    with pytest.raises(handoffs.NoNotesDir) as caught:
+        handoffs.handoff_dir("/work")
+    assert caught.value.problem == ("this launch has no notes directory (no notes_dir and "
+                                    "none for /work), so it has no handoffs/ to read from")
+    assert caught.value.code == "no-notes-dir"
+    assert not handoffs.own_handoffs_dir(create=False).exists()
 
 
-def test_a_broken_notes_falls_back_to_the_launchers_own(notes):
+def test_a_broken_notes_gives_no_handoff_dir(notes):
     notes.found.state = modules.BROKEN
-    assert handoffs.handoff_dir("/work") == handoffs.own_handoffs_dir()
+    with pytest.raises(handoffs.NoNotesDir):
+        handoffs.handoff_dir("/work")
     assert notes.calls == []
+    assert not handoffs.own_handoffs_dir(create=False).exists()
+
+
+def test_a_notes_that_raises_gives_no_handoff_dir(notes, monkeypatch):
+    def broken(path, *, create=False, override=None):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(notes.found.api, "handoffs_dir", broken)
+    with pytest.raises(handoffs.NoNotesDir) as caught:
+        handoffs.handoff_dir("/work")
+    assert "OSError: disk gone" in caught.value.problem
+
+
+def test_a_launchs_dir_carries_the_refusal(notes):
+    notes.answer["folder"] = None
+    with pytest.raises(handoffs.NoNotesDir):
+        handoffs.handoff_dir_of_row(row(identity="planner"))
 
 
 # -- the current session -------------------------------------------------------------------

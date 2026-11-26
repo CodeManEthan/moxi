@@ -24,8 +24,11 @@ dependencies = ["moxi>=0.1.9,<0.2", "psutil>=5.9"]
 # through moxi.modules.load("projects"), and projects reads services' link through its
 # `moxi.projects` group below.
 projects = ["moxi-projects>=0.1,<0.2"]
+# What a stop of slots' server would end, which the page reads before it stops it.
+# services reaches slots only through moxi.modules.load("slots").
+slots = ["moxi-slots>=0.1,<0.2"]
 # The browser UI shell: with it, services' page shows there.
-ui = ["moxi-ui>=0.2,<0.3"]
+ui = ["moxi-ui>=0.2.8,<0.3"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

@@ -1,6 +1,6 @@
 [project]
 name = "moxi-sessions"
-version = "0.2.9"
+version = "0.2.10"
 description = "Read each harness's own session records in one shape: find a session and its subagents, list a root's sources, read records forward or back."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,11 +21,23 @@ dependencies = ["moxi>=0.1.9,<0.2"]
 
 [project.optional-dependencies]
 # The browser UI shell: with it, the sessions page and its window block show there.
-ui = ["moxi-ui>=0.2,<0.3"]
-# Redaction for `moxi sessions read`, through secrets' credentials and broad sets.
-secrets = ["moxi-secrets>=0.1,<0.2"]
+ui = ["moxi-ui>=0.2.8,<0.3"]
+# Redaction for `moxi sessions read`, through secrets' credentials and broad sets, and
+# with personal-data's validators the chat redaction the connector's tools need.
+secrets = ["moxi-secrets[personal-data]>=0.1,<0.2"]
 # turns enforces the transcript-read guard sessions declares.
 turns = ["moxi-turns>=0.2,<0.3"]
+# projects' read API at interface 2: which project holds each folder, for the facts
+# sessions gives the Projects page. sessions reaches it only through
+# moxi.modules.load("projects", interface=2).
+projects = ["moxi-projects>=0.1.4,<0.2"]
+# The session list and transcript reads in the Claude apps, through the public MCP host:
+# the host's provider interface, and personal-data's validators for the chat redaction.
+# The redaction itself is secrets', which the `secrets` extra installs; without it every
+# tool refuses. Both need releases not yet out: the host with `Limit`, and secrets with
+# `chat_redact` and its `between` step. sessions reaches the host only through
+# moxi.modules.load("connector", interface=1).
+connector = ["moxi-connector>=0.1,<0.2", "python-stdnum>=2.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -35,6 +47,10 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 # The module's one announcement, read by moxi.modules.
 [project.entry-points."moxi.modules"]
 sessions = "moxi_sessions.module"
+
+# sessions' tools on the connector, which only the host loads.
+[project.entry-points."moxi.connector.providers"]
+sessions = "moxi_sessions.connector:PROVIDER"
 
 # sessions' guard for turns: the transcript-read guard.
 [project.entry-points."moxi.turns.guards"]

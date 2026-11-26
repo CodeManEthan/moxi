@@ -16,7 +16,7 @@ import json
 import sys
 
 import pytest
-from moxi_dev.testing import wait_for
+from moxi_dev.testing import PROC_WAIT_S, wait_for
 from playwright.sync_api import expect
 
 import launcher_page_kit as kit
@@ -25,7 +25,7 @@ from moxi_launcher import presets
 WAIT_S = pytest.importorskip("moxi_ui.testing", reason="ui is not installed").WAIT_S
 _copying = pytest.importorskip("moxi_ui.testing.browser", reason="ui is not installed")
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(120),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(120, method="thread"),
               pytest.mark.skipif(sys.platform == "win32",
                                  reason="the fake harness is a script run by its #! line")]
 
@@ -236,7 +236,7 @@ def test_a_row_found_and_changed_is_in_the_launch_and_on_its_groups_line(fake, u
     assert "off_posture" not in body and "handoff" not in body["values"], body
     expect(piece.locator('.said [data-line="started"]')).to_be_visible()
     [run] = wait_for(lambda: [run for run in harness.runs() if BRIEF in " ".join(run["argv"])],
-                     10, what="the fake harness's run with the brief")
+                     PROC_WAIT_S, what="the fake harness's run with the brief")
     argv = run["argv"]
     assert argv[argv.index("-n") + 1] == "helper-1", argv
     assert argv[argv.index("--add-dir") + 1] == home_dir, argv
@@ -324,7 +324,7 @@ def headless(piece) -> None:
 def argv_of(harness, brief: str) -> list[str]:
     """The command line of the fake harness's run with `brief`, once there is one."""
     [run] = wait_for(lambda: [run for run in harness.runs() if brief in " ".join(run["argv"])],
-                     10, what="the fake harness's run with the brief")
+                     PROC_WAIT_S, what="the fake harness's run with the brief")
     return run["argv"]
 
 
@@ -395,7 +395,7 @@ def test_a_value_that_can_do_harm_is_on_after_turn_on_and_launches_with_its_flag
     expect(piece.locator('.said [data-line="started"]')).to_be_visible()
     expect(piece.locator('.said [data-line="refused"]')).to_have_count(0)
     [run] = wait_for(lambda: [run for run in harness.runs() if brief in " ".join(run["argv"])],
-                     10, what="the fake harness's run with the brief")
+                     PROC_WAIT_S, what="the fake harness's run with the brief")
     argv = run["argv"]
     assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions", argv
     # It held for that launch only: the row is back at the form's value, the line names the

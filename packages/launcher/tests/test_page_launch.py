@@ -220,7 +220,8 @@ def form_of(preset: dict) -> dict:
 def filled(preset: dict) -> dict:
     """The request a form filled from `/api/form` for `preset` sends untouched, as the
     panel builds it: each field with a value in `values`, each empty one in `leave_out`
-    (an unticked bool among them), a withheld text kept and in neither."""
+    (an unticked bool among them, unless its default is true: that one sends "false"), a
+    withheld text kept and in neither."""
     said = form_of(preset)
     harness = said["harness"]
     values: dict = {"harness": harness}
@@ -229,10 +230,11 @@ def filled(preset: dict) -> dict:
         name = found["name"]
         if name == "harness" or found["withheld"]:
             continue
-        kind = catalog.row(harness, name).type
+        row = catalog.row(harness, name)
         if found["items"] is not None:
             values[name] = found["items"]
-        elif found["value"] is not None and not (kind == "bool" and found["value"] == "false"):
+        elif found["value"] is not None and not (row.type == "bool" and found["value"] == "false"
+                                                 and row.default is not True):
             values[name] = found["value"]
         else:
             leave_out.append(name)
@@ -363,52 +365,52 @@ def test_a_defaults_row_the_mode_does_not_take_stays_not_applied(work, harness):
     assert "approval" in said["not_applied"]
 
 
-def test_limit_at_at_its_shipped_word_is_not_refused_for_its_companion(work, monkeypatch):
+def test_a_retired_row_is_not_on_the_form_and_is_refused_typed(work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
     write_presets(f'[seat.lead]\ncwd = "{work}"\n')
     body = filled({"seat": "lead"})
-    assert (body["values"]["limit_at"], body["values"]["recycle_at_limit"]) == ("1x", "off")
+    assert "limit_at" not in body["values"] and "limit_at" not in body["leave_out"]
     request, _ = pagehandlers.launch_request(body, "r1")
     assert "limit_at" not in request.typed
-    assert job.placed(request).values["limit_at"] == "1x"
-    # Typed, the same word would be refused: limit_at needs recycle_at_limit.
-    with pytest.raises(catalog.Refused, match="limit_at"):
+    assert "limit_at" not in job.placed(request).values
+    with pytest.raises(catalog.Retired, match="limit_at"):
         job.placed(dataclasses.replace(request, typed={"limit_at": "1x"}))
 
 
-def test_a_word_enum_left_out_with_its_companion_off_launches_with_no_recycling(
-        work, monkeypatch):
+def test_the_pages_preview_refuses_a_scratch_set_to_recycle_itself(work, monkeypatch):
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "compact"\n'
-                  'limit_at = "2x"\n')
-    body = edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, ["limit_at"])
+    write_presets('[seat.scratchy]\nscratch = true\nrecycle_at_limit = "relaunch"\n')
+    said = previewed(filled({"seat": "scratchy"}))
+    assert codes(said) == ["scratch-recycle"] and said["ticket"] is None
+
+
+def test_a_word_enum_left_out_launches_with_no_recycling(work, monkeypatch):
+    monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "cache"))
+    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_on_expiry = "compact"\n')
+    body = edited(filled({"seat": "lead"}), {}, ["recycle_on_expiry"])
     request, _ = pagehandlers.launch_request(body, "r1")
-    assert dict(request.typed) == {"recycle_at_limit": "off"}
-    assert tuple(request.left_out) == ("limit_at",)
+    assert dict(request.typed) == {}
+    assert tuple(request.left_out) == ("recycle_on_expiry",)
     resolved = job.placed(request)
-    assert resolved.values["recycle_at_limit"] == "off"
-    assert (resolved.values["limit_at"], resolved.sources["limit_at"]) == ("1x", "left-out")
+    assert (resolved.values["recycle_on_expiry"], resolved.sources["recycle_on_expiry"]) == (
+        "off", "left-out")
 
 
-def test_limit_at_the_preset_sets_to_its_shipped_word_can_still_be_left_out(
+def test_a_word_the_preset_sets_to_its_shipped_value_can_still_be_left_out(
         work, monkeypatch, tmp_path, fixed_ids):
-    # The seat chose limit_at even though "1x" is the shipped word, so leaving it out
-    # removes that choice, as --leave-out does on the command line.
+    # The seat chose recycle_at_limit even though "off" is the shipped word, so leaving it
+    # out removes that choice, as --leave-out does on the command line.
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(slots, "links", lambda name: name in ("turns", "usage"))
-    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "compact"\n'
-                  'limit_at = "1x"\n')
-    body = edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, ["limit_at"])
+    write_presets(f'[seat.lead]\ncwd = "{work}"\nrecycle_at_limit = "off"\n')
+    body = edited(filled({"seat": "lead"}), {}, ["recycle_at_limit"])
     said = previewed(body)
-    assert said["refused"] == [] and said["left_out"] == ["limit_at"]
-    line = ["--seat", "lead", "--recycle-at-limit=off", "--leave-out", "limit_at"]
+    assert said["refused"] == [] and said["left_out"] == ["recycle_at_limit"]
+    line = ["--seat", "lead", "--leave-out", "recycle_at_limit"]
     request, composition = command_line_preview(line)
     assert page_shown(said) == shown(composition)
     assert said["left_out"] == list(request.left_out)
     assert said["command"] == cli.command_line(["moxi", "launcher", "run", *line])
-    # Kept, the seat's limit_at needs the recycling the form turned off.
-    kept = previewed(edited(filled({"seat": "lead"}), {"recycle_at_limit": "off"}, []))
-    assert codes(kept) == ["needs-module"] and kept["refused"][0]["row"] == "limit_at"
 
 
 @POSIX
@@ -531,8 +533,7 @@ def test_an_unchanged_form_types_nothing_and_leaves_nothing_out_over_every_prese
     write_presets(RULE_FILE.format(work=work, there=there) + f"""
 [seat.lead]
 cwd = "{work}"
-recycle_at_limit = "compact"
-limit_at = "1x"
+recycle_at_limit = "off"
 
 [seat.headless]
 harness = "codex"
@@ -557,12 +558,12 @@ remote_control = false
 
 def _sample(row: catalog.Row, work: Path) -> tuple[object, dict]:
     """A value of `row` other than its shipped default, and the rows it needs beside it."""
-    if row.name == "limit_at":
-        return "2x", {"recycle_at_limit": "compact"}
     if row.name == "slot":
         return "3", {"target": "slot"}
-    if row.optional_value or row.type == "bool":
+    if row.optional_value:
         return True, {}
+    if row.type == "bool":
+        return not row.default, {}
     if row.values:
         return next(v for v in row.values if v != row.default), {}
     if row.name == catalog.EXTRA:
@@ -582,7 +583,8 @@ EVERY_ROW = [(harness, name, layer)
              for harness in catalog.HARNESSES
              for name in catalog.offered(harness, _every_module_but_projects)
              if name not in ("harness", "project")
-             for layer in ("defaults", "seat")]
+             for layer in ("defaults", "seat")
+             if not (layer == "defaults" and name in presets.PER_SEAT)]
 
 
 def _resolved(request) -> tuple:
@@ -610,12 +612,39 @@ def test_every_row_a_layer_sets_is_kept_as_filled_and_left_out_when_emptied(
     request, command = pagehandlers.launch_request(body, "r1")
     assert dict(request.typed) == {} and tuple(request.left_out) == ()
     assert "--leave-out" not in command
+    row = catalog.row(harness, name)
+    if row.type == "bool" and row.default is True:
+        # The panel has no empty state for it: unticked sends false, ticked true.
+        return
     # Emptied as the panel empties it (a withheld text: its keep box unticked).
     request, command = pagehandlers.launch_request(edited(body, {}, [name]), "r2")
     assert dict(request.typed) == {} and tuple(request.left_out) == (name,)
     assert command[-2:] == ["--leave-out", name]
     line = api.LaunchRequest(seat="s", off_posture=True, left_out=(name,), request_id="r3")
     assert _resolved(request) == _resolved(line)
+
+
+def test_the_policy_opt_out_round_trips_through_the_form(work, monkeypatch):
+    # Its default is true, so the panel sends an unticked box as false, never a leave-out.
+    monkeypatch.setattr(slots, "links", _every_module_but_projects)
+    write_presets(f'[defaults]\ncwd = "{work}"\n[seat.s]\nidentity = "s"\n'
+                  'takes_policy_directors = false\n[seat.t]\nidentity = "t"\n')
+    body = filled({"seat": "s"})
+    assert body["values"]["takes_policy_directors"] == "false"
+    request, _ = pagehandlers.launch_request(body, "r1")
+    assert "takes_policy_directors" not in request.typed
+    assert presets.resolve(request, available=slots.links).values[
+        "takes_policy_directors"] is False
+    ticked, command = pagehandlers.launch_request(
+        edited(body, {"takes_policy_directors": "true"}, []), "r2")
+    assert ticked.typed["takes_policy_directors"] is True
+    assert "--takes-policy-directors" in command
+    body = filled({"seat": "t"})
+    assert body["values"]["takes_policy_directors"] == "true"
+    unticked, command = pagehandlers.launch_request(
+        edited(body, {"takes_policy_directors": "false"}, []), "r3")
+    assert unticked.typed["takes_policy_directors"] is False
+    assert "--no-takes-policy-directors" in command
 
 
 # --- groups of rows that exclude each other ---
@@ -691,7 +720,8 @@ def _presets_names(module) -> set[str]:
 def test_no_route_or_handler_names_a_writer_of_the_presets_file():
     readers = {"read", "check", "layered", "harness_of", "Request", "Presets", "Preset",
                "Layered", "ERROR", "DEFAULTS", "PRESET", "TWO_SPELLINGS", "mode_of",
-               "off_posture_rows", "SHIPPED", "TYPED", "LEFT_OUT", "dir_place"}
+               "off_posture_rows", "SHIPPED", "TYPED", "LEFT_OUT", "dir_place", "HOME",
+               "projects_api"}
     for module in (page, pagehandlers):
         text = Path(module.__file__).read_text(encoding="utf-8")
         assert "presets.toml" not in text and "presets.path" not in text, module.__name__

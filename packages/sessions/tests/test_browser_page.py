@@ -22,7 +22,7 @@ from playwright.sync_api import expect
 from browser_seed import (AGENT, CHILD_THREAD, CUT_BYTES, LONG, LONG_CHARS, SESSION, THREAD,
                           TURNS, seed, shell_options)
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="sessions' page is checked in a browser on Linux; the "
                                         "Windows and macOS runs are owed")]
@@ -76,7 +76,11 @@ def test_a_claude_session_shows_its_header_and_last_turns_and_pages_back(seeded,
     expect(view).not_to_contain_text("never sends")
     view.get_by_role("button", name="Earlier turns").click()
     expect(texts(panel, "user")).to_have_text([f"turn {n}" for n in range(TURNS)])
-    expect(view.locator('[data-line="start"]')).to_have_text("This is the start of the session.")
+    # With launcher installed, whose log holds no launch, the start says the session was
+    # started by hand.
+    launcher = ui_page.evaluate("async () => (await import('/m/ui/client.js')).installed('launcher')")
+    expect(view.locator('[data-line="start"]')).to_have_text(
+        re.compile(r"^Started .* in project, by hand$") if launcher else "This is the start of the session.")
     expect(view.get_by_role("button", name="Earlier turns")).to_have_count(0)
 
 

@@ -3,6 +3,7 @@ failing and passing; and that looking changes nothing."""
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import stat
@@ -12,7 +13,7 @@ import pytest
 from moxi import cli, modules
 from moxi.doctor import Row
 
-from moxi_rounds import asking, doctor, log, opening, paths
+from moxi_rounds import asking, check_line, checking, doctor, log, opening, paths
 from moxi_rounds.cli import main
 
 A = "proj-a/a-round"
@@ -99,7 +100,7 @@ def test_the_announcement_names_the_doctor_and_the_core_runs_it(rounds, capsys):
 def test_with_no_project_every_row_is_fine():
     found = by_name()
     assert list(found) == ["git", "rounds folders", "logs", "index", "finish locks",
-                           "leftovers"]
+                           "check lock", "private files", "leftovers"]
     assert all(row.state == "ok" for row in found.values()), found
 
 
@@ -347,6 +348,105 @@ def test_an_index_of_another_schema_is_named_and_the_logs_still_answer(rounds):
     assert found["logs"].state == "ok"
 
 
+# -- the check lock ----------------------------------------------------------------------------
+
+def hold_check_lock(output: Path, **fields) -> dict:
+    """A holder record for this process, as the run that holds the check lock writes
+    it, its output `output`; returns it."""
+    record = {**check_line.me(), "round": "proj-a/x", "stage": "B1", "step": "check",
+              "repo": "proj-a", **fields}
+    check_line.write_holder(checking.lock_file(), {**record, "output": str(output)})
+    return record
+
+
+def wait_in_line(name: str, stage: str, **times):
+    return check_line.take(checking.lock_file(),
+                           {**check_line.me(), "round": name, "stage": stage,
+                            "step": "check", "repo": "proj-a", **times})
+
+
+def test_the_doctor_says_the_check_lock_is_free():
+    row = by_name()["check lock"]
+
+    assert (row.state, row.detail) == ("ok", "free; 0 waiting")
+
+
+def test_the_doctor_shows_the_holder_and_the_line_in_order(tmp_path):
+    output = tmp_path / "check-3.log"
+    output.write_bytes(b"x" * 2048)
+    hold_check_lock(output)
+    for name, stage in (("proj-a/y", "B2"), ("proj-a/z", "B1")):
+        wait_in_line(name, stage)
+
+    row = by_name()["check lock"]
+
+    pid = os.getpid()
+    assert row.state == "ok", row
+    assert row.detail.startswith(f"held by pid {pid} (proj-a/x B1, repo proj-a) for 0 min; "
+                                 "its output check-3.log, 2.0 KB, last written ")
+    assert row.detail.endswith(f"; 2 waiting: 1. pid {pid} proj-a/y B2 for 0 min; "
+                               f"2. pid {pid} proj-a/z B1 for 0 min")
+
+
+def test_the_doctor_warns_of_a_quiet_holder(tmp_path):
+    import time
+
+    output = tmp_path / "check-3.log"
+    output.write_text("the last line\n", encoding="utf-8")
+    then = time.time() - check_line.QUIET_S - 60
+    os.utime(output, (then, then))
+    hold_check_lock(output)
+
+    row = by_name()["check lock"]
+
+    assert row.state == "warn" and row.detail.endswith("; 0 waiting; it may be hung")
+    assert "last written 31 min ago" in row.detail
+    assert row.fix == (f"look at pid {os.getpid()} (its output: {output}); if it is hung, "
+                       "end it: the lock frees with the process and the next in line "
+                       "takes it")
+
+
+def test_the_doctor_counts_an_empty_output_from_when_the_lock_was_taken(tmp_path):
+    import time
+
+    output = tmp_path / "check-3.log"
+    output.touch()
+    hold_check_lock(output)
+    record = json.loads(check_line.holder_file(checking.lock_file()).read_text())
+    record["since"] = log.stamp(time.time() - check_line.QUIET_S - 60)
+    check_line.holder_file(checking.lock_file()).write_text(json.dumps(record))
+
+    assert by_name()["check lock"].state == "warn"
+
+
+def test_the_doctor_warns_of_a_stale_ticket():
+    import time
+
+    ticket = wait_in_line("proj-a/y", "B2")
+    then = time.time() - check_line.TICKET_STALE_S - 30
+    os.utime(ticket, (then, then))
+
+    row = by_name()["check lock"]
+
+    pid = os.getpid()
+    assert row.state == "warn", row
+    assert row.detail.startswith(f"free; 1 waiting: 1. pid {pid} proj-a/y B2 for 0 min; "
+                                 f"the ticket of pid {pid} has not been touched for ")
+    assert row.fix == (f"pid {pid} waits but does not run (stopped or suspended): resume "
+                       "it to take its place back, or end it")
+
+
+def test_the_doctor_warns_of_a_lock_held_with_no_holder_record(holder):
+    held = holder(checking.lock_file())
+
+    row = by_name()["check lock"]
+    held.stdin.close()
+
+    assert (row.state, row.detail) == ("warn", f"held by pid {held.pid}, which wrote no "
+                                       "holder record; 0 waiting; a check that keeps no "
+                                       "holder record holds it")
+
+
 # -- looking changes nothing -------------------------------------------------------------------
 
 @pytest.mark.parametrize("index", ["fresh", "stale", "none"])
@@ -368,5 +468,5 @@ def test_the_doctor_changes_no_byte_or_time_of_any_file(rounds, tmp_path, capsys
     assert everything(tmp_path) == before
     assert states == {"git": "ok", "rounds folders": "ok", f"log {B}": "fail",
                       "index": "warn" if index == "stale" else "ok", "finish locks": "ok",
-                      "leftovers": "ok"}
+                      "check lock": "ok", "private files": "ok", "leftovers": "ok"}
     assert os.path.exists(paths.index_file()) == (index != "none")

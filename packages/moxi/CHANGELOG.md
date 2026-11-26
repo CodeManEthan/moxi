@@ -2,6 +2,40 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi config` reaches a table a module keeps in a file of its own. A module names it in
+  its announcement's new `CONFIG_TABLES` (`{name: "package.module:NAME"}`; `moxi modules
+  --json` lists it as `config_tables`), and the hook it names lists the table's rows and
+  changes one. `moxi config <module> show` and `show --json` list the rows after the
+  module's own keys as `<table>.<row>`, with `table_title`, `table_line`, `table_file` and
+  `applies`, and `warning`, `refused` and `clear_only` where the module gives them. `moxi
+  config set` and `unset` of a row call the hook, with the same exit codes, `--json`
+  answer and history line as a config key, and print the module's warning lines after
+  their own (on stderr as `warning: <line>` with `--json`, so stdout stays one object).
+  `--add` and `--remove` on a row are refused. When the table's file can't be read,
+  `show --json` gives one item with `table_error` and `table_fix` in place of the rows
+  and exits 1; when the module's config file can't be read, its error object gains
+  `keys`, the tables' rows, which `set` still writes. A table named like a top-level key
+  of the module's own schema is refused when `moxi config` reads the tables. A module
+  with no `CONFIG_TABLES` shows exactly what it showed before.
+- New `moxi install <module> --setup-only`: runs an installed module's `SETUP` again in a
+  fresh process under the core lock and records the version it ran at in `setup.json`,
+  as an install's settle step does, and nothing else: no install, no index, no catalogue
+  gate, no home move, units, skills, questions or listeners. It works on a module the
+  catalogue marks unreleased, or one another tool installed. A module not installed here
+  is refused (exit 3); one that declares no `SETUP` is said and nothing is recorded; a
+  `SETUP` that fails exits 1 and leaves the record as it was. It takes no other option.
+- The doctor's `setup version` row names `moxi install <module> --setup-only` as its
+  fix, in place of `moxi install <module>`, which refuses a module not on PyPI. A module
+  that declares no `SETUP` no longer gets the row: it has no setup to run again.
+- The terminal walk's docstring names the person neutrally, never "his".
+- A `moxi.ipc` Unix server closed within a second of an accept failing at the
+  file-descriptor limit no longer logs errors after close: `close()` cancels the accept
+  retries asyncio still holds for its listener, each of which logged
+  `Invalid file descriptor: -1` with a traceback when it ran on the closed socket.
+- `moxi.proc.run` takes `first_signal` and `grace_s`: on POSIX a timed-out run sends its
+  group that signal first (`"SIGINT"`, which test runners stop cleanly on) and waits
+  `grace_s` seconds before the SIGKILL. The defaults, SIGTERM and `KILL_GRACE`, are
+  unchanged. A module that passes them needs `moxi>=0.1.11`.
 - On Windows `moxi doctor --costs` shows a module's daemons' open handles in a row of its
   own, `cost handles`, as `N open handles`, and never compares them with the module's
   `fds` budget, a POSIX fd limit: a handle count also holds events, threads and registry
@@ -58,6 +92,13 @@
   held back since the last line, in place of asyncio's traceback for each failure (up to
   101 per readiness event). `serve` puts a filter in front of the loop's exception handler
   to do it; every other context reaches that handler as before.
+- A retired key may carry `left_out = true`, for a key in a file every process of the
+  module reads, where one stale line would stop them all. A file that still sets such a
+  key reads as though it didn't: the `Settings` list it in `left_out`, by name with its
+  `retired` words, in place of a `ConfigError`. `moxi config check` passes and warns,
+  naming the key and its `retired` words; `moxi config set` still refuses the key, and
+  `moxi config unset` removes its line from the file. A module that marks a key `left_out` needs `moxi>=0.1.11`: an older core refuses its
+  schema for the unknown field.
 
 ## 0.1.10 (unreleased)
 

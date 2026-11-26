@@ -38,7 +38,10 @@ read, and the key's replace rule makes that harmless: a row whose key is stored 
 replaced only when its text differs.
 
 **Which sources.** The main sessions of each harness in config `harnesses`; subagents only
-with `index.include_subagents` on, their rows under their main session's id. A Codex thread whose
+with `index.include_subagents` on, their rows under their main session's id. A subagent
+that was a subconscious recall's fork (its agent id is a fork id in memory's recall log)
+is never read, and any rows of it read before its id reached the log are taken out when
+it is next met, since the fork holds a copy of its parent's conversation. A Codex thread whose
 import marks say it was imported (it is listed in Codex's imports file, or its turns
 carry the import prefix) is skipped: the Claude Code transcript is the original. A
 compressed Codex rollout, which sessions doesn't read, is recorded in `sources` and counted
@@ -69,12 +72,47 @@ didn't answer, or one config `harnesses` leaves out), records the counts dropped
 kept, frees its locks and starts one child: the waiting request's when one waits, else one
 walk.
 
+**The version rebuild.** Each generation records which secrets `redact` stored its rows
+(`index.stored_redact_version`). A rebuild that replaces one below the installed secrets'
+`REDACT_VERSION` redacts every row again: it reads every source from its start as any
+rebuild does, and then, per source, keeps everything of each source it didn't read to its
+end (a gone file, a folder that didn't answer, a compressed rollout, a harness config
+`harnesses` leaves out, a subagent's with `index.include_subagents` off, an imported
+thread, a read that failed): its rows and tails, its `sources` row and its secret-path
+calls, each kept text trimmed at its stored cut (`rows.EDGE_CHARS`), redacted again and
+cut to today's sizes. It removes no session from the session table. A row of a source it
+read to its end that the source no longer gives leaves, as in any rebuild, unless its
+session also has a source it didn't read to its end. Nothing an ingest does starts it:
+only a typed `moxi memory reindex` does, and until then an ingest stores its new rows
+under the new `redact` and leaves the stored ones as they are. It records the version it
+replaced (`REPLACED_KEY`), and the new generation records today's, so the next rebuild
+is an ordinary one, which drops what a rebuild drops.
+
+**Writers.** sessions is read at interface 7 (`SESSIONS_INTERFACE`), whose `writer`
+names each row's writer as the row is written. A row read again whose writer differs
+is replaced. A rebuild's copy keeps the writer a row was stored with, and a row copied
+from a generation from before the column has none, as every row stored before it has
+until a rebuild, or a walk reading a waiting source again, reads its source.
+
 **The session table.** For each main session it reads, a child writes the label when the
 row has none, the newest record's time, and the launch kind. It asks the launcher for the
 kind of a session whose row has none or isn't settled. The kind is settled once the index
 holds a model answer of the session and the launcher answered, with a kind or with none;
 with no launcher interface, at that read with no kind. A launcher that can't be asked
 leaves it unsettled.
+
+**Sources waiting on a folder.** A source a walk or a rebuild couldn't read because its
+folder raised (an archive folder offline, a permission or read error) waits on that
+folder, recorded in the state store (`state.Waiting`); a rebuild records, in place of
+what waited before, each source it tried and couldn't read and each source of the
+generation it replaces in a folder that didn't answer that it didn't read. Every later
+walk reads each waiting source again from its start, whatever its time, once its folder
+lists, so a row a rebuild copied with no writer gets one. A source stops waiting when a
+read reaches its end, when the walk finds it and chooses not to read it, or when its
+folder answered and the source is gone. A rebuild with a folder that didn't answer lists
+and reads that harness once more before it decides (`Ingest.walk_again`). A compressed
+Codex rollout, which sessions never reads, never waits: its rows keep no writer.
+`writerless` tells the rows with no writer apart by which of these holds.
 
 A failure that stops a child (config memory can't use, a redaction set that can't run) is
 left as the doctor record `ingest`, which the next child that finishes clears.
@@ -90,7 +128,7 @@ import sys
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 from . import roots, index, labels, links, rows, settings, state, table
 
@@ -103,6 +141,9 @@ KIND_WAIT = 1.0
 RECORD = "ingest"
 #: A `sources` row's reuse value for a compressed rollout.
 COMPRESSED = "compressed"
+#: The `meta` key a version rebuild writes: the `redact_version` of the generation it
+#: replaced.
+REPLACED_KEY = "replaced_redact_version"
 #: How far up a chain of subagents a child looks for the main session.
 MAX_DEPTH = 16
 #: How a probe of sessions' `find` that couldn't read its root begins.
@@ -183,10 +224,20 @@ class Role:
     agent: str | None = None
 
 
-def _api():
-    from moxi_sessions import api
+#: The sessions interface memory reads at: the records and the writer of each.
+SESSIONS_INTERFACE = 7
 
-    return api
+
+def _api():
+    """sessions' API at `SESSIONS_INTERFACE`. Raises `RuntimeError` when the sessions
+    installed doesn't offer it."""
+    from moxi import modules
+
+    found = modules.load("sessions", interface=SESSIONS_INTERFACE)
+    if found.api is None:
+        raise RuntimeError(f"memory reads sessions at interface {SESSIONS_INTERFACE}: "
+                           f"{found.reason or found.state}")
+    return found.api
 
 
 def source_key(src) -> str:
@@ -231,6 +282,35 @@ def not_read(conn) -> int:
         "AND r.session_id = s.session_id)", (json.dumps(COMPRESSED),)).fetchone()[0]
 
 
+class Writerless(NamedTuple):
+    """The rows that record no writer, told apart: those a `moxi memory reindex` gives
+    one (`fixable`), those of a session found only as compressed Codex rollouts, which no
+    reindex can read (`compressed`), and those of a session with a source waiting on a
+    folder (`waiting`), which a walk reads again once the folder answers."""
+
+    fixable: int
+    compressed: int
+    waiting: int
+
+
+def writerless(conn, state_schema: str | None = None) -> Writerless | None:
+    """The rows of the generation `conn` reads that record no writer, told apart
+    (`Writerless`); None for a generation at a schema before the column. `state_schema`
+    names memory's state store attached to `conn`, which says which sessions wait; with
+    none, no row counts as waiting."""
+    if not index.has_writer(conn):
+        return None
+    waits = (f"EXISTS (SELECT 1 FROM {state_schema}.waiting AS w WHERE "
+             "w.harness = r.harness AND w.session_id = r.session_id)"
+             if state_schema and state.has_waiting(conn, state_schema) else "0")
+    waiting, compressed, total = conn.execute(
+        f"SELECT coalesce(sum(w), 0), coalesce(sum(c AND NOT w), 0), count(*) FROM ("
+        f"SELECT {waits} AS w, EXISTS (SELECT 1 FROM sources AS s WHERE "
+        "s.harness = r.harness AND s.session_id = r.session_id AND s.reuse = ?) AS c "
+        "FROM rows AS r WHERE r.writer IS NULL)", (json.dumps(COMPRESSED),)).fetchone()
+    return Writerless(total - waiting - compressed, compressed, waiting)
+
+
 class Ingest:
     """One child's reads into one open generation (`conn`), with the session table
     (`sc`)."""
@@ -253,7 +333,23 @@ class Ingest:
         self.find_roots: dict[str, list[str]] = {}
         self.begun: set[tuple[str, str]] = set()
         self.broken: set[tuple[str, str]] = set()
+        self.read_whole: dict[tuple[str, str], str] = {}
         self.compressed: set[tuple[str, str]] = set()
+        #: Each source this run couldn't read: `(harness, source key)` to its main
+        #: session, the id `find` takes for it, and why.
+        self.unread: dict[tuple[str, str], tuple[str, str, str]] = {}
+        #: The sources this run read from their start to their end.
+        self.from_start: set[tuple[str, str]] = set()
+        #: The sources this run began to read, and those it found and chose not to
+        #: read (an imported thread, a subagent with `index.include_subagents` off).
+        self.touched: set[tuple[str, str]] = set()
+        self.passed: set[tuple[str, str]] = set()
+        #: The sessions a rebuild's second pass reads again whole.
+        self.again: set[tuple[str, str]] = set()
+        #: The sources waiting on a folder when the walk began, and the
+        #: `(harness, folder, lookup)` groups of them it asked their folder for cleanly.
+        self.waiting: list[state.Waiting] = []
+        self.asked_waiting: set[tuple[str, str, str]] = set()
         self._reading: Seen | None = None
         self.sc = sc
         self.harnesses = tuple(config["harnesses"])
@@ -267,6 +363,7 @@ class Ingest:
         self.mains: dict[tuple[str, str], str] = {}
         self.seen: set[tuple[str, str]] = set()
         self.report = Report(mode)
+        self._forks: frozenset[tuple[str, str]] | None = None
 
     # -- the launcher ------------------------------------------------------------------
 
@@ -345,6 +442,21 @@ class Ingest:
         if session is not None:
             self.broken.add(session)
 
+    def _unread(self, src, main: str | None, why: str) -> None:
+        """Note a source this run couldn't read, so it waits on its folder
+        (`state.Waiting`)."""
+        own = _text(getattr(src, "session_id", None))
+        session = main or own
+        if session is not None:
+            self.unread[(src.harness, source_key(src))] = (session, own or session, why)
+
+    def _clean(self, key: tuple[str, str]) -> bool:
+        """Whether this run read the source `key` names from its start to its end, its
+        session not one it began and couldn't read to its end."""
+        main = self.read_whole.get(key)
+        return (key in self.from_start and main is not None
+                and (key[0], main) not in self.broken)
+
     def find_in(self, harness: str, session_id: str, asked: list[str] | None = None):
         """The hits of `find` for a session: in `asked` when given, else in the folders
         this run listed for the harness that answered its start, else the live root. A
@@ -415,6 +527,29 @@ class Ingest:
 
     # -- reading one source ------------------------------------------------------------
 
+    def recall_fork(self, harness: str, agent: str | None) -> bool:
+        """Whether `agent` is a subconscious recall's fork, read from memory's recall log
+        once per run."""
+        if agent is None:
+            return False
+        if self._forks is None:
+            from . import recalls
+
+            try:
+                self._forks = recalls.fork_ids()
+            except (OSError, ValueError):
+                self._forks = frozenset()
+        return (harness, agent) in self._forks
+
+    def leave_out_fork(self, src, skey: str, role: Role) -> None:
+        """Pass a recall fork's source by, taking out any rows of it already stored."""
+        from moxi import store
+
+        self.passed.add((src.harness, skey))
+        with store.transaction(self.conn):
+            self.conn.execute("DELETE FROM rows WHERE harness = ? AND session_id = ? "
+                              "AND agent_id = ?", (src.harness, role.main, role.agent))
+
     def note_compressed(self, src) -> None:
         self.report.compressed += 1
         self.conn.execute(
@@ -424,17 +559,23 @@ class Ingest:
             (src.harness, source_key(src), src.session_id, json.dumps(COMPRESSED),
              time.time()))
 
-    def read_source(self, item, header, role: Role, *, reuse: str | None = None) -> None:
-        """Read one source since its cursor (from its start when `fresh`) and write its
-        rows, tails and cursor, batch by batch."""
+    def read_source(self, item, header, role: Role, *, reuse: str | None = None,
+                    from_start: bool = False) -> None:
+        """Read one source since its cursor (from its start when `fresh` or
+        `from_start`) and write its rows, tails and cursor, batch by batch."""
         from moxi import store
 
         api = _api()
         src = item if isinstance(item, api.Source) else item.source
         skey = source_key(src)
+        if self.recall_fork(src.harness, role.agent):
+            self.leave_out_fork(src, skey, role)
+            return
         stored = self.conn.execute("SELECT cursor FROM sources WHERE harness = ? AND "
                                    "source = ?", (src.harness, skey)).fetchone()
-        cursor = None if self.fresh or stored is None else stored[0]
+        cursor = None if self.fresh or from_start or stored is None else stored[0]
+        at_start = cursor is None
+        self.touched.add((src.harness, skey))
         secret = {r[0] for r in self.conn.execute(
             "SELECT call_id FROM secret_calls WHERE harness = ? AND source = ?",
             (src.harness, skey))}
@@ -450,11 +591,12 @@ class Ingest:
             except OSError as exc:   # sessions' Unreadable is one, a file gone another
                 why = getattr(exc, "reason", None) or exc.strerror or str(exc)
                 self._error(str(src.path), why, (src.harness, role.main))
+                self._unread(src, role.main, why)
                 break
             read_any = True
             got = rows.convert(batch.records, source_key=skey, main_id=role.main,
                                agent_id=role.agent, label=label, policy=self.policy,
-                               secret_calls=secret)
+                               writer=api.writer, secret_calls=secret)
             secret |= got.secret_calls
             with store.transaction(self.conn):
                 self._write(src, skey, role, got, batch.cursor, reuse)
@@ -462,6 +604,9 @@ class Ingest:
                 newest = got.newest if newest is None else max(newest, got.newest)
             cursor = batch.cursor
             if batch.complete:
+                self.read_whole[(src.harness, skey)] = role.main
+                if at_start:
+                    self.from_start.add((src.harness, skey))
                 break
         if read_any:
             self.report.sources += 1
@@ -474,14 +619,15 @@ class Ingest:
         if got.rows:
             cur = c.executemany(
                 "INSERT INTO rows (key, harness, session_id, agent_id, label, time, "
-                "turn_id, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "turn_id, kind, text, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (key) DO UPDATE SET harness = excluded.harness, "
                 "session_id = excluded.session_id, agent_id = excluded.agent_id, "
                 "label = excluded.label, time = excluded.time, turn_id = excluded.turn_id, "
-                "kind = excluded.kind, text = excluded.text "
-                "WHERE rows.text IS NOT excluded.text OR rows.kind IS NOT excluded.kind",
+                "kind = excluded.kind, text = excluded.text, writer = excluded.writer "
+                "WHERE rows.text IS NOT excluded.text OR rows.kind IS NOT excluded.kind "
+                "OR rows.writer IS NOT excluded.writer",
                 [(r.key, r.harness, r.session_id, r.agent_id, r.label, r.time, r.turn_id,
-                  r.kind, r.text) for r in got.rows])
+                  r.kind, r.text, r.writer) for r in got.rows])
             self.report.rows += max(cur.rowcount, 0)
         if got.tails:
             cur = c.executemany(
@@ -507,7 +653,8 @@ class Ingest:
 
     # -- one session, and the walk -----------------------------------------------------
 
-    def read_subagents(self, item, role: Role, depth: int = 0) -> None:
+    def read_subagents(self, item, role: Role, depth: int = 0, *,
+                       from_start: bool = False) -> None:
         api = _api()
         if depth >= MAX_DEPTH:
             return
@@ -519,13 +666,14 @@ class Ingest:
             if header is None:
                 self._error(str(sub.source.path), "its first lines can't be read",
                             (sub.source.harness, role.main))
+                self._unread(sub.source, role.main, "its first lines can't be read")
                 continue
             agent = _text(sub.agent_id) or _text(sub.source.agent_id) or \
                 _text(sub.source.session_id)
             sub_role = Role(role.main, agent)
-            self.read_source(sub, header, sub_role)
+            self.read_source(sub, header, sub_role, from_start=from_start)
             if sub.source.harness != "claude":
-                self.read_subagents(sub, sub_role, depth + 1)
+                self.read_subagents(sub, sub_role, depth + 1, from_start=from_start)
 
     def read_session(self, harness: str, session_id: str) -> None:
         """Read one session's sources since their cursors, and its subagents' when
@@ -539,6 +687,7 @@ class Ingest:
             header = self.header_of(hit.source)
             if header is None:
                 self.report.unreadable += 1
+                self._unread(hit.source, None, "its first lines can't be read")
                 continue
             role = self.classify(hit.source, header)
             if role is None or (role.agent is not None and not self.subagents):
@@ -550,13 +699,20 @@ class Ingest:
     def walk(self, *, full: bool = False) -> None:
         """List every folder of each harness through sessions' `corpus` and read each
         source that changed since that folder's last walk (with `full`, every source),
-        then test the folders again and record each one's answer (`moxi_memory.roots`).
+        read again from its start each source waiting on a folder this run listed (not
+        in a rebuild, which reads every source), then test the folders again and record
+        each one's answer (`moxi_memory.roots`) and, outside a rebuild, which sources
+        wait on a folder now (`state.Waiting`).
         """
         for harness in self.harnesses:
             self._walk_harness(harness, full=full or self.fresh)
+        if not self.rebuilding:
+            self._read_waiting()
         self._reading = None
         self._retest()
         self._record()
+        if not self.rebuilding:
+            self._settle_waiting()
 
     def _since(self, harness: str, records: list[roots.Root]) -> dict[str, float]:
         """Each folder's last walk, for `corpus`: a folder never listed whole, or holding
@@ -579,8 +735,7 @@ class Ingest:
         self.records[harness] = records
         held_at = {r.path: r.held_entries_at for r in records}
         retry = {r.path: r.retry for r in records}
-        began = time.time()
-        self.began[harness] = began
+        self.began.setdefault(harness, time.time())   # a second pass keeps the first's
         try:
             since = None if full else self._since(harness, records)
             listings = api.corpus(harness, since=since, heads=True)
@@ -635,11 +790,13 @@ class Ingest:
                     main = src.session_id if src.agent_id is None else None
                     self._error(str(src.path), "its first lines can't be read",
                                 (harness, main) if main else None)
+                    self._unread(src, main, "its first lines can't be read")
                     if main:
                         self.seen.add((harness, main))
                     continue
                 role = self.classify(src, header)
                 if role is None:
+                    self.passed.add((harness, source_key(src)))
                     continue
                 if role.agent is None:
                     self.seen.add((harness, role.main))
@@ -659,6 +816,10 @@ class Ingest:
         found.sort(key=lambda item: item[2].agent is not None)   # mains, then subagents
         for item, header, role, seen in found:
             self._reading = seen
+            src = item if isinstance(item, _api().Source) else item.source
+            key = (harness, source_key(src))
+            if key in self.read_whole and (harness, role.main) not in self.again:
+                continue    # a second pass: read to its end already
             reuse = _reuse(item)
             if not self.fresh and reuse is not None:
                 stored = self.conn.execute(
@@ -687,6 +848,7 @@ class Ingest:
             if header is None:
                 self._error(str(hit.source.path), "its first lines can't be read",
                             (harness, session_id))
+                self._unread(hit.source, session_id, "its first lines can't be read")
                 continue
             role = self.classify(hit.source, header)
             if role is not None and (role.agent is None or self.subagents):
@@ -695,14 +857,17 @@ class Ingest:
                 out.append((hit.source, header, role, seen))
         return out
 
-    def _retest(self) -> None:
+    def _retest(self, harnesses: list[str] | None = None) -> None:
         """The test just before the run's decision: every archive folder that has answered
         so far is tested again by sessions, taking no kept answer (all at once, one wait),
         and each live root's top level is listed again. A folder that fails then, or that
         lists nothing though memory read from it or a listing once showed it holding an
-        entry (this run's included), didn't answer the run."""
+        entry (this run's included), didn't answer the run. With `harnesses`, only
+        their folders are tested."""
         api = _api()
-        archive_dirs = [s.path for run in self.run.values() for s in run.values()
+        tested = {h: run for h, run in self.run.items()
+                  if harnesses is None or h in harnesses}
+        archive_dirs = [s.path for run in tested.values() for s in run.values()
                         if s.is_archive and s.answered]
         answers: dict[str, Any] = {}
         why = None
@@ -711,7 +876,7 @@ class Ingest:
                 answers = api.archive_answers(archive_dirs, fresh=True)
             except Exception as exc:  # noqa: BLE001 - a test that can't run isn't an answer
                 why = f"its test before the decision couldn't run: {exc}"
-        for harness, run in self.run.items():
+        for harness, run in tested.items():
             for s in run.values():
                 if not s.answered:
                     continue
@@ -828,6 +993,164 @@ class Ingest:
             rec.missed_rebuild_at = self.started
         return rec
 
+    # -- sources waiting on a folder ---------------------------------------------------
+
+    def _read_waiting(self) -> None:
+        """Read again, from its start and whatever its time, each source waiting on a
+        folder (`state.Waiting`) whose folder this run listed: sessions' `find` names it
+        there by its `lookup`, and its session is read as `read_session` reads one, its
+        subagents with it when `index.include_subagents` is on. A folder that still
+        doesn't list leaves its sources waiting."""
+        self.waiting = state.read_waiting(self.sc)
+        groups: dict[tuple[str, str, str], list[state.Waiting]] = {}
+        for w in self.waiting:
+            groups.setdefault((w.harness, w.root_dir, w.lookup), []).append(w)
+        for (harness, root_dir, lookup), items in groups.items():
+            if harness not in self.harnesses or harness in self.failed:
+                continue
+            seen = self.run.get(harness, {}).get(root_dir)
+            if (seen is None or not seen.listed or seen.offline is not None
+                    or seen.empty is not None):
+                continue
+            if all(self._clean((harness, w.source)) for w in items):
+                continue
+            self._reading = seen
+            errors = len(seen.errors)
+            for hit in self.find_in(harness, lookup, [root_dir]):
+                if hit.compressed:
+                    continue
+                header = self.header_of(hit.source)
+                if header is None:
+                    why = "its first lines can't be read"
+                    self._error(str(hit.source.path), why, (harness, items[0].session_id))
+                    self._unread(hit.source, items[0].session_id, why)
+                    continue
+                role = self.classify(hit.source, header)
+                if role is None or (role.agent is not None and not self.subagents):
+                    self.passed.add((harness, source_key(hit.source)))
+                    continue
+                self.read_source(hit.source, header, role, from_start=True)
+                if self.subagents and role.agent is None:
+                    self.read_subagents(hit.source, role, from_start=True)
+            if len(seen.errors) == errors:
+                self.asked_waiting.add((harness, root_dir, lookup))
+        self._reading = None
+
+    def _settle_waiting(self) -> None:
+        """Write which sources wait on a folder after this walk: each it couldn't read
+        is added, and one waiting is cleared when this run read it from its start to its
+        end, found it and chose not to read it, or asked its folder cleanly and the
+        source is gone (its file no longer exists, or `find` no longer names it)."""
+        now = time.time()
+        add = []
+        for (harness, skey), (session, lookup, why) in self.unread.items():
+            root_dir = self._root_of(harness, skey)
+            if root_dir is not None and not self._clean((harness, skey)):
+                add.append(state.Waiting(harness, skey, session, lookup, root_dir, why,
+                                         now))
+        adding = {(w.harness, w.source) for w in add}
+        cleared = []
+        for w in self.waiting:
+            key = (w.harness, w.source)
+            if key in adding:
+                continue
+            if (self._clean(key) or key in self.passed
+                    or (not self.subagents and _claude_subagent(w.harness, w.source))):
+                cleared.append(key)
+            elif ((w.harness, w.root_dir, w.lookup) in self.asked_waiting
+                  and key not in self.touched and _gone(w.source)):
+                cleared.append(key)
+        if add or cleared:
+            state.write_waiting(self.sc, add, cleared)
+
+    def _root_of(self, harness: str, skey: str) -> str | None:
+        """The folder of `harness` that holds the source `skey` names: the longest of
+        this run's folders, the folders recorded before and the live root that it lies
+        under; None when none does."""
+        paths = [*self.run.get(harness, {}), *(r.path for r in self.records.get(harness, []))]
+        try:
+            paths.append(str(_api().root(harness)))
+        except Exception:  # noqa: BLE001 - no live root to name
+            pass
+        return _longest(paths, skey)
+
+    def _unanswered(self, harness: str) -> dict[str, str]:
+        """Each folder of `harness` that didn't answer this run, with why: every folder
+        known when sessions couldn't list the harness at all."""
+        if harness in self.failed:
+            paths = [r.path for r in self.records.get(harness, [])]
+            try:
+                paths.append(str(_api().root(harness)))
+            except Exception:  # noqa: BLE001 - no live root to name
+                pass
+            return dict.fromkeys(paths, self.failed[harness])
+        return {s.path: (s.offline or s.empty or next(iter(s.errors.values()), None)
+                         or "it didn't answer")
+                for s in self.run.get(harness, {}).values() if not s.answered}
+
+    def walk_again(self) -> None:
+        """A rebuild's second try at each harness with a folder that didn't answer its
+        first pass, before it decides: its archive folders are tested afresh, its
+        folders listed again, and each source read that the first pass didn't read to
+        its end, every source of a session it couldn't read to its end included; then
+        those folders are tested and recorded again."""
+        harnesses = [h for h in self.harnesses if not self.harness_answered(h)]
+        if not harnesses:
+            return
+        api = _api()
+        archive_dirs = [s.path for h in harnesses for s in self.run.get(h, {}).values()
+                        if s.is_archive]
+        if archive_dirs:
+            try:
+                api.archive_answers(archive_dirs, fresh=True)
+            except Exception:  # noqa: BLE001 - the listing below tests them itself
+                pass
+        for harness in harnesses:
+            again = {key for key in self.broken if key[0] == harness}
+            self.broken -= again
+            self.again |= again
+            self.failed.pop(harness, None)
+            self._walk_harness(harness, full=True)
+        self._reading = None
+        self._retest(harnesses)
+        self._record()
+
+    def rebuild_waiting(self) -> list[state.Waiting]:
+        """The sources a rebuild leaves waiting on a folder: each it tried and couldn't
+        read to its end, and each source of the generation it replaces that lies in a
+        folder that didn't answer and that it didn't read. A compressed rollout, a
+        session it read cleanly from another folder, and a Claude Code subagent's file
+        with `index.include_subagents` off never wait."""
+        now = time.time()
+        out: dict[tuple[str, str], state.Waiting] = {}
+        for (harness, skey), (session, lookup, why) in self.unread.items():
+            root_dir = self._root_of(harness, skey)
+            if root_dir is not None and not self._clean((harness, skey)):
+                out[(harness, skey)] = state.Waiting(harness, skey, session, lookup,
+                                                     root_dir, why, now)
+        if self.prior is None:
+            return list(out.values())
+        done = self.begun - self.broken
+        compressed = json.dumps(COMPRESSED)
+        for harness in self.harnesses:
+            down = self._unanswered(harness)
+            if not down:
+                continue
+            for skey, session, reuse in self.prior.execute(
+                    "SELECT source, session_id, reuse FROM sources WHERE harness = ? "
+                    "AND session_id IS NOT NULL", (harness,)).fetchall():
+                key = (harness, skey)
+                if (reuse == compressed or key in out or self._clean(key)
+                        or (harness, session) in done
+                        or (not self.subagents and _claude_subagent(harness, skey))):
+                    continue
+                root_dir = _longest(down, skey)
+                if root_dir is not None:
+                    out[key] = state.Waiting(harness, skey, session,
+                                             _lookup(harness, root_dir, skey) or session,
+                                             root_dir, down[root_dir], now)
+        return list(out.values())
+
     # -- the rebuild's keep rule -------------------------------------------------------
 
     def take_out_broken(self) -> None:
@@ -862,7 +1185,7 @@ class Ingest:
         calls, under the rules a stored row allows: no row of a harness config
         `harnesses` leaves out, no subagent row with `index.include_subagents` off, each
         text redacted with today's `redact.sets` and cut to today's sizes, and each row
-        given the session table's label."""
+        given the session table's label. Each row keeps the writer it was stored with."""
         from moxi import store
 
         old = self.prior
@@ -890,17 +1213,18 @@ class Ingest:
         label = row.label if row is not None and row.label else None
         sets = self.policy.sets
         rows_out = []
-        for key, agent, label_was, when, turn, kind, text in old.execute(
-                "SELECT key, agent_id, label, time, turn_id, kind, text FROM rows "
+        for key, agent, label_was, when, turn, kind, text, wrote in old.execute(
+                "SELECT key, agent_id, label, time, turn_id, kind, text, "
+                f"{_writer_column(old)} FROM rows "
                 "WHERE harness = ? AND session_id = ?", (harness, session_id)):
             if agent is not None and not self.subagents:
                 continue
             limit = rows.TOOL_CHARS if kind == rows.TOOL else rows.MESSAGE_CHARS
             rows_out.append((key, harness, session_id, agent, label or label_was, when,
-                             turn, kind, rows.recut_head(text, limit, sets)))
+                             turn, kind, rows.recut_head(text, limit, sets), wrote))
         self.conn.executemany(
             "INSERT OR IGNORE INTO rows (key, harness, session_id, agent_id, label, time, "
-            "turn_id, kind, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
+            "turn_id, kind, text, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
         tails_out = [(key, harness, session_id, label or label_was, when, turn, failed,
                       rows.recut_tail(text, self.policy.tail_chars, sets))
                      for key, label_was, when, turn, failed, text in old.execute(
@@ -922,6 +1246,172 @@ class Ingest:
                     "SELECT harness, source, call_id FROM secret_calls "
                     "WHERE harness = ? AND source = ?", (harness, source)).fetchall())
         return bool(rows_out or tails_out or srcs)
+
+    # -- the version rebuild's keep rule -----------------------------------------------
+
+    def read_to_end(self) -> set[tuple[str, str]]:
+        """The `(harness, source key)` of each source this run read to its end: its read
+        stopped at a batch sessions marked complete, and its session isn't one the run
+        began and couldn't read to its end."""
+        return {key for key, main in self.read_whole.items()
+                if (key[0], main) not in self.broken}
+
+    def copy_unread(self) -> int:
+        """Copy from the generation a version rebuild replaces everything of a source
+        this run didn't read to its end, decided per source. Returns how many sessions it
+        copied anything of.
+
+        A row or tail is counted against every source that may have given it: each source
+        the old `sources` lists under its harness and session, the source its key names
+        (`<source>@line:N` or `@offset:N`), and for an OpenCode subagent's row its own
+        session's source. It is copied when one of those is unread, or when none is
+        known. Every unread `sources` row is copied with its cursor and reuse, and the
+        secret-path calls of each. Nothing the config leaves out is skipped: every harness
+        the old generation holds, and subagents' rows whether or not
+        `index.include_subagents` is on. A copy never replaces what this run wrote. Each
+        copied text loses its stored cut edge (`rows.EDGE_CHARS`), is redacted again with
+        today's `redact.sets` and cut to today's sizes, and each row takes the session
+        table's label and keeps the writer it was stored with."""
+        from moxi import store
+
+        old = self.prior
+        if old is None:
+            return 0
+        whole = self.read_to_end()
+        listed: dict[tuple[str, str], set[str]] = {}
+        for harness, source, session_id in old.execute(
+                "SELECT harness, source, session_id FROM sources"):
+            if session_id is not None:
+                listed.setdefault((harness, session_id), set()).add(source)
+        sessions = sorted(set(old.execute(
+            "SELECT harness, session_id FROM rows UNION "
+            "SELECT harness, session_id FROM tails UNION "
+            "SELECT harness, session_id FROM sources WHERE session_id IS NOT NULL")))
+        copied = 0
+        for harness, session_id in sessions:
+            own = listed.get((harness, session_id), set())
+            with store.transaction(self.conn):
+                if self._copy_unread_one(old, harness, session_id, own, whole):
+                    copied += 1
+        for harness, source in old.execute(
+                "SELECT harness, source FROM sources WHERE session_id IS NULL").fetchall():
+            if (harness, source) not in whole:
+                with store.transaction(self.conn):
+                    self._copy_source(old, harness, source)
+        return copied
+
+    def _copy_unread_one(self, old, harness: str, session_id: str, own: set[str],
+                         whole: set[tuple[str, str]]) -> bool:
+        def kept(key: str, agent: str | None) -> bool:
+            counted = set(own)
+            named = _named_source(key)
+            if named is not None:
+                counted.add(named)
+            if harness == "opencode" and agent is not None:
+                counted.update(f"{s.rpartition('#')[0]}#{agent}" for s in own if "#" in s)
+            return not counted or any((harness, s) not in whole for s in counted)
+
+        row = table.row(self.sc, harness, session_id)
+        label = row.label if row is not None and row.label else None
+        sets = self.policy.sets
+        rows_out = []
+        for key, agent, label_was, when, turn, kind, text, wrote in old.execute(
+                "SELECT key, agent_id, label, time, turn_id, kind, text, "
+                f"{_writer_column(old)} FROM rows "
+                "WHERE harness = ? AND session_id = ?", (harness, session_id)):
+            if not kept(key, agent):
+                continue
+            limit = rows.TOOL_CHARS if kind == rows.TOOL else rows.MESSAGE_CHARS
+            rows_out.append((key, harness, session_id, agent, label or label_was, when,
+                             turn, kind, rows.recut_head(text, limit, sets,
+                                                         edge_chars=rows.EDGE_CHARS),
+                             wrote))
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO rows (key, harness, session_id, agent_id, label, time, "
+            "turn_id, kind, text, writer) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows_out)
+        tails_out = [(key, harness, session_id, label or label_was, when, turn, failed,
+                      rows.recut_tail(text, self.policy.tail_chars, sets,
+                                      edge_chars=rows.EDGE_CHARS))
+                     for key, label_was, when, turn, failed, text in old.execute(
+                         "SELECT key, label, time, turn_id, failed, text FROM tails "
+                         "WHERE harness = ? AND session_id = ?", (harness, session_id))
+                     if kept(key, None)]
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO tails (key, harness, session_id, label, time, turn_id, "
+            "failed, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tails_out)
+        unread = [s for s in sorted(own) if (harness, s) not in whole]
+        for source in unread:
+            self._copy_source(old, harness, source)
+        return bool(rows_out or tails_out or unread)
+
+    def _copy_source(self, old, harness: str, source: str) -> None:
+        """Copy one `sources` row, with its cursor and reuse, and its secret-path calls."""
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO sources (harness, source, session_id, cursor, reuse, "
+            "read) VALUES (?, ?, ?, ?, ?, ?)",
+            old.execute("SELECT harness, source, session_id, cursor, reuse, read "
+                        "FROM sources WHERE harness = ? AND source = ?",
+                        (harness, source)).fetchall())
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO secret_calls (harness, source, call_id) "
+            "VALUES (?, ?, ?)", old.execute(
+                "SELECT harness, source, call_id FROM secret_calls "
+                "WHERE harness = ? AND source = ?", (harness, source)).fetchall())
+
+
+def _longest(paths, skey: str) -> str | None:
+    """The longest of `paths` that the source `skey` names lies under (a file below it,
+    or an OpenCode `<database>#<session>`); None when none."""
+    best = None
+    for path in paths:
+        if (skey.startswith(path.rstrip(os.sep) + os.sep) or skey.startswith(path + "#")
+                or skey == path) and (best is None or len(path) > len(best)):
+            best = path
+    return best
+
+
+def _lookup(harness: str, root_dir: str, skey: str) -> str | None:
+    """The id sessions' `find` takes for the source `skey` names in `root_dir`: an
+    OpenCode session's own id, else the session its path names."""
+    if harness == "opencode":
+        return skey.rpartition("#")[2] or None
+    return _session_of(harness, root_dir, skey)
+
+
+def _claude_subagent(harness: str, skey: str) -> bool:
+    """Whether `skey` names a Claude Code subagent's file."""
+    return harness == "claude" and f"{os.sep}subagents{os.sep}" in skey
+
+
+def _gone(skey: str) -> bool:
+    """Whether the file a source key names no longer exists. A key that isn't a file
+    (an OpenCode `<database>#<session>`) is gone too, which its caller asks only once
+    `find` has answered without it. A path that can't be checked (a folder above it
+    unreadable) isn't gone."""
+    try:
+        os.lstat(skey)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _writer_column(conn) -> str:
+    """What a copy selects for a row's writer from the generation it replaces: the
+    column, or NULL from a generation at a schema before it."""
+    return "writer" if index.has_writer(conn) else "NULL"
+
+
+def _named_source(key: str) -> str | None:
+    """The source a row's key names (`<harness>|<source>@line:N|<place>`, or
+    `@offset:N`), or None for a key that names the line by the harness's own id."""
+    _, _, rest = key.partition("|")
+    line, _, _ = rest.rpartition("|")
+    source, sep, place = line.rpartition("@")
+    if sep and source and (place.startswith("line:") or place.startswith("offset:")):
+        return source
+    return None
 
 
 def _lists_nothing(n: int, held_at: float | None) -> str | None:
@@ -992,11 +1482,22 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
     held writer lock `w`; keep what can't be known gone; switch to it; and drop from the
     session table each session it found no source for.
 
+    A rebuild that replaces a generation whose `redact_version` is below the installed
+    secrets' (a version rebuild) keeps more and drops nothing from the table: in place of
+    `Ingest.copy_kept` it copies, per source, everything of each source it didn't read to
+    its end (`Ingest.copy_unread`), and it removes no session. It runs only when someone
+    types `moxi memory reindex`, as any rebuild does; an ingest into such a generation
+    leaves its stored rows as they are.
+
     Its steps, in order: it reads every folder `corpus` lists; it tests the folders again
-    and decides which answered (`Ingest.walk`); it takes out of the new generation what it
+    and decides which answered (`Ingest.walk`); for each harness with a folder that
+    didn't answer, it lists and reads that harness once more and decides again
+    (`Ingest.walk_again`); it takes out of the new generation what it
     wrote for each session it couldn't read to its end; it copies the sessions it keeps
     from the generation it replaces, which it holds open read only under the reader's
-    shared lock until then (`Ingest.copy_kept`); it switches. A session of a harness with
+    shared lock until then (`Ingest.copy_kept`); it switches; and it records which
+    sources wait on a folder in place of those recorded before
+    (`Ingest.rebuild_waiting`). A session of a harness with
     a folder that didn't answer is unknown, not gone: the rebuild keeps it, and its row in
     the session table, as it keeps every row of a harness config `harnesses` leaves
     out."""
@@ -1005,6 +1506,9 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
             old = index.open_read(env)
         except (index.IndexMissing, index.IndexUnreadable):
             old = None
+        versioned = (old is not None and index.stored_redact_version(old.conn)
+                     < rows.redact_version())
+        replaced = index.stored_redact_version(old.conn) if versioned else None
         try:
             n, conn = w.new_generation()
             sc = state.connect(env)
@@ -1015,21 +1519,27 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
                                  rebuilding=True, prior=old.conn if old else None,
                                  started=started)
                     job.walk(full=True)
+                    job.walk_again()
                     job.take_out_broken()
-                    kept = job.copy_kept()
+                    kept = job.copy_unread() if versioned else job.copy_kept()
+                    waiting = job.rebuild_waiting()
                 finally:
                     conn.close()
                 if old is not None:
                     old.close()
                     old = None
                 w.switch(n)
-                seen = set(job.seen)
-                keep = job.keeping()
-                seen.update((h, s) for h, s in sc.execute(
-                    "SELECT harness, session_id FROM sessions")
-                    if h in keep or h not in job.harnesses)
-                dropped = table.remove_unseen(sc, seen, started)
+                if versioned:
+                    dropped = 0
+                else:
+                    seen = set(job.seen)
+                    keep = job.keeping()
+                    seen.update((h, s) for h, s in sc.execute(
+                        "SELECT harness, session_id FROM sessions")
+                        if h in keep or h not in job.harnesses)
+                    dropped = table.remove_unseen(sc, seen, started)
                 state.clear_unfinished(sc)
+                state.write_waiting(sc, waiting, (), replace=True)
             finally:
                 sc.close()
         finally:
@@ -1040,6 +1550,8 @@ def _rebuild(w, *, env, relabel: bool, config, launcher) -> Report:
             index.meta_set(conn, "dropped", dropped)
             index.meta_set(conn, "kept", kept)
             index.meta_set(conn, "rebuilt", started)
+            if replaced is not None:
+                index.meta_set(conn, REPLACED_KEY, replaced)
         finally:
             conn.close()
         job.report.dropped = dropped
@@ -1196,5 +1708,6 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["MAX_BYTES", "RECORD", "TRIGGERS", "WAITING", "Report", "Role", "Ingest",
-           "source_key", "imported", "not_read", "rebuild", "run", "main"]
+__all__ = ["MAX_BYTES", "RECORD", "REPLACED_KEY", "TRIGGERS", "WAITING", "Report", "Role", "Ingest",
+           "Writerless", "source_key", "imported", "not_read", "writerless", "rebuild",
+           "run", "main"]

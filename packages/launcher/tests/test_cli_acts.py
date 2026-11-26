@@ -18,8 +18,9 @@ from moxi import exit as codes
 from moxi import modules
 
 import launcher_fake_turns as fake_turns
-from moxi_launcher import (cli, exits, keepwarm, relaunch, resume, slots, state, store, target,
-                           targets)
+from launcher_fake_harness import Harness
+from moxi_launcher import (api, cli, exits, keepwarm, relaunch, resume, slots, state, store,
+                           target, targets)
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 OTHER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -108,6 +109,7 @@ PARSES = [
     (["relaunch", "boss@work", "--dry-run"], {"target": "boss@work", "dry_run": True}),
     (["relaunch", "--status", "ab12", "--json"], {"status": "ab12", "json": True}),
     (["relaunch", "--from-record", "ab12"], {"from_record": "ab12", "target": None}),
+    (["relaunch", "--stop", "ab12", "--json"], {"stop": "ab12", "target": None, "json": True}),
     (["exit-session", SID], {"verb": "exit-session", "session_id": SID, "dry_run": False,
                              "json": False}),
     (["exit-session", SID, "--dry-run", "--json"], {"dry_run": True, "json": True}),
@@ -116,13 +118,25 @@ PARSES = [
      {"limit": 5, "before": "2026-10-30T00:00:00Z", "json": True}),
     (["sessions"], {"verb": "sessions", "limit": None, "before": None, "json": False}),
     (["sessions", "--limit", "2", "--json"], {"limit": 2, "json": True}),
-    (["resume", SID], {"verb": "resume", "session_id": SID, "slot": None}),
+    (["resume", SID], {"verb": "resume", "session_id": SID, "slot": None, "brief": None,
+                       "brief_file": None, "plain": False}),
+    (["resume", SID, "--plain"], {"plain": True, "brief": None, "brief_file": None}),
     (["resume", SID, "--slot", "4"], {"slot": "4"}),
+    (["resume", SID, "--brief", "Carry on."], {"brief": "Carry on.", "brief_file": None}),
+    (["resume", SID, "--brief-file", "b.md"], {"brief": None, "brief_file": "b.md"}),
     (["keep-warm", "hold", "build-7"], {"verb": "keep-warm", "action": "hold",
                                         "name": "build-7", "json": False}),
     (["keep-warm", "release", "build-7"], {"action": "release", "name": "build-7"}),
     (["keep-warm", "holds"], {"action": "holds", "json": False}),
     (["keep-warm", "holds", "--json"], {"action": "holds", "json": True}),
+    (["keep-warm", "--session", SID], {"verb": "keep-warm", "action": None, "session": SID,
+                                       "dry_run": False, "json": False}),
+    (["keep-warm", "--dry-run", "--json"], {"action": None, "session": None,
+                                            "dry_run": True, "json": True}),
+    (["clear-expired"], {"verb": "clear-expired", "session": None, "dry_run": False,
+                         "json": False}),
+    (["clear-expired", "--dry-run", "--json"], {"dry_run": True, "json": True}),
+    (["clear-expired", "--session", SID, "--dry-run"], {"session": SID, "dry_run": True}),
     (["show"], {"verb": "show", "session_id": None, "json": False}),
     (["show", SID, "--json"], {"session_id": SID, "json": True}),
     (["log", "--table", "runs"], {"verb": "log", "table": "runs"}),
@@ -140,13 +154,15 @@ REFUSED = [
     ["relaunch"],
     ["relaunch", "--self"],
     ["relaunch", "--handoff", "h.md"],
-    ["relaunch", SID, "--handoff", "h.md"],
     ["relaunch", SID, "--self", "--handoff", "h.md"],
     ["relaunch", SID, "--status", "ab12"],
     ["relaunch", "--status", "ab12", "--from-record", "ab12"],
     ["relaunch", "--self", "--handoff", "h.md", "--status", "ab12"],
     ["relaunch", "--status", "ab12", "--dry-run"],
     ["relaunch", "--from-record", "ab12", "--dry-run"],
+    ["relaunch", "--stop", "ab12", "--dry-run"],
+    ["relaunch", "--stop", "ab12", "--status", "ab12"],
+    ["relaunch", SID, "--stop", "ab12"],
     ["relaunch", "--status"],
     ["relaunch", SID, OTHER],
     # Nothing is abbreviated.
@@ -160,11 +176,19 @@ REFUSED = [
     ["sessions", "--bogus"],
     ["resume"],
     ["resume", SID, "--slot"],
+    ["resume", SID, "--brief"],
+    ["resume", SID, "--brief-f", "b.md"],
     ["keep-warm"],
     ["keep-warm", "hold"],
     ["keep-warm", "open", "x"],
     ["keep-warm", "hold", "x", "--json"],
     ["keep-warm", "holds", "x"],
+    ["keep-warm", "--json"],
+    ["keep-warm", "--session", SID, "holds"],
+    ["keep-warm", "--dry-run", "hold", "x"],
+    ["clear-expired", SID],
+    ["clear-expired", "--session"],
+    ["clear-expired", "--sess", SID],
     ["show", SID, OTHER],
     ["log", "--table", "nope"],
 ]
@@ -302,9 +326,11 @@ def test_relaunch_director_calls_with_the_target(monkeypatch, capsys):
                  result(codes.OK, "run ab12: relaunched", outcome="relaunched"))
     status, out, _ = run(["relaunch", "boss@work"], capsys)
     assert (status, out) == (codes.OK, "run ab12: relaunched\n")
-    assert seen == [(("boss@work",), {"dry_run": False})]
+    assert seen == [(("boss@work",), {"handoff": None, "dry_run": False})]
     run(["relaunch", SID, "--dry-run"], capsys)
-    assert seen[-1] == ((SID,), {"dry_run": True})
+    assert seen[-1] == ((SID,), {"handoff": None, "dry_run": True})
+    run(["relaunch", SID, "--handoff", "h.md"], capsys)
+    assert seen[-1] == ((SID,), {"handoff": "h.md", "dry_run": False})
 
 
 @pytest.mark.parametrize("code, outcome", [
@@ -345,7 +371,8 @@ def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
                         {"word": "person", "detail": "a client was active 40 s ago"},
                         at="2026-10-31T10:01:00.000000Z")
     status, out, err = run(["relaunch", "--status", run_.run_id], capsys)
-    assert (status, err) == (codes.OK, "")
+    # An open run exits 75, its lines still on stdout.
+    assert (status, err) == (codes.TEMPFAIL, "")
     lines = out.splitlines()
     assert lines[0] == (f"run {run_.run_id}: relaunch (self) of session {SID} in slot 3: "
                         "armed")
@@ -353,7 +380,7 @@ def test_relaunch_status_shows_the_run_and_its_latest_wait(conn, capsys):
     assert len(lines) == 4
     status, out, _ = run(["relaunch", "--status", run_.run_id, "--json"], capsys)
     data = json.loads(out)
-    assert status == codes.OK and data["outcome"] == "armed"
+    assert status == codes.TEMPFAIL and data["outcome"] == "armed"
     assert data["wait"]["word"] == "person" and len(data["events"]) == 2
 
 
@@ -361,7 +388,9 @@ def test_relaunch_status_of_an_ended_run_carries_its_outcome(conn, capsys):
     launched(conn)
     run_ = ended_run(conn, "not-exited", word="mismatch", detail="the dialog changed")
     status, out, _ = run(["relaunch", "--status", run_.run_id, "--json"], capsys)
-    assert status == codes.OK and json.loads(out)["outcome"] == "not-exited"
+    assert status == codes.ERROR and json.loads(out)["outcome"] == "not-exited"
+    status, out, err = run(["relaunch", "--status", run_.run_id], capsys)
+    assert status == codes.ERROR and err == "" and "not-exited (mismatch)" in out
 
 
 def test_relaunch_status_of_no_run_is_refused(conn, capsys):
@@ -393,6 +422,23 @@ def test_relaunch_from_record_follows_its_repair(code, outcome, monkeypatch, cap
     assert (out if code == codes.OK else err) == f"run cd34: {outcome}\n"
 
 
+def test_relaunch_stop_says_what_the_stop_does(monkeypatch, capsys):
+    line = ("stop sent to run ab12: it ends stopped before the exit; from the exit on, it "
+            "ends after the relaunch is tried")
+    seen = calls(monkeypatch, relaunch, "stop_run", result(codes.OK, line,
+                                                           outcome="stop-sent"))
+    status, out, _ = run(["relaunch", "--stop", "ab12"], capsys)
+    assert status == codes.OK and seen == [(("ab12",), {})] and out == line + "\n"
+
+
+def test_relaunch_stop_of_an_ended_run_is_refused(conn, capsys):
+    launched(conn)
+    run_ = ended_run(conn, "relaunched")
+    status, out, err = run(["relaunch", "--stop", run_.run_id], capsys)
+    assert status == codes.REFUSED and out == ""
+    assert err.splitlines()[0].endswith("[not-open]")
+
+
 def test_relaunch_from_record_of_a_run_that_cant_be_repaired_is_refused(conn, capsys):
     """Through the real repair: a run that relaunched its session is not repaired."""
     launched(conn)
@@ -414,6 +460,49 @@ def test_relaunch_from_record_without_slots_is_refused(conn, capsys):
     run_ = ended_run(conn, "relaunch-failed", word="no-pane")
     status, _, err = run(["relaunch", "--from-record", run_.run_id], capsys)
     assert status == codes.REFUSED and err.splitlines()[0].endswith("[no-slots]")
+
+
+# -- clear-expired and keep-warm by hand ----------------------------------------------------
+
+
+def swept(code, *lines, dry_run=False):
+    return result(code, *lines, outcome="dry-run" if dry_run else "asked", dry_run=dry_run,
+                  sessions=[])
+
+
+def test_clear_expired_runs_the_sweep_and_prints_its_lines(monkeypatch, capsys):
+    from moxi_launcher import recycle
+
+    seen = calls(monkeypatch, recycle, "clear_expired",
+                 swept(codes.OK, f"session {SID} (launch r1): cleared"))
+    status, out, err = run(["clear-expired"], capsys)
+    assert (status, out, err) == (codes.OK, f"session {SID} (launch r1): cleared\n", "")
+    assert seen == [((None,), {"dry_run": False})]
+    status, out, _ = run(["clear-expired", "--dry-run", "--json"], capsys)
+    assert json.loads(out)["outcome"] == "asked" and seen[-1] == ((None,), {"dry_run": True})
+    assert run(["clear-expired", "--session", SID], capsys)[0] == codes.OK
+    assert seen[-1] == ((SID,), {"dry_run": False})
+
+
+def test_clear_expired_with_a_verdict_to_see_exits_1_on_stderr(monkeypatch, capsys):
+    from moxi_launcher import recycle
+
+    calls(monkeypatch, recycle, "clear_expired",
+          swept(codes.ERROR, f"session {SID} (launch r1): blocked (draft)"))
+    status, out, err = run(["clear-expired"], capsys)
+    assert (status, out) == (codes.ERROR, "") and "blocked (draft)" in err
+
+
+def test_keep_warm_by_hand_passes_the_session_and_the_dry_run(monkeypatch, capsys):
+    seen = calls(monkeypatch, keepwarm, "keep_warm", swept(codes.OK, "nudged"))
+    assert run(["keep-warm", "--session", SID], capsys)[0] == codes.OK
+    assert run(["keep-warm", "--dry-run"], capsys)[0] == codes.OK
+    assert seen == [((SID,), {"dry_run": False}), ((None,), {"dry_run": True})]
+
+
+def test_clear_expired_with_no_launch_log_says_none_recycles(capsys):
+    status, out, _ = run(["clear-expired", "--dry-run"], capsys)
+    assert (status, out) == (codes.OK, "no live launch recycles on expiry\n")
 
 
 # -- exit-session and exits -----------------------------------------------------------------
@@ -545,9 +634,24 @@ def test_resume_hands_the_slot_and_the_warn_printer_over(monkeypatch, capsys):
                  result(codes.OK, "launch r9 started in slot 4", outcome="resumed"))
     status, out, _ = run(["resume", SID, "--slot", "4"], capsys)
     assert (status, out) == (codes.OK, "launch r9 started in slot 4\n")
-    assert seen == [((SID,), {"slot": "4", "warn": cli._warn})]
+    assert seen == [((SID,), {"slot": "4", "brief": None, "brief_file": None,
+                              "plain": False, "warn": cli._warn})]
     run(["resume", SID], capsys)
     assert seen[-1][1]["slot"] is None
+    run(["resume", SID, "--plain"], capsys)
+    assert (seen[-1][1]["plain"], seen[-1][1]["brief"]) == (True, None)
+
+
+def test_resume_hands_its_brief_over_and_reads_a_brief_file_from_where_it_runs(
+        monkeypatch, capsys, tmp_path):
+    seen = calls(monkeypatch, resume, "resume",
+                 result(codes.OK, "launch r9 started in slot 4", outcome="resumed"))
+    run(["resume", SID, "--brief", "Carry on."], capsys)
+    assert (seen[-1][1]["brief"], seen[-1][1]["brief_file"]) == ("Carry on.", None)
+    monkeypatch.chdir(tmp_path)
+    run(["resume", SID, "--brief-file", "b.md"], capsys)
+    assert (seen[-1][1]["brief"], seen[-1][1]["brief_file"]) == (None,
+                                                                 str(tmp_path / "b.md"))
 
 
 def test_resume_whose_launch_failed_exits_1_on_stderr(monkeypatch, capsys):
@@ -576,6 +680,59 @@ def test_resume_of_a_headless_launch_is_refused_and_writes_nothing(conn, capsys)
     launched(conn, target_="headless")
     status, _, err = run(["resume", SID], capsys)
     assert status == codes.REFUSED and err.splitlines()[0].endswith("[headless]")
+    assert [r.request_id for r in store.log(conn)] == ["r1"]
+
+
+def test_resume_of_a_go_launch_with_no_brief_is_refused_and_writes_nothing(conn, capsys):
+    """Through the real verb: a resumed go session does not wake itself either."""
+    launched(conn, values={"posture": "go"})
+    conn.execute("UPDATE launches SET posture = 'go'")
+    status, _, err = run(["resume", SID], capsys)
+    assert status == codes.REFUSED and "[posture-brief]" in err.splitlines()[0]
+    assert "posture go needs a brief on a resume" in err
+    assert "give the resume --brief or --brief-file" in err
+    status, _, err = run(["resume", SID, "--brief", "Go.", "--brief-file", "/b.md"], capsys)
+    assert status == codes.USAGE and "both brief and brief_file are given" in err
+    assert [r.request_id for r in store.log(conn)] == ["r1"]
+
+
+def test_a_plain_resume_of_a_go_launch_starts_with_no_first_turn(conn, capsys, tmp_path,
+                                                                 monkeypatch):
+    """Through the real verb into this terminal: `--plain` resumes a `go` launch with no
+    brief, and the resumed session gets no first turn, its launch's own brief included."""
+    Harness.on_path(tmp_path, monkeypatch)
+    execs = []
+    monkeypatch.setattr(targets, "_execve",
+                        lambda command, argv, env: execs.append(argv))
+    monkeypatch.chdir(tmp_path)
+    work = tmp_path / "work"
+    work.mkdir()
+    api.launch(api.LaunchRequest(typed={"posture": "go", "brief": "Build it."},
+                                 cwd=str(work), request_id="r1", session_id=SID,
+                                 actor="ann"))
+    # The launch's session has ended: its recorded process is not running.
+    conn.execute("UPDATE launches SET pid_started = 1.0 WHERE request_id = 'r1'")
+    assert any("Build it." in word for word in execs[-1])
+    status, _, err = run(["resume", SID], capsys)
+    assert status == codes.REFUSED and "[posture-brief]" in err.splitlines()[0]
+    assert len(execs) == 1
+    status, _, err = run(["resume", SID, "--plain"], capsys)
+    assert status == codes.OK, err
+    argv = execs[-1]
+    assert argv[1:3] == ["--resume", SID]
+    assert not any("Build it." in word or word.startswith("Brief from launcher")
+                   for word in argv), argv
+    new = store.resolve(conn, SID)
+    assert (new.resume_of, new.brief) == ("r1", None)
+
+
+@pytest.mark.parametrize("given", [["--brief", "Go."], ["--brief-file", "/b.md"]])
+def test_a_plain_resume_with_a_brief_is_refused_and_writes_nothing(given, conn, capsys):
+    """A plain resume sends nothing, so a brief beside `--plain` is refused."""
+    launched(conn, values={"posture": "go"})
+    status, out, err = run(["resume", SID, "--plain", *given], capsys)
+    assert status == codes.USAGE and out == ""
+    assert err.splitlines()[0].endswith("[bad-value]") and "--plain" in err
     assert [r.request_id for r in store.log(conn)] == ["r1"]
 
 
@@ -650,6 +807,7 @@ def test_state_of_a_quiet_launch_is_ok(conn, capsys):
     assert (status, err) == (codes.OK, "")
     lines = out.splitlines()
     assert lines[0] == f"session {SID} (launch r1): ok"
+    # turns and cache are hidden here, so keep-warm can't act and the launch reads off.
     assert lines[1] == "relaunch: none" and lines[3] == "keep warm: off"
 
 

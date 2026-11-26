@@ -15,8 +15,13 @@ one name. It registers with the daemon as one of the daemon's adapter **kinds**:
 |---|---|---|
 | `claude-shim` | `moxi-comms-claude` | a Claude Code session |
 | `codex` | `moxi-comms-codex` | a Codex thread, through `codex app-server` |
-| `opencode` | `moxi-comms-opencode` | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
+| `opencode` | `moxi comms opencode` (also `moxi-comms-opencode`) | an OpenCode session, through `opencode serve` (see [OpenCode](#opencode)) |
 | `connector` | none: comms' provider runs in the connector | the Claude apps, through the connector; a person kind |
+| `speech` | none: voice binds it | a person speaking and listening through voice, which binds the operator's name as it; a person kind |
+
+A live row of `api.roster_rows()` and `agents --json` bound as the `connector` kind
+carries `via`, `Claude's apps, through the connector`, while the connector module is
+installed; every other row's `via` is null. The Comms page shows it after the name.
 
 `moxi install comms` puts the wrappers in the `moxi` tool's environment, and uv puts none
 of them on PATH, so run one by its path: `"$(uv tool dir)/moxi/bin/moxi-comms-codex" <identity>`.
@@ -41,7 +46,14 @@ the same way. The daemon reads the group when it starts and refuses a register o
 kind; a declaration that does not hold is left out and logged
 (`moxi_comms/kinds.py`). An adapter built outside comms uses `moxi_comms.adapter`: the
 daemon client, the backoff, the digest and frame line, the attribution tiers
-and the machine line's parse.
+and the machine line's parse. It gets the box's policy directors (`[policy] directors`)
+only if its launch calls `moxi_comms.api.effective`, which reads the box's comms config
+itself, and its holder writes both lists into
+the claim, as `directors` and `policy_directors`, and passes the second to the frame line
+as `policy=`. The connector can be named a policy director but can't be directed (it
+renders no standing); voice binds the operator's own name, whose messages are always
+directives; and the `moxi-comms-shim --inject-file` test seam takes `--director` or the
+stamps as given, the policy part keeping its guard, and merges nothing.
 
 ## What a harness is
 
@@ -94,8 +106,8 @@ a harness.
    message that opens a thread with limits). An open message with no posture token shows
    none. Layer one, the block a session is shown at start, is `context.layer_one_block`
    for every harness: the context block, with the director sentence after it only for
-   an agent with a declared director (`--director` for Claude, the roster's `directors`
-   for Codex and OpenCode). After the block comes one line, the same on every harness,
+   an agent whose launch declared a director (`--director` for Claude, the roster's
+   `directors` for Codex and OpenCode); a policy director alone adds no sentence. After the block comes one line, the same on every harness,
    naming which comms to run by absolute path: the launching install's own `moxi`
    script, since the agent's shell may find another install's `moxi` first. The Codex
    and OpenCode wrappers write it into layer one themselves; the Claude wrapper stamps
@@ -118,7 +130,9 @@ a harness.
      one second by default, so an adapter whose delivery keeps failing doesn't spin.
 7. **The adapter reports completion; the daemon keeps the books.** The adapter opens each
    digest with the daemon (`open_digest`), hands it to turns with the digest's id as its
-   ref, and reports each turn's end (`turn_ended`) with the digests it handled and the
+   ref, `by="comms"` and the qualified name of each of its messages' senders, once each
+   (`senders`; a session's `prompt` listeners read them as `delivery_by` and
+   `delivery_senders`), and reports each turn's end (`turn_ended`) with the digests it handled and the
    ones it didn't. The daemon advances the cursor and deletes the handled rows in one
    transaction. A digest whose turn can't be identified is reported unhandled and
    replays. Replay is the safe direction; a cursor that moved too far is not. No adapter
@@ -230,7 +244,7 @@ a loop while supervision brings it back.
 |---|---|---|---|---|
 | Claude Code | `claude-shim` | `moxi comms claude --name <name>`: the session is the terminal it runs in; the wrapper forks the session's adapter process | the turn's end as Moxi turns reports it: a digest is handled when its turn ends with an answer, and handed again when it was interrupted (Esc), ended in an error or refusal, refused, or lost | supported through Moxi turns; the session must load turns' Claude plugin |
 | Codex | `codex` | `moxi comms codex --name <name>` runs Moxi turns' Codex host in the terminal, with its window, on a new thread for each launch, or on the thread `--resume THREAD_ID` names | the turn's end as the host reports it: handled on an answer, handed again otherwise | experimental; through Moxi turns |
-| OpenCode | `opencode` | `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
+| OpenCode | `opencode` | `moxi comms opencode <identity>` opens `opencode attach` on a new session for each launch | the first idle after the model saw the digest, when the turn ended with `finish=stop` | experimental |
 
 comms reads a cache clock for both. A Codex thread's clock is the end of its last
 request in its rollout, under the sessions root its wrapper reports; an OpenCode
@@ -269,6 +283,46 @@ longest of their waits, from comms' API: `ENDS_ON_BIND_TIMEOUT` (`{"claude", "co
 and `BIND_WAIT` (15 seconds). The OpenCode wrapper isn't one of them: it binds in its
 own process before it starts OpenCode's server, so it waits for no adapter's word.
 
+A Claude Code session's adapter that dies while `claude` runs is replaced at once, with
+no relaunch and no prompt. Its claim file stays, with a socket that answers no one under a
+live `claude`. The daemon sees the adapter's connection drop, reads its claim socket for
+up to 10 seconds until nothing answers it (a live adapter that only lost its connection
+binds again by itself), and starts a new adapter for the session, with the environment
+`claude` started with. The new adapter takes a handle on the same `claude` (the claim
+file's root, its pid checked against the start time recorded there), reads the claim
+file, binds the same name and serves the same claim socket, with the tool token the
+session's environment carries. It finds the session's endpoint as any adapter does, and
+ends with `claude`. Its bind releases the mail that waited, and its first look at an idle
+session is a release point, so the mail starts a turn with nobody typing. A daemon that
+was not running when an adapter died does the same for it once it starts. A daemon that
+runs as a systemd service starts the new adapter in a scope of its own
+(`moxi-comms-adapter-<session id>.scope`, through `systemd-run --user --scope`), so a
+restart of the daemon's service doesn't kill it. When `systemd-run` fails, the daemon logs
+why and starts the adapter in its own cgroup instead: a restart of the daemon then ends
+that adapter, and the restarted daemon replaces it. The daemon replaces one session's
+adapter at most 3 times in 10 minutes; past that it logs once and leaves the session to
+its next start or prompt, which starts a new adapter itself.
+
+The session is told at its next start or prompt, in one line before the start's layer one
+and roster or the prompt's roster changes, which it gets as it would with its adapter
+alive: `comms: this session's comms adapter had stopped at <HH:MM>. A new one has bound
+<name> again, and its mail resumes.` The new adapter leaves the line in the session's
+runtime directory and the line is printed once. When no adapter serves the session at a
+start or prompt (the daemon's cap was reached, or its new adapter couldn't bind), comms'
+listener starts one itself, waits for its word within its 1.5-second bound and says the
+same line without the time. A daemon that is not running is no failure: the new adapter
+binds when it returns. Mail sent while the session was unbound waits at the daemon and is
+delivered once the name is bound again.
+
+When no new adapter can be started (the claim file's `claude` can't be found, or the
+system has no process handle to watch it with) or the new one's bind is refused (another
+session took the name meanwhile), the claim file and the session's roster memory stay,
+and the line is `comms: mail has stopped for <name>`, with why: no message reaches the
+session and a send from it is refused. The next start or prompt tries again; a relaunch
+gets the mail back for good.
+Until an adapter binds it, `moxi comms doctor` prints an `adapter` line for the session
+and `moxi doctor` a fail row `adapter: <name>`.
+
 ## Codex
 
 **Through turns' host.** `moxi comms codex` (also `moxi-comms-codex`) starts a Codex
@@ -278,6 +332,7 @@ runs `codex app-server` and its hooks and keeps the session's endpoint. Install 
 
 ```text
 moxi comms codex --name NAME [--scope SCOPE | --global] [--director NAME]...
+                 [--no-policy-directors]
                  [--model M] [--sandbox MODE | --permissions PROFILE]
                  [--option KEY=VALUE]... [--options-file F]
                  [--no-window] [--dry-run]
@@ -312,10 +367,11 @@ hands turns one digest with `deliver`, which starts a turn. Mail that arrives wh
 turn runs, yours or the one a digest started, waits for that turn's end and goes in as
 one digest then. Mail sent with `--interrupt` goes into the running turn at once, by
 turns' `steer`, with `[interrupt]` on its frame line so the model knows why it came
-mid-turn; if the turn ended in between, it goes by `deliver` instead, once. Each digest
-is acked when the turn that took it ends with an answer, and handed again otherwise. A
-hand-in whose answer never came is waited on, not handed again: the text may already be
-in a turn.
+mid-turn; if the turn ended in between, it goes by `deliver` instead, once. Every
+digest, steered or not, carries `by="comms"` and its senders' names; a headless launch's
+brief carries neither. Each digest is acked when the turn that took it ends with an
+answer, and handed again otherwise. A hand-in whose answer never came is waited on, not
+handed again: the text may already be in a turn.
 
 **A headless session.** `--headless` runs the session with no window and nobody in it:
 
@@ -381,7 +437,7 @@ launch and launch again.
 
 ## OpenCode
 
-`"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>` runs an [OpenCode](https://opencode.ai) session you sit in,
+`moxi comms opencode <identity>` (also `"$(uv tool dir)/moxi/bin/moxi-comms-opencode" <identity>`) runs an [OpenCode](https://opencode.ai) session you sit in,
 in the terminal you start it from. It is experimental. It was built and tested on
 OpenCode 1.18.34, with OpenCode Zen's free models (no account and no key) and with a
 local model through Ollama.
@@ -603,3 +659,99 @@ later holder of a freed name is someone else. Its sender is not told. `moxi comm
 reserved]`. The daemon drops it at its start, at the name's next release point, and when
 `moxi comms agents` or `explain` asks, so a name another process reserved or registered
 takes effect at the next of those. A name in conflict isn't reserved, and keeps its mail.
+
+## Scoped senders
+
+A scoped sender is a send-only name that belongs to one parent comms name and one module.
+comms forms it from the parent and a word the module declares: for the parent
+`builder@acme` and the word `digest`, it is `builder-digest@acme`, the parent's name, a
+dash and the word, in the parent's scope (`fleet-lead-digest` for the global
+`fleet-lead`). The parent is the identity comms resolves the name to, as for any
+recipient: an ephemeral `agent-N` is the global one however it is spelled, so the
+scoped sender of `agent-3@acme` is `agent-3-digest`, and `agent-3-digest@acme` is no
+scoped sender's name. A module uses one to send a session something of its own, under a name
+the session can tell apart from any agent's, without a name per session to reserve.
+
+A module declares a word by an entry point in comms' group `moxi.comms.scoped_senders`,
+named by the word, whose target is a one-line description in plain stdlib data, so the
+declaration imports nothing of comms (as an adapter kind is declared in
+`moxi.comms.kinds`):
+
+```toml
+[project.entry-points."moxi.comms.scoped_senders"]
+digest = "some_package.words:DIGEST"
+```
+
+```python
+# some_package/words.py
+DIGEST = "the nightly digest a session gets from its own reader"
+```
+
+A word is lower-case letters and digits, starting with a letter, with no dash, so a
+formed name reads back to one parent and one word. The module that owns the word is the
+one whose distribution carries the entry point. comms reads the group where it reads a
+module's `RESERVED_NAMES`: when a module installs or is uninstalled, at the daemon's
+start and in `moxi doctor`. A word one module declares is active, and comms mints that
+module's token for it into the credential chain, as `comms/scoped/<word>`. A word two
+modules declare is in conflict for both, and no token sends under it; `moxi doctor`
+warns until one lets it go. A word no module declares any more is freed and its token
+removed.
+
+**Sending.** Only the module's own code sends under its scoped sender, through comms'
+API (interface 3, so a module for which comms is optional loads comms with
+`interface=3` to tell an older comms without scoped senders):
+
+```python
+from moxi_comms import api
+
+result = api.send_scoped("some", "builder@acme", "builder@acme", "the digest",
+                         interrupt=True, expires="never")
+```
+
+The send reaches its parent alone: `to` must name the parent and no one else. It is
+refused, with nothing posted, as `scoped-recipient` when it names anyone else (the
+parent and another included), and the daemon refuses the same with the verb bypassed
+(`scoped-recipient`, 1116). As for any send-only name, a session's binding token never
+sends under it, and the daemon refuses a send from any process inside a live session,
+or one whose ancestry it can't read (`name-reserved`). Its messages carry `[no reply]`.
+The other refusals: `scoped-undeclared` (the module declares no such word),
+`scoped-conflict` (the word is in conflict, or the name is held; the daemon's code is
+1115), `scoped-unreadable` (comms' store can't be read), `credential` (the token can't
+be read or doesn't match) and `protocol-mismatch` (a running daemon older than scoped
+senders: restart it). A send refused for its credential leaves a record that `moxi
+doctor` shows, naming the process, until a send under the word works again or `moxi
+comms reserved renew --word WORD`, run from that process's environment, mints a new
+token.
+
+Delivery is unchanged: the message reaches the parent as any message does (`interrupt`
+into a running turn between tool calls, else at the turn boundary; held for a cold
+cache; its expiry as given). Its frame line names the scoped sender and marks it
+`(send-only)`, a delivery's `senders` carry its qualified name, and `moxi comms
+history` shows it as the author, `(send-only, verified)`. `moxi comms explain`
+explains the parent's delivery of it, as for any message.
+
+**Nobody mails it or holds it.** `moxi comms send` and `reply` refuse it as a recipient,
+and the daemon refuses a line zero that names it (`not-mailable`). Once a word is
+declared, no session binds a name of its form, and `moxi comms send-only add` refuses
+one. A name of the form someone held before the word was declared (a live session's
+binding, or a program's send-only name) stays its holder's; that one parent's scoped
+sender is in conflict (`scoped-conflict`), and `moxi doctor` names the holder. Other
+parents' scoped senders of the word are unaffected. A scoped sender is never a binding,
+so `moxi comms agents` (and `--json`), `api.roster()`, `api.roster_rows()`, the launch
+snapshot, the roster's join and leave notices and comms' page list none.
+
+**Reading one back.** Both reads open comms' store read-only and never ask the daemon,
+so a listener can ask at each prompt:
+
+- `api.scoped_sender(name)`: for a sender name (as a delivery's `senders` carry it), an
+  `api.ScopedSender` (`qualified`, `module`, `word`, `parent`) while it is an active
+  scoped sender, else None. Only an active one reads back: a name of the form that a
+  session or a program holds, or whose word no module declares now (or two do), reads
+  back as None, so no module takes mail from it for its own.
+- `api.scoped_state(module, parent, *, word=None)`: whether the module's scoped sender
+  for the parent can send now, an `api.ScopedState` with `can_send`, its `qualified`
+  name, and, when it can't, `reason` (one of `api.SCOPED_REASONS`: `undeclared`,
+  `conflict`, `unreadable`) and `why` in words.
+
+`word` may be left out of `send_scoped` and `scoped_state` when the module declares one
+word; with more than one, each call names it.

@@ -27,7 +27,9 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import expect
 
-pytestmark = [pytest.mark.browser, pytest.mark.timeout(180),
+from projects_page_kit import turns_asked
+
+pytestmark = [pytest.mark.browser, pytest.mark.timeout(180, method="thread"),
               pytest.mark.skipif(not sys.platform.startswith("linux"),
                                  reason="projects' components are checked in a browser on "
                                         "Linux; the Windows and macOS runs are owed")]
@@ -135,9 +137,12 @@ def shown(shell, key: str) -> dict | None:
 
 def test_the_page_keeps_the_contract_and_opens_its_add_in_the_panel(seeded, ui_page,
                                                                     ui_component_check):
-    # With services installed, the page places its `project-facts` component, which reads
-    # services' routes.
-    check = ui_component_check(ui_page, "projects", "page", keep=True, allow=("services",))
+    # With services, sessions, launcher, loadout and turns installed, the page places each
+    # one's `project-facts` component, which reads that module's routes; of turns, only its
+    # component's own script, route and topic.
+    check = ui_component_check(ui_page, "projects", "page", keep=True,
+                               allow=("services", "sessions", "launcher", "loadout", "turns"))
+    assert not turns_asked(check.requests), turns_asked(check.requests)
     assert check.element == "moxi-projects-page"
     # The shell's top line names the page; the page draws no heading of its own.
     expect(check.locator.locator("h1")).to_have_count(0)

@@ -127,7 +127,7 @@ def test_the_package_requires_the_core_and_turns_and_codex_is_an_extra():
     """turns is required: it is the one way into a harness session. The MCP SDK is too:
     comms' tools are how a session's model sends, served on uvicorn."""
     project = PYPROJECT["project"]
-    assert project["dependencies"] == ["moxi>=0.1.11,<0.2", "moxi-turns>=0.2,<0.3",
+    assert project["dependencies"] == ["moxi>=0.1.11,<0.2", "moxi-turns>=0.2.5,<0.3",
                                        "keyring>=25", "psutil>=5.9", "mcp>=2.3,<3",
                                        "uvicorn>=0.54,<1"]
     assert [d.split(">")[0] for d in project["optional-dependencies"]["codex"]] == \
@@ -164,14 +164,14 @@ def test_the_announcement_offers_codex_and_gates_its_script():
     assert module.SETTINGS == "settings.toml"
     assert set(module.OPTIONAL) == set(PYPROJECT["project"]["optional-dependencies"])
     assert module.GATED == {"moxi-comms-codex": "codex"}
-    assert module.API == "moxi_comms.api" and module.INTERFACES == frozenset({2})
+    assert module.API == "moxi_comms.api" and module.INTERFACES == frozenset({2, 3})
 
 
 def test_internal_env_is_the_wrapper_wiring_the_secrets_step_and_the_test_seam():
     """Every other variable comms reads is a config key's `env` or a root locator."""
     assert set(module.INTERNAL_ENV) == {
         "MOXI_COMMS_NAME", "MOXI_COMMS_SCOPE", "MOXI_COMMS_GLOBAL",
-        "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_SOCKET", "MOXI_COMMS_CLAIM_SOCKET",
+        "MOXI_COMMS_DIRECTORS", "MOXI_COMMS_POLICY_DIRECTORS", "MOXI_COMMS_SOCKET", "MOXI_COMMS_CLAIM_SOCKET",
         "MOXI_COMMS_PROJECT", "MOXI_COMMS_OPERATOR", "MOXI_COMMS_SECRET_",
         "MOXI_COMMS_MOCK_BACKEND", "MOXI_COMMS_MCP_TOKEN", "MOXI_COMMS_MCP_URL",
         "MOXI_COMMS_SHELL_REACH",
