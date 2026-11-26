@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Every launcher module imports on its own, in any order: `parks` reaches `fork` only when
+  it reads a launch, which ends the import cycle that made `import moxi_launcher.keepwarm`
+  or `moxi_launcher.relaunch` fail when imported first.
 - Interface 4, for a caller that runs its own headless agents: a `LaunchRequest`'s
   `stamps` (a fork's rule), kept in the launch's values; `continue_headless`, a headless
   resume that replays the stored values and stamps, launched by `by` (the caller's
