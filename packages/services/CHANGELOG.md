@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- `moxi services enable` of a timer (a module's or yours) and `moxi services add --timer
-  --enable` refuse with exit 3, writing nothing, when an agent's session started the run
-  (the core's `moxi.terminal.agent()`). Disabling a timer, and every act on a daemon,
+- `moxi services enable` of a timer (a module's or yours) and a `moxi services add
+  --enable` that makes a timer (`--timer`, or an adopted systemd `.timer`, which is a
+  timer without the flag) refuse with exit 3, writing nothing, when an agent's session
+  started the run (the core's `moxi.terminal.agent()`). Needs `moxi>=0.1.11`, which
+  services now requires. Disabling a timer, and every act on a daemon,
   goes through, and so does the services page's enable, which runs in the ui daemon.
 - The add panel reads the typed unit through moxi-ui's `readLater`, so the page root's
   `data-reading` mark counts that read from the keystroke until what it fills in is

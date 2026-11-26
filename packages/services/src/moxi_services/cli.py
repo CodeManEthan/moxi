@@ -300,6 +300,14 @@ def _refuse_in_agent() -> None:
         raise Refused(moxi.units.TIMER_ON_REFUSED.format(harness=harness))
 
 
+def _adds_a_timer(args) -> bool:
+    """Whether `moxi services add` makes a timer row: a written row with `--timer`, an
+    adopted one by the kind its unit takes (a systemd `.timer` is one without `--timer`)."""
+    if args.unit is None:
+        return bool(args.timer)
+    return acts.adopted_kind(args.unit, is_timer=args.timer) == "timer"
+
+
 def _remove(args, out) -> int:
     outcome = acts.remove(args.id)
     _say(outcome, out)
@@ -307,7 +315,7 @@ def _remove(args, out) -> int:
 
 
 def _add(args, out) -> int:
-    if args.timer and args.enable:
+    if args.enable and _adds_a_timer(args):
         _refuse_in_agent()
     health = split_command(args.health) if args.health is not None else None
     if args.unit is not None:

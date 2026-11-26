@@ -3,6 +3,7 @@ and every exit code, against a fake `moxi.units`."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import sys
@@ -505,3 +506,21 @@ def test_an_agent_adding_an_enabled_timer_is_refused(fake, no_modules, agent, ca
     assert run(capsys, "add", "nightly", "--timer", "--every", "1h", "--", PY, "-c",
                "pass")[0] == 0
     assert run(capsys, "add", "web", "--enable", "--", PY, "-c", "pass")[0] == 0
+
+
+def test_an_agent_adopting_a_systemd_timer_enabled_is_refused_without_the_flag(
+        fake, no_modules, agent, capsys):
+    """A `.timer` adopted with no `--timer` is still a timer, so its `--enable` is fenced."""
+    fake.foreign["backup.timer"] = Unit("timer", enabled=False)
+    fake.foreign["site.service"] = Unit("daemon", enabled=False)
+    agent["harness"] = "claude"
+    code, out, err = run(capsys, "add", "backup", "--unit", "backup.timer", "--enable")
+    assert code == 3 and err.strip() == f"moxi services add: {TIMER_REFUSAL}"
+    assert store.get("backup") is None
+    assert not fake.foreign["backup.timer"].enabled
+    # An adopted service passes the fence, and so does a launchd label adopted without
+    # --timer, which is a daemon there.
+    assert run(capsys, "add", "site", "--unit", "site.service", "--enable")[0] == 0
+    fake.supervisor = "launchd"
+    adopting = argparse.Namespace(unit="com.example.agent", timer=False)
+    assert cli._adds_a_timer(adopting) is False
