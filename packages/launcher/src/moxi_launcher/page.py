@@ -306,13 +306,18 @@ ACTIVITY = _table(nullable=True, at=_text(), by=_text(nullable=True),
 #: Null where it would not.
 COVERABLE = _table(nullable=True, cap=Out("int"))
 #: One launch running now. `started_at` is when its row was written; `model` and `effort`
-#: are the values it was launched with, null where it set none. `cache`, `waits`,
-#: `coverable` and `activity` are null and `covered` false while nothing was read of them.
+#: are the values it was launched with, null where it set none. `next_keep_alive_at` is
+#: when keep-warm's next nudge is due, set only while `covered` is true: `cache.until`
+#: less `keepwarm.OPEN_S` (900 s), a UTC time in whole seconds with `Z`, the moment its
+#: window opens; a time already past means the next ask nudges. `cache`, `waits`,
+#: `coverable`, `activity` and `next_keep_alive_at` are null and `covered` false while
+#: nothing was read of them.
 RUNNING_LAUNCH = _table(
     request_id=_text(), harness=_text(), session_id=_text(nullable=True), name=_text(),
     identity=_text(nullable=True), where=WHERE, started_at=_text(),
     model=_text(nullable=True), effort=_text(nullable=True), cache=CACHE,
     waits=WAITS, covered=Out("bool"), coverable=COVERABLE, activity=ACTIVITY,
+    next_keep_alive_at=_text(nullable=True),
 )
 #: The launches running now, newest first: `count` of them, every one in `sessions`.
 RUNNING = {**STANDING, "count": Out("int"), "sessions": Out("list", items=RUNNING_LAUNCH)}

@@ -10,6 +10,7 @@ work it handed out, and the named holds that say a director has work out.
     signal_of(listed, named, dropped, holds, *, directed)   # the signal, from values alone
     would_nudge(conn, row, sid, clock, ...)     # whether the next ask would nudge
     reading(conn, row, sid, clock, ...)         # the same, its first step not passed
+    window_opens(expires_at)                    # when the window opens on a cache's expiry
     cover_on(conn, row, sid, ...) / cover_off(conn, row, sid, why)   # the press's record
     cover(conn, row, sid) / on(conn, row, sid)  # the record read; keep-warm on for a sid
     launch_on(row)                              # keep-warm on by the launch itself
@@ -357,6 +358,12 @@ def window(clock: Any | None) -> Verdict | None:
         return Verdict(None, "outside", f"the cache's age, {age:g} s, is outside "
                                         f"[{ttl - OPEN_S:g}, {ttl - SHUT_S:g}) s")
     return None
+
+
+def window_opens(expires_at: float) -> float:
+    """When keep-warm's window opens for a cache that expires at `expires_at` (epoch
+    seconds): `OPEN_S` before it, the first moment an ask may nudge."""
+    return expires_at - OPEN_S
 
 
 def no_window(ttl: float | None) -> bool:
@@ -1069,5 +1076,5 @@ __all__ = ["ASK_EVERY_S", "ASK_JOIN_BUDGET_S", "BLOCKED_REFUSALS", "CAPS", "CASE
            "cover", "cover_off", "cover_on", "on", "asked_before_shut", "check_name", "delivered",
            "hold", "holds", "keep_warm", "no_window", "nudge_text", "open_hold", "reading", "release",
            "release_hold", "run_counts", "run_of_nudges", "signal_now", "signal_of", "spent",
-           "timed", "window", "chosen", "launch_on", "would_nudge", "subagent_room",
+           "timed", "window", "window_opens", "chosen", "launch_on", "would_nudge", "subagent_room",
            "joins", "can_act"]

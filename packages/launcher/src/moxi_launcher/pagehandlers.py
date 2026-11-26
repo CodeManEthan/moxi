@@ -32,14 +32,16 @@ every exception: a failure is logged once per class and the next tick reads agai
 **The launches running now** (`/api/running` and the topic `running`) are `api.running`'s,
 each with where it runs, its folder sent as the last segment of its directory and never
 as a path. Over each the feed lays the facts its joiner kept for that request id and
-session (`joiner`): its cache, what it waits on, whether keep-warm covers it, and its
-session's latest message. A launch with none kept has `cache`, `waits` and `activity`
-null and `covered` false. The read costs one look at the launch log and one at a process
-per launch, as the `sessions` topic does, and asks no other module: the joiner reads the
-other modules on a task of its own, started with the poller, which the poller never
-awaits, and its pass asks the topic for a rebuild when it ends. The first call of
-`/api/running` waits for the first pass, for at most `FIRST_JOIN_WAIT_S` seconds, so a
-page server that has just started answers with the joined facts when that pass is quick.
+session (`joiner`): its cache, what it waits on, whether keep-warm covers it, when
+keep-warm's next nudge is due (`next_keep_alive_at`, set only while covered), and its
+session's latest message. A launch with none kept has `cache`, `waits`, `activity` and
+`next_keep_alive_at` null and `covered` false. The read costs one look at the launch log
+and one at a process per launch, as the `sessions` topic does, and asks no other module:
+the joiner reads the other modules on a task of its own, started with the poller, which
+the poller never awaits, and its pass asks the topic for a rebuild when it ends. The
+first call of `/api/running` waits for the first pass, for at most `FIRST_JOIN_WAIT_S`
+seconds, so a page server that has just started answers with the joined facts when that
+pass is quick.
 
 **The launch form** is filled from `/api/form`: the value each row offered for a harness
 takes from the shipped defaults, `[defaults]` and at most one preset, as `presets.layered`
@@ -210,7 +212,7 @@ TOPICS = ("sessions", "launches", "running")
 #: The facts of a running launch that are read beyond the launch log, each as it is when
 #: none was read.
 UNJOINED = {"cache": None, "waits": None, "covered": False, "coverable": None,
-            "activity": None}
+            "activity": None, "next_keep_alive_at": None}
 #: Seconds between the poller's reads of the launch log's data version, which moves at
 #: every write to the log.
 TICK = 1.0

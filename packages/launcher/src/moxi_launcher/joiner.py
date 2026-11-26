@@ -43,6 +43,13 @@ What a pass reads, each only when its module is installed:
   cap of the case a press would nudge for, when `keepwarm.reading` with `pressed` passes
   every step; else null. None of them writes anything.
 
+After its reads a launch's worker sets `next_keep_alive_at` (`next_keep_alive`): when
+`covered` is true and `cache.until` is set, the moment keep-warm's window opens on that
+expiry, `cache.until` less `keepwarm.OPEN_S` (`keepwarm.window_opens`), written as `until`
+is; else null. Keep-warm's first ask at or after it nudges, so a time already past means
+the nudge goes at the next ask. It reads nothing of its own: it moves only when `until` or
+`covered` does.
+
 No fact holds the time it was read, so a pass over sessions that did nothing gives the
 same facts as the last one, and the topic publishes nothing.
 """
@@ -431,9 +438,21 @@ READS: tuple[Callable[[Pass, Launch], Mapping[str, Any]], ...] = (
     read_cache, read_activity, read_waits)
 
 
+def next_keep_alive(facts: Mapping[str, Any]) -> str | None:
+    """The `next_keep_alive_at` of a launch's facts: when `covered` is true and its cache
+    has an `until`, that time less `keepwarm.OPEN_S`, in whole seconds with `Z`; else
+    None."""
+    cache = facts.get("cache")
+    until = cache.get("until") if isinstance(cache, Mapping) else None
+    if facts.get("covered") is not True or until is None:
+        return None
+    return _iso(keepwarm.window_opens(_epoch(until)), whole=True)
+
+
 def work(each: Pass, launch: Launch) -> dict[str, Any]:
-    """One launch's facts: every read of `READS`, in order. Raises `Late` when a read asks
-    for a call past the deadline. A launch with no session id has no fact."""
+    """One launch's facts: every read of `READS`, in order, then `next_keep_alive_at` from
+    what they read. Raises `Late` when a read asks for a call past the deadline. A launch
+    with no session id has no fact."""
     facts: dict[str, Any] = {}
     if launch.session_id is None:
         return facts
@@ -444,6 +463,7 @@ def work(each: Pass, launch: Launch) -> dict[str, Any]:
             raise
         except Exception as exc:
             _log_once(exc, f"reading a running launch's {read.__name__} failed")
+    facts["next_keep_alive_at"] = next_keep_alive(facts)
     return facts
 
 
@@ -541,5 +561,6 @@ def _prepared() -> tuple[list[Launch], Any | None, Any | None, Any | None, Any |
 __all__ = ["ACTIVITY_LIMIT", "ACTIVITY_TEXT_CHARS", "CACHE_KINDS", "COMMS_TIMEOUT_S",
            "JOIN_BUDGET_S", "JOIN_EVERY", "JOIN_KEEP_S", "JOIN_MAX", "JOIN_THREADS", "READS",
            "UNCOVERED", "UNTIL_SAME_S", "Joiner", "Kept", "Late", "Launch", "Pass", "activity_of",
-           "cache_api", "cache_fact", "cache_tick_s", "comms_api", "proc_gone", "read_activity",
-           "read_cache", "read_waits", "sessions_api", "take", "transcripts_root", "work"]
+           "cache_api", "cache_fact", "cache_tick_s", "comms_api", "next_keep_alive",
+           "proc_gone", "read_activity", "read_cache", "read_waits", "sessions_api", "take",
+           "transcripts_root", "work"]

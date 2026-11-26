@@ -186,6 +186,15 @@ def test_the_subscription_asks_in_the_window_before_expiry_for_every_launched_se
         "run": ["moxi-launcher-job", "keep-warm", "{session}"]}
 
 
+def test_the_subscription_s_window_is_keep_warm_s_own():
+    """The timer's first ask comes at the moment `window_opens` names, and its last before
+    the window shuts: the subscription is held to `OPEN_S` and `SHUT_S`."""
+    sub = keep_warm_sub()
+    assert sub["at"] == -keepwarm.OPEN_S and sub["until"] == -keepwarm.SHUT_S
+    assert keepwarm.window_opens(1_793_354_400.0) == 1_793_354_400.0 - keepwarm.OPEN_S
+    assert keepwarm.window_opens(3600.5) == 3600.5 - 900.0
+
+
 @pytest.mark.skipif(not modules.available("cache"), reason="cache is not installed")
 def test_cache_s_timer_asks_by_the_request_stamp_alone():
     """cache's `asking` runs its timer's own check and `env_met` over the installed
