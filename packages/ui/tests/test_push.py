@@ -670,6 +670,11 @@ def up(data) -> bool:
     return data["state"] == "up"
 
 
+def pspage_running(data) -> bool:
+    return any(row["module"] == "pspage" and row["state"] == "running"
+               for row in data["servers"])
+
+
 def test_the_push_needs_the_key(shell, tmp_path):
     rig = Rig(shell, tmp_path)
 
@@ -697,8 +702,11 @@ def test_two_topics_and_ui_servers_on_one_stream_current_value_first_down_then_u
         assert names[0] == "ui.servers"
         server = rig.server()
         assert server.streams == 1, "one upstream, without the dropped topic (else a 400)"
-        assert await reader.until("ui.servers", lambda d: any(
-            row["module"] == "pspage" and row["state"] == "running" for row in d["servers"]))
+        # `ui.servers` is sent only when it changes, so the running row may have come
+        # while the values above were read: the last one seen is the current value.
+        seen = [data for name, data in reader.skipped if name == "ui.servers"]
+        if not pspage_running(seen[-1]):
+            assert await reader.until("ui.servers", pspage_running)
 
         # A fixture act changes a topic, and the stream shows it.
         answer = await rig.push.client.request("pspage", "POST", "/api/bump", act=True,
