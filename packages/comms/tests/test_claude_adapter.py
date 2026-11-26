@@ -67,9 +67,16 @@ def warm(monkeypatch):
 def endpoints():
     made: list[FakeEndpoint] = []
 
-    def make(**kw) -> FakeEndpoint:
+    def make(*, open_turn: str | None = None, **kw) -> FakeEndpoint:
+        """`open_turn`: a turn already running when the endpoint opens, with that id and
+        no delivery of its own, as an endpoint that carried it across a reload reads."""
         kw.setdefault("session_id", SESSION)
-        ep = FakeEndpoint(**kw).open()
+        ep = FakeEndpoint(**kw)
+        if open_turn is not None:
+            ep.turn = {"id": open_turn, "opening": None, "deliveries": [],
+                       "started_at": time.time()}
+            ep.turn_number = 1
+        ep.open()
         made.append(ep)
         return ep
 
@@ -334,9 +341,9 @@ def test_a_loss_that_is_not_untied_means_the_endpoint_is_gone(
         "the daemon was told"
 
 
-def test_the_endpoint_going_away_settles_the_open_digest_and_the_adapter_looks_again(
+def test_the_endpoint_going_away_settles_a_digest_not_started_and_the_adapter_looks_again(
         rig, adapter, endpoints, frames):
-    ep = endpoints()
+    ep = endpoints(auto=False)            # the harness has not started the digest's turn
     a = adapter()
     assert found(a, ep)
     send(rig, "in flight")
@@ -345,13 +352,128 @@ def test_the_endpoint_going_away_settles_the_open_digest_and_the_adapter_looks_a
     ep.go_away("a plugin reload")
     assert wait_until(lambda: a.session is None)
     assert wait_until(lambda: binding(rig).endpoint is False)
-    assert wait_until(lambda: any(mid in f.get("unhandled_ids", ())
-                                  for f in frame_kinds(frames, "turn")))
+    assert wait_until(lambda: mid in turn_frames(frames, "unhandled_ids"))
     again = endpoints()
     assert wait_until(lambda: a.session is not None and a.looks == 2)
     assert wait_until(lambda: again.stop_handler is not None), \
         "the adapter handles the new endpoint's stops"
     assert wait_until(lambda: binding(rig).endpoint is True)
+
+
+def _lose_first(ep, did):
+    """The delivery's own wait reads `Lost` before the watch hears `session.gone`, as
+    the old endpoint's `stop()` settles it at SIGTERM."""
+    ep.settle(did, {"kind": "lost", "reason": "the endpoint is stopping"})
+
+
+def _gone_first(ep, did):
+    """The watch hears `session.gone` before the delivery's wait reads its value."""
+    with ep._lock:
+        ep._emit("session.gone", {"reason": "a plugin reload"})
+
+
+@pytest.mark.parametrize("loss", [_lose_first, _gone_first], ids=["lost-first", "gone-first"])
+def test_a_started_digest_is_carried_across_the_loss_and_its_turns_end_settles_it(
+        rig, adapter, endpoints, frames, loss):
+    """A digest whose turn started is not settled by the endpoint's loss, whichever way
+    the loss arrives. The re-look reads that turn still open, and the new endpoint's end
+    of it, named by its turn id alone, settles the digest handled: it is not handed
+    again."""
+    ep = endpoints()
+    a = adapter()
+    assert found(a, ep)
+    send(rig, "carried")
+    assert wait_until(lambda: len(ep.texts) == 1)
+    (mid,) = awaiting(a)
+    turn_id = ep.turn["id"]
+    assert wait_until(lambda: a.boundary is not None and a.boundary.turn_id == turn_id)
+    loss(ep, ep.calls[0][1])
+    assert wait_until(lambda: a.session is None)
+    ep.go_away("a plugin reload")
+    time.sleep(0.3)
+    assert mid not in turn_frames(frames, "unhandled_ids"), "the loss settled nothing"
+    assert a.boundary is not None and a.boundary.carried
+    again = endpoints(open_turn=turn_id)
+    assert wait_until(lambda: a.session is not None and a.looks == 2)
+    time.sleep(0.3)
+    assert a.boundary is not None, "the look read its turn open: it stays open"
+    assert mid not in turn_frames(frames, "unhandled_ids")
+    again.end_turn("answer")
+    assert wait_until(lambda: mid in turn_frames(frames, "handled_ids"))
+    assert wait_until(lambda: a.boundary is None and not a.shim.awaiting_ids)
+    assert wait_until(lambda: cursor_of(REVIEWER) == mid)
+    time.sleep(0.3)
+    assert again.texts == [], "a handled digest is not handed again"
+
+
+def test_a_second_loss_before_the_carried_turn_ends_carries_it_again(
+        rig, adapter, endpoints, frames):
+    ep = endpoints()
+    a = adapter()
+    assert found(a, ep)
+    send(rig, "twice carried")
+    assert wait_until(lambda: len(ep.texts) == 1)
+    (mid,) = awaiting(a)
+    turn_id = ep.turn["id"]
+    assert wait_until(lambda: a.boundary is not None and a.boundary.started)
+    ep.go_away("a plugin reload")
+    assert wait_until(lambda: a.session is None)
+    second = endpoints(open_turn=turn_id)
+    assert wait_until(lambda: a.session is not None and a.looks == 2)
+    second.go_away("another reload")
+    assert wait_until(lambda: a.session is None)
+    third = endpoints(open_turn=turn_id)
+    assert wait_until(lambda: a.session is not None and a.looks == 3)
+    time.sleep(0.3)
+    assert mid not in turn_frames(frames, "unhandled_ids")
+    third.end_turn("answer")
+    assert wait_until(lambda: mid in turn_frames(frames, "handled_ids"))
+    assert third.texts == []
+
+
+def test_a_steered_digest_is_started_and_carried_too(rig, adapter, endpoints, frames):
+    """`TurnSteered` names the turn that took a steered digest: it is started, and the
+    loss carries it like a boundary digest."""
+    ep = endpoints()
+    a = adapter()
+    assert found(a, ep)
+    ep.start_turn()                       # the person's turn
+    assert wait_until(lambda: a.turn_open)
+    turn_id = ep.turn["id"]
+    interrupt(rig, "steered")
+    assert wait_until(lambda: any(m == "steer" for (m, *_) in ep.calls))
+    assert wait_until(lambda: any(h.steer and h.turn_id == turn_id
+                                  for h in list(a.hands.values())))
+    ep.go_away("a plugin reload")
+    assert wait_until(lambda: a.session is None)
+    time.sleep(0.3)
+    assert not turn_frames(frames, "unhandled_ids"), "the loss settled nothing"
+    again = endpoints(open_turn=turn_id)
+    assert wait_until(lambda: a.session is not None and a.looks == 2)
+    again.end_turn("answer")
+    assert wait_until(lambda: turn_frames(frames, "handled_ids"))
+    assert not turn_frames(frames, "unhandled_ids")
+    assert again.texts == []
+
+
+@pytest.mark.parametrize("next_turn", [None, "t-other"], ids=["no-turn", "another-turn"])
+def test_a_carried_digest_settles_unhandled_at_a_look_that_reads_its_turn_gone(
+        rig, adapter, endpoints, frames, next_turn):
+    ep = endpoints()
+    a = adapter()
+    assert found(a, ep)
+    send(rig, "carried, then not")
+    assert wait_until(lambda: len(ep.texts) == 1)
+    (mid,) = awaiting(a)
+    assert wait_until(lambda: a.boundary is not None and a.boundary.started)
+    ep.go_away("a plugin reload")
+    assert wait_until(lambda: a.session is None)
+    time.sleep(0.3)
+    assert mid not in turn_frames(frames, "unhandled_ids")
+    endpoints(open_turn=next_turn)
+    assert wait_until(lambda: a.session is not None and a.looks == 2)
+    assert wait_until(lambda: mid in turn_frames(frames, "unhandled_ids"))
+    assert a.boundary is None and not a.hands
 
 
 def test_a_look_after_a_reload_releases_no_held_mail(rig, adapter, endpoints, frames):
@@ -763,7 +885,7 @@ def test_an_unknown_whose_endpoint_no_longer_serves_is_unhandled_only_then(
     assert found(a, ep)
     ep.start_turn()
     assert wait_until(lambda: a.turn_open)
-    ep.script.append(late(30))
+    ep.script.append(late(30, hold()))   # never taken: a loss settles it at once
     interrupt(rig, "never answered")
     assert wait_until(lambda: len(ep.calls) == 1)
     time.sleep(1.0)
