@@ -18374,3 +18374,12 @@ rounds	packages/rounds/tests/test_page.py	return {"id": ruled.id, "text": ruled.
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": BUSY, "id": "C9"}),	keep	round	round
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": "kestrel/nowhere", "id": "C1"}))	keep	round	round
 rounds	packages/rounds/tests/test_page.py	assert missing == nowhere == {"gone": True, "record": None}	keep	record	record
+cache	packages/cache/tests/test_browser_others.py	LAUNCHES = [{"request_id": "r-slot", "session": SLOT, "target": "slot", "slot": "4", "folder": "atlas-api",	keep	folder	folder
+cache	packages/cache/tests/test_browser_others.py	"folder": "kestrel-web", "values": {"name": "planner", "model": "sonnet"}}]	keep	folder	folder
+cache	packages/cache/tests/test_browser_others.py	shell = ui_shells(leave_out=leave_out, env={"CLAUDE_CONFIG_DIR": str(base / "claude-home")})	keep	env	env
+cache	packages/cache/tests/test_browser_others.py	f"{round(CONTEXT / 1000)}k")	keep	round	round
+cache	packages/cache/tests/test_browser_others.py	"where": {"target": "slot", "slot": "2", "project_key": project, "folder": project},	keep	folder	folder
+cache	packages/cache/tests/test_browser_others.py	self.answer: dict = {"refused": None}	keep	refused	refused
+cache	packages/cache/tests/test_browser_others.py	self._fulfill(route, {"state": "up", "detail": None, "refused": None, "sessions": self.states})	keep	refused	refused
+cache	packages/cache/tests/test_browser_others.py	stub.answer = {"refused": {"code": "unsupported", "problem": "turns can't nudge this session"}}	keep	refused	refused
+cache	packages/cache/tests/test_browser_others.py	assert any(reads in url for url in check.requests), check.requests	keep	any	any

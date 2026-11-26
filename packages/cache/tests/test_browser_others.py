@@ -116,7 +116,7 @@ def made(ui_shells, tmp_path_factory, name: str, leave_out: list[str]):
     usage is there, the two launches written where launcher is, and every record laid."""
     base = tmp_path_factory.mktemp(name)
     shell = ui_shells(leave_out=leave_out, env={"CLAUDE_CONFIG_DIR": str(base / "claude-home")})
-    run(shell, sys.executable, "-c", SEED, json.dumps([[one, folder] for one, (folder, _) in SESSIONS.items()]), MODEL)
+    run(shell, sys.executable, "-c", SEED, json.dumps([[one, project] for one, (project, _) in SESSIONS.items()]), MODEL)
     if "usage" not in leave_out:
         run(shell, sys.executable, "-m", "moxi", "usage", "index")
     if "launcher" not in leave_out:
@@ -195,10 +195,10 @@ def iso_in(seconds: float) -> str:
 def launch(request_id: str, session: str, name: str, *, waits: int = 0, covered: bool = False,
            coverable: bool = False, effort: str | None = "high") -> dict:
     """One running launch in launcher's declared shape, warm until its record goes cold."""
-    folder, age = SESSIONS[session]
+    project, age = SESSIONS[session]
     return {
         "request_id": request_id, "harness": "claude", "session_id": session, "name": name, "identity": None,
-        "where": {"target": "slot", "slot": "2", "project_key": folder, "folder": folder},
+        "where": {"target": "slot", "slot": "2", "project_key": project, "folder": project},
         "started_at": iso_in(-7200), "model": "sonnet", "effort": effort,
         "cache": {"state": "warm", "until": iso_in(3600 - age), "estimated": False},
         "waits": {"kind": "agents", "count": waits} if waits else None,
@@ -206,7 +206,7 @@ def launch(request_id: str, session: str, name: str, *, waits: int = 0, covered:
     }
 
 
-def state(request_id: str, session: str, on: bool, holds: tuple[str, ...] = ()) -> dict:
+def state(request_id: str, session: str, *, on: bool, holds: tuple[str, ...] = ()) -> dict:
     return {"session_id": session, "request_id": request_id, "relaunch": None, "recycle": None,
             "keep_warm": {"on": on, "holds": list(holds), "nudges": 0, "last": None, "window": None},
             "red": False, "since": None, "why": None, "word": None, "run_id": None, "unreadable": None}
@@ -356,7 +356,7 @@ def test_the_session_waiting_uncovered_is_loud_and_first_and_a_covered_one_is_ke
     page = ui_contexts(full).pages[0]
     stub = LauncherStub(page, [launch("r-loud", LOUD, "director", waits=2, coverable=True),
                                launch("r-covered", COVERED, "planner", waits=1, covered=True)],
-                        [state("r-loud", LOUD, False), state("r-covered", COVERED, True, ("builder-1: orders pagination",))])
+                        [state("r-loud", LOUD, on=False), state("r-covered", COVERED, on=True, holds=("builder-1: orders pagination",))])
     panel, _ = open_page(page)
     warm_rows = panel.locator('section[data-group="warm"] moxi-ui-row')
     expect(warm_rows.first).to_have_attribute("data-key", f"claude/{LOUD}")
@@ -401,7 +401,7 @@ def test_the_session_waiting_uncovered_is_loud_and_first_and_a_covered_one_is_ke
 
 def test_a_refused_press_says_why_on_its_row(full, ui_contexts):
     page = ui_contexts(full).pages[0]
-    stub = LauncherStub(page, [launch("r-loud", LOUD, "director", waits=2, coverable=True)], [state("r-loud", LOUD, False)])
+    stub = LauncherStub(page, [launch("r-loud", LOUD, "director", waits=2, coverable=True)], [state("r-loud", LOUD, on=False)])
     stub.answer = {"refused": {"code": "unsupported", "problem": "turns can't nudge this session"}}
     panel, _ = open_page(page)
     loud = row(panel, LOUD)
@@ -413,7 +413,7 @@ def test_a_later_failed_read_of_launchers_leaves_no_piece_of_it(full, ui_context
     page = ui_contexts(full).pages[0]
     stub = LauncherStub(page, [launch("r-slot", SLOT, "builder-1"),
                                launch("r-loud", LOUD, "director", waits=2, coverable=True)],
-                        [state("r-slot", SLOT, False), state("r-loud", LOUD, False)])
+                        [state("r-slot", SLOT, on=False), state("r-loud", LOUD, on=False)])
     panel, _ = open_page(page)
     slot, loud = row(panel, SLOT), row(panel, LOUD)
     expect(slot).to_have_attribute("name", "builder-1")
