@@ -1362,29 +1362,41 @@ class _Cmd(_Reader):
 
 #: Each `sh` wrapper: its options without a value, its options with one, and what comes
 #: after its options ("command", "assignments" for `env`, "duration" for `timeout`).
+#: Where a short option has a long form the tool takes for it, the long form is named too.
 #: `nice` also takes `-N`, a number.
 _WRAPPERS: dict[str, tuple[frozenset[str], frozenset[str], str]] = {
-    "sudo": (frozenset({"-A", "-b", "-E", "-H", "-k", "-n", "-P", "-S", "--preserve-env"}),
+    "sudo": (frozenset({"-A", "-b", "-E", "-H", "-k", "-n", "-P", "-S", "--askpass",
+                        "--background", "--preserve-env", "--set-home", "--reset-timestamp",
+                        "--non-interactive", "--preserve-groups", "--stdin"}),
              frozenset({"-C", "-D", "-g", "-h", "-p", "-r", "-R", "-t", "-u", "-U",
-                        "--user", "--group"}), "command"),
+                        "--close-from", "--chdir", "--group", "--host", "--prompt",
+                        "--role", "--chroot", "--type", "--user", "--other-user"}),
+             "command"),
     "doas": (frozenset({"-n"}), frozenset({"-a", "-u"}), "command"),
-    "env": (frozenset({"-i", "-0", "-"}), frozenset({"-u", "-C"}), "assignments"),
+    "env": (frozenset({"-i", "-0", "-", "--ignore-environment", "--null"}),
+            frozenset({"-u", "-C", "--unset", "--chdir"}), "assignments"),
     "nohup": (frozenset(), frozenset(), "command"),
     "builtin": (frozenset(), frozenset(), "command"),
     "exec": (frozenset({"-c", "-l"}), frozenset({"-a"}), "command"),
     "command": (frozenset({"-p"}), frozenset(), "command"),
-    "nice": (frozenset(), frozenset({"-n"}), "command"),
-    "timeout": (frozenset({"-v", "--foreground", "--preserve-status"}),
-                frozenset({"-s", "-k"}), "duration"),
-    "setsid": (frozenset({"-c", "-f", "-w"}), frozenset(), "command"),
-    "stdbuf": (frozenset(), frozenset({"-i", "-o", "-e"}), "command"),
+    "nice": (frozenset(), frozenset({"-n", "--adjustment"}), "command"),
+    "timeout": (frozenset({"-v", "--verbose", "--foreground", "--preserve-status"}),
+                frozenset({"-s", "-k", "--signal", "--kill-after"}), "duration"),
+    "setsid": (frozenset({"-c", "-f", "-w", "--ctty", "--fork", "--wait"}), frozenset(),
+               "command"),
+    "stdbuf": (frozenset(), frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}),
+               "command"),
 }
+
+#: PowerShell's assignment operators: the pipeline on their right is a command.
+_PS_ASSIGNMENTS = ("??=", "+=", "-=", "*=", "/=", "%=", "=")
 
 
 def command_word_index(command: ShellCommand, *, dialect: str = "sh") -> int | None:
     """The index in `command.words` of the word that names what it runs: past
     `NAME=value` words, the reserved words that start a command and the wrappers with
-    the options their table names (`sh`), the call operators `&` and `.` (`powershell`),
+    the options their table names, short or long (`sh`), an assignment's targets and its
+    operator (`$x =`, `[int]$x +=`) and the call operators `&` and `.` (`powershell`),
     or a leading `@` (`cmd`). None when nothing is left, when the command starts with a
     word that runs nothing (`}`, `fi`, `done`, `esac`, `for`, `select`, `case`, `[[`, a
     `((...))` word, a PowerShell statement word, cmd's `if`, `for`, `call`, `start` and
@@ -1394,6 +1406,8 @@ def command_word_index(command: ShellCommand, *, dialect: str = "sh") -> int | N
     words = [w.text for w in command.words]
     if dialect == "powershell":
         k = 0
+        while (past := _ps_past_assignment(words, k)) is not None:
+            k = past
         while k < len(words) and words[k] in ("&", "."):
             k += 1
         if k >= len(words) or words[k].lower() in _PS_STATEMENTS:
@@ -1407,6 +1421,22 @@ def command_word_index(command: ShellCommand, *, dialect: str = "sh") -> int | N
             return None
         return k
     return _sh_command_word(words)
+
+
+def _ps_past_assignment(words: list[str], k: int) -> int | None:
+    """The index past an assignment that starts at `k` (its targets, each a variable or a
+    cast such as `$x`, `$x.y`, `[int]$x` or `$a, $b`, and its operator, standing alone or
+    written against the last target), or None when none starts there."""
+    for j in range(k, len(words)):
+        word = words[j]
+        if j > k and word in _PS_ASSIGNMENTS:
+            return j + 1
+        target = word.lstrip(",")
+        if not target.startswith(("$", "[")):
+            return None
+        if target.endswith(_PS_ASSIGNMENTS):
+            return j + 1
+    return None
 
 
 def _is_assignment(word: str) -> bool:

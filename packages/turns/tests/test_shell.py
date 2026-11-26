@@ -501,8 +501,41 @@ def test_command_word_past_each_wrapper(text, name):
     assert runs(text) == [name]
 
 
+#: Each long form a wrapper's tool takes for a short option the table names.
+LONG_PLAIN = [("sudo", o) for o in ("--askpass", "--background", "--preserve-env",
+                                    "--set-home", "--reset-timestamp", "--non-interactive",
+                                    "--preserve-groups", "--stdin")] + [
+    ("env", "--ignore-environment"), ("env", "--null"), ("timeout 5", "--verbose"),
+    ("setsid", "--ctty"), ("setsid", "--fork"), ("setsid", "--wait")]
+LONG_VALUED = [("sudo", o) for o in ("--close-from", "--chdir", "--group", "--host",
+                                     "--prompt", "--role", "--chroot", "--type", "--user",
+                                     "--other-user")] + [
+    ("env", "--unset"), ("env", "--chdir"), ("nice", "--adjustment"),
+    ("timeout 5", "--signal"), ("timeout 5", "--kill-after"), ("stdbuf", "--input"),
+    ("stdbuf", "--output"), ("stdbuf", "--error")]
+
+
+def _long(wrapper: str, option: str, value: str | None) -> str:
+    """`wrapper option [value] kill 1`, with timeout's duration after its options."""
+    name, _, duration = wrapper.partition(" ")
+    words = [name, option] + ([value] if value else []) + ([duration] if duration else [])
+    return " ".join(words + ["kill", "1"])
+
+
+@pytest.mark.parametrize("wrapper, option", LONG_PLAIN)
+def test_command_word_past_a_long_option_without_a_value(wrapper, option):
+    assert runs(_long(wrapper, option, None)) == ["kill"]
+
+
+@pytest.mark.parametrize("wrapper, option", LONG_VALUED)
+def test_command_word_past_a_long_option_and_its_value_in_either_form(wrapper, option):
+    assert runs(_long(wrapper, option, "X")) == ["kill"]
+    assert runs(_long(wrapper, option + "=X", None)) == ["kill"]
+
+
 @pytest.mark.parametrize("text", [
-    "sudo --login kill 1", "sudo -i kill 1", "env -S 'kill 1'", "timeout --signal=KILL 5 kill",
+    "sudo --login kill 1", "sudo -i kill 1", "env -S 'kill 1'", "timeout --frob 5 kill",
+    "sudo --non-interactiv kill 1", "env --split-string='kill 1'",
     "command -v kill", "A=1", "sudo", "for x in y", "case x in", "}", "fi", "done", "esac",
     "((x))",
 ])
@@ -516,6 +549,37 @@ def test_command_word_in_powershell_and_cmd():
     for statement in ("if", "while", "foreach", "switch", "try", "function", "param"):
         assert runs(f"{statement} x", "powershell") == [None]
     assert runs("@ taskkill /PID 1", "cmd") == ["taskkill"]
+
+
+@pytest.mark.parametrize("text", [
+    "$x = kill 1", "$null = kill 1", "$x= kill 1", "[int]$x = kill 1", "[int] $x = kill 1",
+    "[void]$x = kill 1", "$x += kill 1", "$x -= kill 1", "$x *= kill 1", "$x /= kill 1",
+    "$x %= kill 1", "$x ??= kill 1", "$x+= kill 1", "$a, $b = kill 1", "$a,$b = kill 1",
+    "$x.y = kill 1", "$a[0] = kill 1", "$env:X = kill 1", "${x} = kill 1",
+    "$script:x = kill 1", "$x = $y = kill 1", "$x = . kill 1",
+])
+def test_ps_an_assignment_s_pipeline_is_a_command(text):
+    assert runs(text, "powershell") == ["kill"]
+
+
+def test_ps_what_is_not_an_assignment_keeps_its_first_word():
+    assert runs("$x", "powershell") == ["$x"]
+    assert runs("$x -eq 1", "powershell") == ["$x"]
+    assert runs("$x.Kill()", "powershell") == ["$x.Kill\x00"]
+    assert runs("$x = 1 | kill 2", "powershell") == ["1", "kill"]
+    assert runs("$x = if ($a) { kill 1 }", "powershell") == [None, "kill", None]
+    # An operator joined to the command word leaves one word, which isn't split.
+    assert runs("$x=kill 1", "powershell") == ["$x=kill"]
+    assert runs("$x =kill 1", "powershell") == ["$x"]
+    # In `sh` an assignment word is `NAME=value`, as before.
+    assert runs("$x = kill 1") == ["$x"]
+
+
+def test_ps_an_assignment_s_shell_gives_its_script():
+    assert scripts("$out = pwsh -Command 'kill 1'", "powershell") == [
+        ("kill 1", "powershell", 0, "argument")]
+    assert scripts("$null = bash -c 'kill 1'", "powershell") == [
+        ("kill 1", "sh", 0, "argument")]
 
 
 def test_xargs_is_no_wrapper():

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.9 (unreleased)
+
+- `command_word_index` reads each wrapper option's long form wherever it reads the short
+  one, as the tool takes it, with its value in the next word or after `=`: `sudo`'s
+  `--askpass`, `--background`, `--set-home`, `--reset-timestamp`, `--non-interactive`,
+  `--preserve-groups` and `--stdin`, and `--close-from`, `--chdir`, `--host`, `--prompt`,
+  `--role`, `--chroot`, `--type` and `--other-user` with a value; `env`'s
+  `--ignore-environment` and `--null`, and `--unset` and `--chdir` with a value; `nice`'s
+  `--adjustment`; `timeout`'s `--verbose`, `--signal` and `--kill-after`; `setsid`'s
+  `--ctty`, `--fork` and `--wait`; `stdbuf`'s `--input`, `--output` and `--error`. So
+  `sudo --non-interactive kill 1` and `env --unset=X kill 1` name `kill`, where the read
+  used to end at the option.
+- In PowerShell, `command_word_index` finds the command word past an assignment: the
+  pipeline on the right of `$x = ...`, `$null = ...`, `[int]$x = ...`, `$a, $b = ...`,
+  the compound forms (`+=`, `-=`, `*=`, `/=`, `%=`, `??=`) and a chain of them is a
+  command, with the operator standing alone or written against its target (`$x= ...`).
+  `shell_scripts` reads that command as any other (`$x = pwsh -c '...'`). An operator
+  joined to the command word (`$x=Stop-Process`) is still one word and isn't read.
+
 ## 0.2.8 (unreleased)
 
 - The guard API gains a shell reader, exported from `moxi_turns`: `read_shell(text,
