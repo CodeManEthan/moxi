@@ -2034,6 +2034,22 @@ def test_the_presets_check_does_not_warn_of_a_defaults_stop(recyclable):
     assert not [w for w in stop_warnings(text) if w[1] == "stop_at"]
 
 
+@pytest.mark.parametrize("text", [
+    '[defaults]\nstop_at = "2.5x"\n[seat.c]\nharness = "codex"\n',
+    '[defaults]\nrecycle_at_limit = "relaunch"\nstop_at = "2.5x"\ntarget = "slot"\n',
+])
+def test_the_presets_check_leaves_out_a_defaults_stop_as_the_launch_does(recyclable, text):
+    # A Codex launch with no warn_at of its own can't relaunch itself, so it leaves a
+    # [defaults] stop_at out rather than refusing it for want of a warn_at; nor does
+    # the check, for a preset or for a launch with no preset.
+    found = problems(text, SLOTTED)
+    assert not [p for p in found if p.key == "stop_at"]
+    assert not [p for p in found if p.level == presets.ERROR]
+    got = resolve(text, SLOTTED, **({"seat": "c"} if "seat.c" in text
+                                     else {"typed": {"harness": "codex"}}))
+    assert got.values["stop_at"] == "" and got.sources["stop_at"] == presets.LEFT_OUT
+
+
 # -- what a launch with no preset meets from [defaults] -----------------------------------
 
 def _bare(text: str, available) -> list[tuple]:

@@ -404,8 +404,10 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
     names those rows), so a `[defaults]` `recycle_at_limit = compact` the preset doesn't
     override holds `off`, source `left-out`, and a seat or Codex launch that sets no
     `warn_at` holds none, so a `stop_at` it sets is refused here as at its launch. A
-    `stop_at` the preset sets on a launch that can't relaunch itself is warned of
-    (`_stop_way_out`)."""
+    `[defaults]` `stop_at` the preset doesn't override is left out where a launch of it
+    can't relaunch itself (`_no_way_out`), as `_settle_stop` leaves it out, before the
+    rules see it. A `stop_at` the preset sets on a launch that can't relaunch itself is
+    warned of (`_stop_way_out`)."""
     harness = preset.harness if preset.harness in catalog.HARNESSES else base_harness
     rows = catalog.offered(harness, avail)
     effective = {name: row.default for name, row in rows.items()}
@@ -422,6 +424,9 @@ def _value_rules(preset: Preset, values: Mapping[str, object],
             and _no_default_mark(harness, preset, scratch=bool(effective.get("scratch")),
                                  source=SHIPPED)):
         effective[WARN_AT] = ""
+    if (STOP_AT not in values and catalog.is_set(effective.get(STOP_AT))
+            and _no_way_out(harness, effective, recycle_source, avail) is not None):
+        effective[STOP_AT] = ""
     try:
         catalog.refuse_values(harness, effective, chosen=values, available=avail)
     except Refused as exc:
@@ -445,18 +450,25 @@ def _stop_way_out(preset: Preset, harness: str, effective: Mapping[str, object],
     slot, slots not running here, a scratch folder. The handoff folder needs the launch's
     folder, and is left to the launch. A warning, not an error: a launch may type what
     the preset lacks (`--target slot`)."""
-    from . import selfrecycle
-
-    target = effective.get("target")
-    found = selfrecycle.missing(
-        harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=None,
-        values=effective, source=recycle_source,
-        slots_here=lambda: avail(slots.MODULE) and catalog.slots_here(),
-        unplaced=True)
+    found = _no_way_out(harness, effective, recycle_source, avail)
     if found is None:
         return []
     return [Problem(preset.where, STOP_AT, STOP_NO_WAY_OUT_PRESET.format(
         problem=found.problem), found.hint, catalog.StopMark.code, WARNING)]
+
+
+def _no_way_out(harness: str, effective: Mapping[str, object],
+                recycle_source: str | None, avail):
+    """The first item of the self-relaunch test (`selfrecycle.missing`, armed) that a
+    launch of `effective`, with nothing typed, fails among those that need no launch
+    folder; None when it fails none."""
+    from . import selfrecycle
+
+    target = effective.get("target")
+    return selfrecycle.missing(
+        harness=harness, target=str(target or ""), in_slot=target == "slot", cwd=None,
+        values=effective, source=recycle_source,
+        slots_here=lambda: avail(slots.MODULE) and catalog.slots_here(), unplaced=True)
 
 
 def defaults_problems(table: Mapping[str, object], *,
