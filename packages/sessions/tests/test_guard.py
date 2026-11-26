@@ -155,6 +155,20 @@ def test_a_substitution_in_double_quotes_is_read_as_commands(home):
         assert refused("Bash", {"command": command}, home), command
 
 
+def test_text_after_a_substitution_that_starts_a_path_is_judged(home):
+    t = transcript(home)
+    for command in (f"cat $(x){t}", "ls `x`~/.claude/projects", "ls $(x)$HOME/.claude/projects",
+                    f"python3 tool.py --file=$(x){t}"):
+        assert refused("Bash", {"command": command}, home), command
+    assert not refused("Bash", {"command": "cat $(x)/work/project/notes.md"}, home)
+
+
+def test_a_quote_inside_a_value_s_double_quotes_ends_no_command(home):
+    t = transcript(home)
+    for command in (f"echo ${{x:-\"it's\"}}; cat {t}", f'echo ${{HOME:-"}}"}}; cat {t}'):
+        assert refused("Bash", {"command": command}, home), command
+
+
 def test_codex_shell_calls_under_its_root_are_refused(home):
     rollout = str(home / ".codex/sessions/2026/11/07/rollout.jsonl")
     assert refused("Bash", {"command": f"cat {rollout}"}, home, harness="codex")

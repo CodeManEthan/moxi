@@ -423,8 +423,7 @@ installed, since then nothing enforces it.
 
 The guard is a nudge, not a boundary. Its known gaps:
 
-- A relative path after `cd`, a variable, or a path a script builds gets past it, and so
-  does the text after a substitution in a word (`$(...)/<path>`).
+- A relative path after `cd`, a variable, or a path a script builds gets past it.
 - A heredoc's body is not read as commands, even one fed to a shell (`bash <<EOF`);
   only the substitutions of an unquoted one are.
 - A path counts only when it is a transcript root or lies under one, so a search that

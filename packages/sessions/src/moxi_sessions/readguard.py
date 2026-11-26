@@ -34,8 +34,9 @@ command after it on the same line is judged on its own, so `moxi sessions root; 
 process, which is no tool call, so the guard never sees them.
 
 **A nudge, not a boundary.** A relative path after `cd`, a variable, a path built at run
-time (the text after a substitution in a word is not read), a heredoc's body, or a script
-the command runs gets past it.
+time, a heredoc's body, or a script the command runs gets past it. Of a word that holds a
+substitution, the text before its first one is judged, and the text after its last one
+when that starts with `/`, `~`, `$HOME` or `${HOME}`.
 
 **Fail open.** Every error is logged once per kind and the call is allowed; the guard's
 `on_error` is `allow` as well, so one fault never refuses every read everywhere. sessions'
@@ -80,6 +81,8 @@ DENY = (
 
 _GLOB = "*?["
 _HOME_PREFIXES = ("${HOME}", "$HOME", "~")
+#: How the text after a word's last substitution starts when it is judged as a path.
+_TAIL_STARTS = ("/", *_HOME_PREFIXES)
 _said: set[str] = set()
 _lock = _thread.allocate_lock()
 _config_cache: list = [None, None]
@@ -327,11 +330,18 @@ def _pathlike(word: str) -> bool:
 
 
 def _values(word: str) -> Iterator[str]:
-    """The word, and the value of a `--name=value` or `NAME=value` word."""
-    yield word
+    """The word, and the value of a `--name=value` or `NAME=value` word; for each that
+    holds a substitution (a NUL), also the text after its last one when that starts like
+    an absolute path (`$(x)/<path>`, `$(x)$HOME/<path>`)."""
+    found = [word]
     name, eq, value = word.partition("=")
     if eq and value and "/" not in name:
-        yield value
+        found.append(value)
+    for each in found:
+        yield each
+        tail = each.rpartition("\0")[2]
+        if tail != each and tail.startswith(_TAIL_STARTS):
+            yield tail
 
 
 # --- the shell --------------------------------------------------------------------------

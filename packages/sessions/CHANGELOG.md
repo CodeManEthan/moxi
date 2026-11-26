@@ -6,9 +6,8 @@
   in place of a splitter of its own. It now reads a `$(...)` inside double quotes
   (`echo "$(cat <transcript>)"` is refused) and `$'...'` as the shell does, so a command
   after one is no longer missed. A heredoc's body is no longer read as commands, one fed
-  to a shell included; an unquoted one's substitutions still are. The text after a
-  substitution in a word (`$(...)/<path>`) is not judged, where the old splitter read it
-  as a word of its own. The `turns` extra asks for moxi-turns 0.2.8 or later.
+  to a shell included; an unquoted one's substitutions still are. The `turns` extra asks
+  for moxi-turns 0.2.8 or later.
 - With cache installed, a row of `Active recently` ends its first line in `warm until
   <time>` or `cold`, from cache's clock record for the session, and turns cold at its
   time; opened, it has a `Cache` line linking cache's page. A day's rows say nothing of
