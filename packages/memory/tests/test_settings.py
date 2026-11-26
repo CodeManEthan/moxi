@@ -34,6 +34,10 @@ def test_every_key_has_its_default():
     assert read["subconscious.fork_commands"] == [
         "moxi memory search", "moxi sessions read", "grep", "cat", "head", "tail", "ls",
         "wc", "cut"]
+    assert read["subconscious.chat.enabled"] is False
+    assert read["subconscious.chat.running_max"] == 2
+    assert read["subconscious.chat.drop_after_s"] == 900
+    assert read["subconscious.chat.model"] == ""
 
 
 def test_every_key_is_read_at_its_use_and_none_from_the_env():
@@ -44,7 +48,9 @@ def test_every_key_is_read_at_its_use_and_none_from_the_env():
         "reminder.enabled", "ingest.timer.enabled", "subconscious.trigger",
         "subconscious.scope", "subconscious.limit_s", "subconscious.max_tools",
         "subconscious.max_rounds", "subconscious.max_points", "subconscious.prefetch_hits",
-        "subconscious.on_demand_per_prompt", "subconscious.fork_commands"}
+        "subconscious.on_demand_per_prompt", "subconscious.fork_commands",
+        "subconscious.chat.enabled", "subconscious.chat.running_max",
+        "subconscious.chat.drop_after_s", "subconscious.chat.model"}
     assert all(key.read == "use" and key.env is None for key in keys)
     assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {
         "MOXI_MEMORY_SUBCONSCIOUS", "MOXI_MEMORY_SUBCONSCIOUS_ROUTE",
@@ -73,6 +79,10 @@ def test_an_edit_takes_effect_at_the_next_read():
     ('[subconscious]\nfork_commands = ["grep", "  "]\n', "subconscious.fork_commands"),
     ('[subconscious]\ntrigger = "comms"\n', "subconscious.trigger"),
     ('[subconscious]\nscope = "near"\n', "subconscious.scope"),
+    ("[subconscious.chat]\nrunning_max = 0\n", "subconscious.chat.running_max"),
+    ("[subconscious.chat]\nrunning_max = 6\n", "subconscious.chat.running_max"),
+    ("[subconscious.chat]\ndrop_after_s = 59\n", "subconscious.chat.drop_after_s"),
+    ("[subconscious.chat]\ndrop_after_s = 86401\n", "subconscious.chat.drop_after_s"),
 ])
 def test_the_check_refuses_what_memory_cant_use(text, key):
     with pytest.raises(ConfigError) as caught:

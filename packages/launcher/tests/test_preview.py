@@ -538,3 +538,25 @@ def test_a_preview_of_a_scratch_holds_a_defaults_relaunch_off(tmp_path, monkeypa
         api.preview(api.LaunchRequest(typed={"scratch": True,
                                              "recycle_at_limit": "relaunch"},
                                       request_id="r4", session_id=SID, actor="ann"))
+
+
+def test_child_env_is_the_scrubbed_caller_with_the_launchs_stamps(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    req = api.LaunchRequest(typed={"target": "headless", "brief": "b"}, cwd=str(work),
+                            request_id="r1", session_id=SID, actor="ann")
+    composition = api.preview(req)
+    caller = {"PATH": "/bin", "KEEP_ME": "1", "CLAUDECODE": "1"}
+    env = api.child_env(req, composition, env=caller)
+    assert env["KEEP_ME"] == "1" and env["PATH"] == "/bin" and "CLAUDECODE" not in env
+    assert {k: env[k] for k in composition.env} == dict(composition.env)
+
+
+def test_settable_rows_name_every_row_a_request_may_leave_out():
+    rows = api.settable_rows("claude")
+    assert {"identity", "keep_warm", "tools", "mcp_config", "extra_flags"} <= set(rows)
+    assert "session_id" not in rows and len(rows) == len(set(rows))
+    req = api.LaunchRequest(typed={"target": "headless", "brief": "b"},
+                            left_out=[r for r in rows
+                                      if r not in ("harness", "target", "brief")])
+    presets.layered(req)

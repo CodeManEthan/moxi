@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Interface 4, for a caller that runs its own headless agents: a `LaunchRequest`'s
+  `stamps` (a fork's rule), kept in the launch's values; `continue_headless`, a headless
+  resume that replays the stored values and stamps, launched by `by` (the caller's
+  identity when left out); `run_log`, a launch's run log; and
+  `end_headless`, which ends a headless launch's whole process tree on every system and
+  leaves a pid whose start time no longer matches. Two reads that start nothing come with
+  it: `child_env`, the environment a launch's harness would get, and `settable_rows`,
+  every row a request may type or leave out.
 - A handoff waits until its seat takes it. A seat's start no longer marks the handoff it
   points to as picked, so the pointer comes back at every start until the handoff is
   taken, given to a launch, or a newer one of the key is. The pointer now ends "then run:

@@ -28,6 +28,32 @@
   would return them, so a task's notice that opens with `<task-notification>` is found.
   `harness` and `summary` rows stay out. A delivered hit's line in the text part reads
   `delivered by <writer>`, and the tool's description lists the writers it returns.
+- A chat's subconscious: with the `connector` extra, memory's provider serves a second
+  tool, `recall`, listed whether the chat recall is on or off. A chat calls it at the
+  start of every turn with a conversation label, the user's words and a short context;
+  it returns at once, handing back the pieces earlier recalls of the conversation found
+  (each once, oldest first, a line handed in the last six hours cut from later pieces,
+  `stale` when a later call carried words first, dropped past
+  `subconscious.chat.drop_after_s`, each redacted through secrets' `chat_redact` with sessions' path cut between its
+  passes, as `search_memory` is, one that comes back unscanned held back with a note) and starting a chat recall for the
+  words, or saying in `skipped` why none started. It runs under a limit of its own and a
+  5-second budget for its work, every lock wait inside it. A chat recall is a fresh
+  headless Claude Code agent launched, continued and ended through the launcher's
+  interface 4, stamped `MOXI_MEMORY_SUBCONSCIOUS_FORK`, with the chat's context before
+  the recall brief. Its fence: read tools only (`--tools Read,Grep,Glob`, the web tools
+  only where the brief allows the web), no MCP tool or server, `--safe-mode`,
+  `--restricted`, `dontAsk` with no permission prompts, and a budget and turn limit;
+  every launcher row is typed or left out. A probe checks the fence on the machine at
+  the first chat recall after each change of `claude` and keeps the outcome in
+  `subconscious/chat/fence.json`; a failed part stops chat recalls there. A chat
+  recall's transcript is left out of the index. At most `subconscious.chat.running_max`
+  run per conversation and 4 over every conversation. New settings:
+  `subconscious.chat.enabled` (off by default), `running_max`, `drop_after_s` and
+  `model`. The connector's `memory recall` status row and the doctor's `subconscious` row
+  say whether it is on and why none can start; the doctor also shows the fence's outcome.
+  `recall_start.begin` takes `keep_running` and `lock_s`, each defaulting to what it did
+  before.
+
 - A recall fork's plain-read test reads the shell text through turns' shell reader
   (`read_shell`) in place of a splitter of its own, after the same character filter. It
   now refuses a comment (`grep x #c`), which it allowed; everything else it allowed or

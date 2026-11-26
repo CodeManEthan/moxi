@@ -48,6 +48,9 @@ line and the other leaves it. A line a taker left is free again once that taker 
   turns: a first round ends the recall `lost` (`gone`), a later one ends the stream with
   the line `back` and the round's loss noted. A taker gives no further round, and ends
   the record as the stream's end does.
+- On a chat recall's headless route, the round's end is read from the run log its
+  line's `request` names (`recall_route.Headless.read_end`), never through turns, and
+  the line is left while that launch still runs; the ack does nothing.
 - On the slot route, every path above that settles the line (all but `none` and a line
   left for turns' end) then ends the slot fork (`recall_route.end_fork`), the recall
   getting no further round. Where comms refuses the send, the fork is ended at that
@@ -278,11 +281,13 @@ def _finish(recall, line: dict, route, *, read_end, read_start, send, sleep,
         return SETTLED
     number = round_number(ref)
     try:
-        end = (read_end or _read_end(_turns_session(route, session_id)))(str(ref))
+        end = (read_end or getattr(route, "read_end", None)
+               or _read_end(_turns_session(route, session_id)))(str(ref))
     except Exception:  # noqa: BLE001 - no end yet, or turns can't be asked: left for later
         return LEFT
     _note_fork(recall, str(ref),
-               read_start or _read_end(_turns_session(route, session_id), "started"))
+               read_start or getattr(route, "read_start", None)
+               or _read_end(_turns_session(route, session_id), "started"))
     recall_stream.settle(recall, number or 1, _as_gone(end), route)
     if recall.line.get("state") == recalls.SENDING:
         recall_stream.deliver(recall, send=send, sleep=sleep, on_refused=on_refused)

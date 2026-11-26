@@ -24,6 +24,11 @@ record holds, never on a fresh read of memory's config:
    the main agent already has,
    noting the hit count and whether the search went past the project on the line, and
    the brief on the record.
+   A chat recall (start `chat`) takes its own branch here instead
+   (`moxi_memory.recall_chat.prepare`): it mints its agent's session id and writes it
+   first, asks the fence (the probe, when the fence record holds no outcome for the
+   binary), ending the recall `lost` (`fence`, or `gone` with no outcome) when it fails,
+   and builds the chat's brief; its route is the headless one.
 4. It runs the recall's stream through its route (`moxi_memory.recall_stream`): the
    brief as the first round, later rounds while the stream lasts, each round settled
    on the line and acked to turns, and the record ended. On the slot route it then
@@ -184,9 +189,18 @@ def run(session_id: str, recall_id: str, *, route=None) -> int:
         if error is not None:
             lose(recall, CONFIG, error)
             return 0
-        text_brief = write_brief(recall)
         from . import recall_route, recall_stream
 
+        if recall.record.get("start") == recalls.CHAT:
+            from . import recall_chat
+
+            prepared = recall_chat.prepare(recall)
+            if prepared is None:
+                return 0
+            text_brief, chat_route = prepared
+            route = chat_route if route is None else route
+        else:
+            text_brief = write_brief(recall)
         if route is None:
             route = recall_route.for_recall(recall)
         end_fork = recall_route.ForkEnder(recall, route)

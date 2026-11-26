@@ -155,7 +155,7 @@ def test_nothing_else_in_memory_imports_the_provider():
 
 
 def test_the_tool_is_read_only_ends_with_the_untrusted_line_and_bounds_its_inputs():
-    (only,) = connector.PROVIDER.tools
+    only = connector.PROVIDER.tools[0]
     assert only.name == "search_memory" and only.title
     assert only.annotations == {"readOnlyHint": True, "destructiveHint": False,
                                 "idempotentHint": True, "openWorldHint": False}
