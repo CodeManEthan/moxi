@@ -513,7 +513,18 @@ sessions module. Top to bottom:
 A session is shown by the name typed for it in its harness, else by its folder's last
 segment and when it started (`proj-a · started today 09:14`, `proj-a · started Nov 3
 08:52`: the start's day is worded as the Sessions page words it), never by its id; `Copy id`
-copies the id. A sum that is not whole reads `at least $19.54`, and one nothing in which
+copies the id.
+
+Where the launcher module is installed, the page also reads the launcher's
+`/api/running` when it opens and when its tab is shown again, and follows the launcher's
+`running` topic. A session one of those running launches holds (the same harness and
+session id) is shown, where no name was typed for it, by the launch's name as the
+launcher gives it (`builder-1`), with its folder or project beside it. Where it runs
+leads that: `slot 4 · atlas-api`, `terminal · kestrel-web`. Opened, its harness, model
+and start line also gives the effort it was launched with (`claude · <model> · high ·
+started today 12:45`), where the launch set one. A session that no running launch holds,
+an ended one among them, reads as before. Without the launcher, or while its read fails,
+none of this shows, nothing stands in its place, and no line at the foot names it. A sum that is not whole reads `at least $19.54`, and one nothing in which
 could be priced, `no price`. In a table such a cost carries a dim `*` in its own cell,
 why on hover and, for a screen reader, in the cell's text (`no price, not whole: nothing
 here could be priced`); no table has a column for it. The chart's table puts the mark in
