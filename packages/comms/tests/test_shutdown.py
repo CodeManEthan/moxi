@@ -9,6 +9,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import psutil
@@ -47,7 +48,9 @@ def test_a_signal_runs_the_clean_shutdown(tmp_path, sig):
 def test_ctrl_break_runs_the_clean_shutdown_on_windows(tmp_path):
     """Windows' stop that a handler sees: Ctrl+Break, sent to the daemon's own process
     group. Its handler stops the daemon as SIGTERM's does on POSIX, so it exits 0 and no
-    longer answers at its pipe."""
+    longer answers at its pipe. The break is sent once the daemon has started and waits
+    to be stopped: Windows runs a handler only while the main thread runs Python code, so
+    a break that lands during the start is handled whatever the wait does."""
     from moxi_comms.client import DaemonClient
 
     proc = subprocess.Popen(
@@ -56,6 +59,17 @@ def test_ctrl_break_runs_the_clean_shutdown_on_windows(tmp_path):
         env=os.environ.copy(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
     address = daemon_socket()
+    lines: list[str] = []
+    started = threading.Event()
+
+    def read() -> None:
+        for line in proc.stdout:
+            lines.append(line)
+            if "comms daemon listening on" in line:
+                started.set()
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
 
     def answers() -> bool:
         try:
@@ -72,19 +86,22 @@ def test_ctrl_break_runs_the_clean_shutdown_on_windows(tmp_path):
 
     try:
         deadline = time.time() + 20
-        while not answers():
-            assert proc.poll() is None, proc.stdout.read()
-            assert time.time() < deadline, "the daemon never answered at its pipe"
+        while not (started.is_set() and answers()):
+            assert proc.poll() is None, "".join(lines)
+            assert time.time() < deadline, "the daemon never started: " + "".join(lines)
             time.sleep(0.05)
+        time.sleep(0.5)     # past the log line, into the wait main() stops in
         proc.send_signal(signal.CTRL_BREAK_EVENT)
-        out, _ = proc.communicate(timeout=20)
+        proc.wait(timeout=20)
+        reader.join(5)
     finally:
         if proc.poll() is None:
             for child in psutil.Process(proc.pid).children(recursive=True):
                 with contextlib.suppress(psutil.NoSuchProcess):
                     child.kill()
             proc.kill()
-            proc.communicate()
+            proc.wait()
+    out = "".join(lines)
     assert proc.returncode == 0, out
     assert not answers(), "stop() closed the pipe it served"
 

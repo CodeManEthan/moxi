@@ -153,6 +153,10 @@ ASK_INDEX_SLACK = constants.RESCAN_LIMIT // 10
 TRIM_INTERVAL = 24 * 3600
 #: How often the trim loop wakes to check `TRIM_INTERVAL`.
 TRIM_TICK = 5.0
+#: How often `main` wakes from waiting to be stopped. Windows runs a signal's handler only
+#: when the main thread runs Python code, and a wait with no timeout never returns to it
+#: there, so a started daemon took Ctrl+Break and never stopped.
+STOP_TICK = 0.5
 
 # `moxi comms explain`'s four cases, classified on demand
 CASE_HANDLED = "handled"
@@ -3956,7 +3960,8 @@ def main(argv=None) -> int:  # pragma: no cover - exercised by the CLI smoke run
         raise SystemExit(str(exc)) from None
     log.info("comms daemon listening on %s", daemon.socket_path)
     try:
-        stopping.wait()
+        while not stopping.wait(STOP_TICK):
+            pass
     except KeyboardInterrupt:
         pass
     finally:

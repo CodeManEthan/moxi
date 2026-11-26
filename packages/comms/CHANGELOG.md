@@ -20,8 +20,10 @@
   started.
 - On Windows the daemon stops cleanly on Ctrl+Break, as it does on SIGTERM elsewhere: it
   closes its custody intervals and its pipe and exits 0. Windows has no SIGHUP, and a
-  SIGTERM sent there ends the process with no handler run, so only Ctrl+C in its own
-  console reached the stop.
+  SIGTERM sent there ends the process with no handler run. A daemon that had finished
+  starting waited to be stopped with no timeout, and Windows runs a signal's handler only
+  when the main thread runs Python code, so it took the break and went on; it now wakes
+  twice a second to let the handler run.
 - On Windows comms reads cards again. The read opened a card with `O_NOFOLLOW`, which
   Windows lacks; there it now refuses a card that is a link or another reparse point by
   its own `lstat`, and reads only the file that `lstat` saw.
