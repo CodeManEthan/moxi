@@ -1824,6 +1824,7 @@ comms	packages/comms/tests/test_claim_ops.py	h.on_end = ended.set	keep	set	set
 comms	packages/comms/tests/test_claim_send.py	assert len(calls) == 1 and rig.record.history(rig.names_channel) == []	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	assert phrase in out and rig.record.history(rig.names_channel) == []	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	assert rig.record.history(rig.names_channel) == []	keep	record	record
+comms	packages/comms/tests/test_claim_send.py	assert wait_for(lambda: (s.record() or {}).get("state") == "offline")	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	code, out = rig.cli(["reply", mine, "fine"], env=as_claim(s))     # its own message	keep	env	env
 comms	packages/comms/tests/test_claim_send.py	code, out = rig.cli(["reply", other.id, "fine"], env=as_claim(s))  # another's	keep	env	env
 comms	packages/comms/tests/test_claim_send.py	code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))	keep	env	env
