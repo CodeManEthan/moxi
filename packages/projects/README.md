@@ -469,4 +469,4 @@ lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-projects-v0.1.4/packages/projects/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-projects-v0.1.5/packages/projects/LICENSE).

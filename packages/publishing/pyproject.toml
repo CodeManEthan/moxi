@@ -19,8 +19,13 @@ classifiers = [
 ]
 # repo runs the git hook pieces; secrets holds the pattern sets and lists they read.
 # packaging reads the versions and requirements a release is judged by.
-dependencies = ["moxi>=0.1.9,<0.2", "moxi-repo>=0.1.2,<0.2", "moxi-secrets>=0.1,<0.2",
+dependencies = ["moxi>=0.1.11,<0.2", "moxi-repo>=0.1.2,<0.2", "moxi-secrets>=0.1,<0.2",
                 "packaging"]
+
+[project.optional-dependencies]
+# The questions `moxi projects add` puts about clean history and push approval. projects
+# reads them through its `moxi.projects` group below, from 0.1.5, which reads interface 3.
+projects = ["moxi-projects>=0.1.5,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"

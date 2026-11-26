@@ -51,7 +51,8 @@ The first version.
 - `moxi publishing ci notes`: a tag's CHANGELOG section.
 - Every setting carries page fields, which `moxi config publishing show --json` prints
   and the settings page draws: a plain label, a line, and on `provenance.rules` a
-  can-hurt mark on taking a rule away. publishing needs moxi 0.1.9 or later.
+  can-hurt mark on taking a rule away. publishing needs moxi 0.1.11 or later, the
+  first with the agent test push approval reads.
 - The push piece's `standing-branch` setting (`ci/*`, say): a standing branch goes out
   only at the tip of the local branch its name names, may be forced, and is deleted
   whatever its tip; a push of only standing branches to the URL that reduces to
@@ -92,7 +93,8 @@ The first version.
   deletes a branch a pattern names, or any tag, needs `MOXI_PUBLISHING_PUSH_WORD`
   matching `push.word_pattern`; a push from your own terminal or a Moxi unit needs none.
   It reads no public or clean flag. A passing push is logged in `pushes.jsonl` with the
-  word and the agent's harness.
+  word and the agent's harness; where the push piece is enabled in the same repo, its own
+  record logs the push instead, with the word and no harness.
 - The push piece's `word-required` setting and `defaults.word_required` are retired: the
   word is push approval's. A repo whose push piece still holds `word-required = true` has
   every push refused, naming `moxi publishing approval enable PATH --branch ...` and
@@ -111,5 +113,11 @@ The first version.
   `project_add.clean_history` and `project_add.push_approval` (`ask`, `yes` or `no`,
   default `ask`) and `project_add.approval_branches` answer for the machine: with `yes`
   or `no` the add asks nothing for that choice and applies it. publishing contributes
-  through projects' `moxi.projects` group, interface 3, and needs a projects that reads
-  it.
+  through projects' `moxi.projects` group, interface 3, and its `projects` extra asks for
+  moxi-projects 0.1.5 or later, the first that reads it.
+- A repo can be left out of project add: `moxi publishing project-add disable PATH`
+  writes `moxi-publishing.left-out = true` into its git config, and `project-add enable
+  PATH` removes it. A project add in a left-out repo turns neither clean history nor push
+  approval on, whatever the answer or the `project_add.*` preset, and says so with the
+  command that turns each on by hand. `moxi publishing list` shows the mark (`left_out` in
+  `--json`) and `moxi doctor publishing` gives it an `ok` row.

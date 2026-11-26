@@ -32,7 +32,8 @@ def test_list_shows_flagged_repos_with_each_piece(repo, names, template, tmp_pat
 def test_list_with_none_says_so(capsys):
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out.strip() == (
-        "no repo keeps a clean history, has push approval or is marked public")
+        "no repo keeps a clean history, has push approval, is marked public or is "
+        "left out of project add")
 
 
 def test_list_shows_each_repos_three_choices(repo, names, template, tmp_path, capsys):
@@ -65,3 +66,16 @@ def test_list_shows_a_repo_with_approval_alone(repo, capsys):
     [entry] = flag.listing()
     assert (entry["public"], entry["clean"], entry["approval"]) == (False, False, ["*"])
     assert entry["pieces"] == {"publishing/approval": entry["pieces"]["publishing/approval"]}
+
+
+def test_list_shows_a_repo_left_out_of_project_add(repo, names, capsys):
+    from moxi_publishing import approval, projects_link
+
+    approval.enable(repo, ["main"])
+    assert flag.listing()[0]["left_out"] is False
+    projects_link.leave_out(str(repo))
+    [entry] = flag.listing()
+    assert entry["left_out"] is True
+    assert cli.main(["list"]) == 0
+    assert ("  public: no; clean history: no; push approval: main; project add: left out"
+            in capsys.readouterr().out)

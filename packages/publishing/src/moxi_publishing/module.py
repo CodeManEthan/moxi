@@ -2,8 +2,9 @@
 
 publishing keeps private text out of a public repo and releases that repo's packages. It
 declares four git hook pieces, which repo runs (`moxi_publishing.message`, `.content`,
-`.push` and `.approval`), and reads secrets' pattern sets and lists. No daemon, timer,
-store or page.
+`.push` and `.approval`), and reads secrets' pattern sets and lists. With projects
+installed, a project add asks its two questions (`moxi_publishing.projects_link`). No
+daemon, timer, store or page.
 """
 
 INTERFACES = frozenset({1})
@@ -11,7 +12,10 @@ API = None
 #: What `moxi publishing` runs, in process, as `main(argv, prog="moxi publishing")`.
 CLI = "moxi_publishing.cli:main"
 SUMMARY = "Keep private text out of a public git repo, and release its packages."
-OPTIONAL = {}
+OPTIONAL = {
+    "projects": "The questions moxi projects add puts for a new project in a git repo: "
+                "keep its history clean, and ask approval before agents push.",
+}
 GATED = {}
 INTERNAL_ENV = {
     "MOXI_PUBLISHING_PUSH_WORD": "set by whoever pushes, per push: where the push was "

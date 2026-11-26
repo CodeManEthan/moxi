@@ -27,10 +27,11 @@ history on, or the repo was enabled before clean history existed, `disable` turn
 too; a repo that kept a clean history before it was made public keeps it, and `disable`
 names `clean-history disable` for it.
 
-`list` shows every repo that keeps a clean history, has push approval or is marked public:
-a line with its three choices (`public: yes; clean history: yes; push approval: main`),
-then each piece's state and settings. `--json` gives them as `public`, `clean` and
-`approval` (the branch patterns, or null).
+`list` shows every repo that keeps a clean history, has push approval, is marked public
+or is [left out of project add](#leaving-a-repo-out): a line with its choices (`public:
+yes; clean history: yes; push approval: main`, then `; project add: left out` where it
+is), then each piece's state and settings. `--json` gives them as `public`, `clean`,
+`approval` (the branch patterns, or null) and `left_out`.
 
 `enable` warns when secrets' private names list is empty: add yours with
 `moxi config secrets`.
@@ -126,6 +127,26 @@ applies it, in a terminal or not:
 With `push_approval = "yes"` and no branches listed, a terminal add asks for them, and any
 other add turns nothing on and says so. The questions read no repo's git config, so a repo
 that already keeps a clean history is asked again; a yes then changes nothing.
+
+### Leaving a repo out
+
+A repo you never want a project add to change, say one that holds many projects' notes,
+can be left out:
+
+```sh
+moxi publishing project-add disable ~/src/shared
+moxi publishing project-add enable ~/src/shared
+```
+
+`disable` writes `moxi-publishing.left-out = true` into the repo's git config. After
+that, a project add whose root is in that repo turns neither clean history nor push
+approval on there, whatever you answer and whatever the `project_add.*` settings preset,
+and its output says so: `publishing: clean history left off: <repo> is left out of
+project add (moxi-publishing.left-out); ...`, with the command that turns it on by hand.
+The questions are still put, since they read no git config. `enable` removes the mark.
+Neither step turns clean history or push approval on or off, and `moxi publishing
+clean-history enable` and `approval enable` still act on a left-out repo. `moxi publishing
+list` and `moxi doctor publishing` show the mark for each repo repo has indexed.
 
 ## Settings
 
@@ -640,6 +661,8 @@ from the template; and, once, when secrets' private names list is empty and when
 push log can't be written. It fails a push piece that still holds the retired
 `word-required = true` (every push is then refused), naming both commands that move it to
 push approval, and warns where it holds any other value.
+A repo left out of project add gets one more `ok` row, `repo <root> project add`,
+saying so.
 
 For a repo whose push piece sets `standing-branch`, it fails a bad pattern (the piece then
 refuses every push) and an unset `moxi-publishing.github` (no push of `main` then waits

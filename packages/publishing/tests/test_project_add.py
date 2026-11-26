@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import pytest
 from conftest import write_config
 
-from moxi_publishing import approval, flag
+from moxi_repo.api import quote_arg
+
+from moxi_publishing import approval, cli, flag
 from moxi_publishing import projects_link as link
 
 
@@ -55,7 +57,8 @@ def test_a_root_with_a_space_is_quoted_in_the_command(repo, tmp_path):
     (spaced / ".git").mkdir()
     put = by_key(link.questions(fields(spaced)))
     assert put["clean_history"]["later"] == (
-        f'moxi publishing clean-history enable "{spaced}"')
+        f"moxi publishing clean-history enable {quote_arg(str(spaced))}")
+    assert quote_arg(str(spaced)) != str(spaced)
 
 
 @pytest.mark.parametrize("text, presets", [
@@ -139,3 +142,59 @@ def test_a_project_add_names_the_commands_without_answers_and_applies_a_yes_sett
     assert added.asked == [] and added.warnings == []
     assert flag.is_clean(str(other))
     assert flag.piece_settings(str(other), approval.PIECE_ID)[approval.BRANCH] == ["main"]
+
+
+# -- a repo left out of project add ------------------------------------------------------
+
+def test_a_left_out_repo_answered_yes_turns_nothing_on_and_says_why(repo, names, capsys):
+    assert cli.main(["project-add", "disable", str(repo)]) == 0
+    assert "is left out of project add" in capsys.readouterr().out
+    assert flag.is_left_out(str(repo))
+    said = link.answer(project(repo), "clean_history", "yes")
+    assert said == (f"clean history left off: {repo} is left out of project add "
+                    f"({flag.LEFT_OUT}); to turn it on there, moxi publishing "
+                    f"clean-history enable {quote_arg(str(repo))}")
+    assert not flag.is_clean(str(repo))
+    said = link.answer(project(repo), "push_approval", "yes")
+    assert said.startswith("push approval left off: ") and "approval enable" in said
+    assert link.answer(project(repo), "approval_branches", "main") is None
+    assert flag.piece_settings(str(repo), approval.PIECE_ID) is None
+    # The verbs themselves still act there.
+    assert link.answer(project(repo), "push_approval", "no") is None
+
+
+def test_an_unmarked_repo_answered_yes_turns_both_on(repo, names, capsys):
+    assert cli.main(["project-add", "disable", str(repo)]) == 0
+    assert cli.main(["project-add", "enable", str(repo)]) == 0
+    assert capsys.readouterr().out.strip().endswith("is no longer left out of project add")
+    assert not flag.is_left_out(str(repo))
+    assert cli.main(["project-add", "enable", str(repo)]) == 0
+    assert "nothing changed" in capsys.readouterr().out
+    link.answer(project(repo), "clean_history", "yes")
+    link.answer(project(repo), "approval_branches", "main")
+    assert flag.is_clean(str(repo))
+    assert flag.piece_settings(str(repo), approval.PIECE_ID)[approval.BRANCH] == ["main"]
+
+
+def test_yes_presets_skip_a_left_out_repo_and_act_in_an_unmarked_one(repo, names,
+                                                                      tmp_path):
+    acts = pytest.importorskip("moxi_projects.acts")
+    import shutil
+
+    write_config("publishing", '[project_add]\nclean_history = "yes"\n'
+                               'push_approval = "yes"\napproval_branches = ["*"]\n')
+    other = tmp_path / "proj-b"
+    shutil.copytree(repo, other, symlinks=True)
+    link.leave_out(str(repo))
+    added = acts.add("proj-a", root=str(repo))
+    assert added.asked == [] and added.warnings == []
+    assert not flag.is_clean(str(repo))
+    assert flag.piece_settings(str(repo), approval.PIECE_ID) is None
+    said = [note for note in added.notes if note.startswith("publishing: ")]
+    assert [note.split(" left off: ")[0] for note in said] == [
+        "publishing: clean history", "publishing: push approval"]
+    assert all(f"is left out of project add ({flag.LEFT_OUT})" in n for n in said)
+    added = acts.add("proj-b", root=str(other))
+    assert added.asked == [] and added.warnings == []
+    assert flag.is_clean(str(other))
+    assert flag.piece_settings(str(other), approval.PIECE_ID)[approval.BRANCH] == ["*"]

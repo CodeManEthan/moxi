@@ -32,8 +32,9 @@ Interface 3 is interface 2 plus, offered both or neither:
 - `questions(fields)`: gets the project just added as a dict (`key`, `root`, `kind`,
   `lead`, `notes_root`, and `mint`, the mint `add --create` makes, or None) and returns a
   list of the questions the add should put, or None. Each is a dict: `key` (a name unique
-  within the module: a lower-case letter, then lower-case letters, digits and `_`), `text` (one plain sentence), `later` (the command that sets it
-  later), and, each optional, `choices` (a list of answers; none means any text),
+  within the module: a lower-case letter, then lower-case letters, digits and `_`),
+  `text` (one plain sentence), `later` (the command that sets it later), and, each
+  optional, `choices` (a list of answers; none means any text),
   `suggested` (the answer offered as the default), `preset` (an answer already settled,
   say by a setting: the add asks nothing and acts on it) and `after` (`[key, value]`: put
   only once the module's earlier question `key` is answered `value`). A `suggested` or

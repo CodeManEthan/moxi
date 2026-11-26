@@ -73,6 +73,17 @@ def test_the_push_piece_in_a_clean_repo_that_isnt_public_fails(repo, names):
                       "so it refuses every push")
 
 
+def test_a_repo_left_out_of_project_add_has_its_own_ok_row(repo, names):
+    from moxi_publishing import projects_link
+
+    enabled(repo)
+    projects_link.leave_out(str(repo))
+    rows = [(r.state, r.detail) for r in doctor.rows() if r.name == f"repo {repo} project add"]
+    assert rows == [("ok", "left out of project add (moxi-publishing.left-out): a project "
+                           "add turns neither clean history nor push approval on here")]
+    assert states(repo) == [("ok", "marked public; the three pieces are enabled")]
+
+
 def test_with_nothing_public_one_ok_row():
     rows = list(doctor.rows())
     assert [(r.name, r.state) for r in rows] == [("repos", "ok")]

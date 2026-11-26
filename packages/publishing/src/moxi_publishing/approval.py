@@ -177,7 +177,7 @@ def enable(path: str | os.PathLike, branches: list[str] | tuple) -> list[str]:
         raise flag.Failure(exc.text, exc.code) from None
     return [*report.lines, *report.problems,
             f"an agent's push of {' '.join(branches)}, or of any tag, needs the word in "
-            f"{root}"]
+            f"{api.quote_arg(root)}"]
 
 
 def disable(path: str | os.PathLike) -> list[str]:

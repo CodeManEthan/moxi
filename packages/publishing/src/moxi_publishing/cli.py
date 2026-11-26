@@ -5,6 +5,7 @@
     moxi publishing clean-history enable|disable PATH
     moxi publishing approval enable PATH --branch PATTERN [--branch PATTERN]...
     moxi publishing approval disable PATH
+    moxi publishing project-add enable|disable PATH
     moxi publishing list [--json]
     moxi publishing scan [PATH] [--rev REV] [--from REV] [--ci]
     moxi publishing bump PACKAGE... [--part patch|minor|major] [--path PATH]
@@ -107,10 +108,25 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                          description="Remove the approval piece from the repo at PATH.")
     s.add_argument("path", metavar="PATH")
     p = verbs.add_parser(
+        "project-add", help="let a project add turn a repo's choices on, or not",
+        description="Whether moxi projects add may turn clean history and push approval "
+                    "on in the repo at PATH, by its answers or the project_add.* "
+                    "presets. disable marks the repo left out (moxi-publishing.left-out "
+                    "in its git config); the add then leaves both off and says why. "
+                    "Neither step turns anything on or off itself.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser("disable", help="leave the repo out of project add",
+                         description="Mark the repo at PATH left out of project add.")
+    s.add_argument("path", metavar="PATH")
+    s = steps.add_parser("enable", help="let project add act in the repo again",
+                         description="Remove the left-out mark from the repo at PATH.")
+    s.add_argument("path", metavar="PATH")
+    p = verbs.add_parser(
         "list", help="every repo with clean history, push approval or the public flag",
         description="Every repo repo has indexed that keeps a clean history, has push "
-                    "approval or is marked public: its three choices, then each piece's "
-                    "state and settings.")
+                    "approval, is marked public or is left out of project add: its "
+                    "choices, then each piece's state and settings.")
     p.add_argument("--json", action="store_true", help="print JSON")
     p = verbs.add_parser(
         "scan", help="scan a commit's whole tree for text a public repo can't hold",
@@ -282,14 +298,16 @@ def _scan(args, prog: str) -> int:
 
 def _print_listing(repos: list[dict]) -> None:
     if not repos:
-        print("no repo keeps a clean history, has push approval or is marked public")
+        print("no repo keeps a clean history, has push approval, is marked public or is "
+              "left out of project add")
         return
     for repo in repos:
         print(repo["root"] + (f" (github {repo['github']})" if repo["github"] else ""))
         approval = (" ".join(repo["approval"]) or "no branch, tags only"
                     if repo["approval"] is not None else "off")
         print(f"  public: {'yes' if repo['public'] else 'no'}; clean history: "
-              f"{'yes' if repo['clean'] else 'no'}; push approval: {approval}")
+              f"{'yes' if repo['clean'] else 'no'}; push approval: {approval}"
+              + ("; project add: left out" if repo["left_out"] else ""))
         for piece, state in repo["pieces"].items():
             if state is None:
                 print(f"  {piece}: missing")
@@ -322,6 +340,11 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
 
             lines = (approval.enable(args.path, args.branches) if args.step == "enable"
                      else approval.disable(args.path))
+        elif args.verb == "project-add":
+            from moxi_publishing import projects_link
+
+            lines = (projects_link.let_in(args.path) if args.step == "enable"
+                     else projects_link.leave_out(args.path))
         else:
             repos = flag.listing()
             if args.json:

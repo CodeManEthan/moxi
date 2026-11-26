@@ -102,8 +102,9 @@ class Prepared:
         self.sets = ([f"{REFUSED_TRAILER}={value}" for value in current + self.added]
                      if self.added else [])
 
-    def record(self, root: str) -> None:
-        """Write the records `disable` reads, after the pieces are registered."""
+    def remember(self, root: str) -> None:
+        """Write into the repo's git config what `disable` reads to take back only what
+        `enable` added, after the pieces are registered."""
         recorded = {v.casefold() for v in flag.config_get_all(root, CLEAN_TRAILERS)}
         for key in self.added:
             if key.casefold() not in recorded:
@@ -137,13 +138,14 @@ def enable(path: str | os.PathLike) -> list[str]:
         report = api.add(root, *PIECES, *prepared.named, sets=given + prepared.sets)
     except api.Failure as exc:
         raise flag.Failure(exc.text, exc.code) from None
-    prepared.record(root)
+    prepared.remember(root)
     for key, value in ((flag.CLEAN, "true"), (flag.INTERPRETER, api.interpreter())):
         done = flag._git(root, "config", key, value)
         if done.returncode != 0:
             raise flag.Failure(f"git config {key} failed in {root}: {done.stderr.strip()}; "
                                "the pieces are registered and refuse every commit until "
-                               f"moxi publishing clean-history enable {root} runs again")
+                               "moxi publishing clean-history enable "
+                               f"{api.quote_arg(root)} runs again")
     lines = [f"{root} keeps a clean history ({flag.CLEAN})", *report.lines,
              *report.problems, *prepared.lines()]
     warning = flag._names_empty()
@@ -226,5 +228,6 @@ def disable(path: str | os.PathLike) -> list[str]:
     return lines
 
 
-__all__ = ["CLEAN_TRAILERS", "CLEAN_RULES", "CLEAN_HOOKS", "CLEAN_WITH_PUBLIC", "Prepared", "PIECES", "COMMIT_RULES", "REFUSED_TRAILER",
+__all__ = ["CLEAN_TRAILERS", "CLEAN_RULES", "CLEAN_HOOKS", "CLEAN_WITH_PUBLIC", "Prepared",
+           "PIECES", "COMMIT_RULES", "REFUSED_TRAILER",
            "enable", "disable"]

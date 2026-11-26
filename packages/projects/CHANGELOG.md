@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 (unreleased)
 
 - `moxi projects add` asks the questions other modules offer about the new project.
   With a terminal on stdin and stdout and without `--json`, it asks each one, its

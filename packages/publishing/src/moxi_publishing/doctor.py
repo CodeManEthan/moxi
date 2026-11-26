@@ -35,6 +35,8 @@ Read-only, and no row uses the network. For each repo repo has indexed:
   then waits for no CI;
 - `ok`, one row, for a flagged repo with none of the above `fail`s, naming the standing
   patterns where there are some.
+- `ok`, one row more, for a repo left out of project add (`moxi-publishing.left-out`),
+  saying a project add turns neither clean history nor push approval on there.
 
 Then, once: `warn` when secrets' private names list is empty or can't be read, and when
 the push log can't be written, since the push piece then refuses every push.
@@ -78,6 +80,7 @@ def rows() -> Iterator[Row]:
         if found:
             seen = True
             yield from found
+        yield from _left_out_rows(str(repo.root))
     if not seen:
         yield Row(MODULE, "repos", "ok", "no repo keeps a clean history or is marked "
                                          "public")
@@ -132,6 +135,21 @@ def _repo_rows(root: str) -> Iterator[Row]:
         patterns = _standing_values(have)
         yield Row(MODULE, name, "ok", "marked public; the three pieces are enabled" + (
             f"; standing branches: {' '.join(patterns)}" if patterns else ""))
+
+
+def _left_out_rows(root: str) -> Iterator[Row]:
+    """The row of a repo left out of project add; none for any other, or one whose git
+    config can't be read (its own rows say so)."""
+    from moxi_publishing import flag
+
+    try:
+        left_out = flag.is_left_out(root)
+    except flag.Failure:
+        return
+    if left_out:
+        yield Row(MODULE, f"repo {root} project add", "ok",
+                  f"left out of project add ({flag.LEFT_OUT}): a project add turns neither "
+                  "clean history nor push approval on here")
 
 
 def _clean_rows(root: str, name: str, have: dict) -> Iterator[Row]:

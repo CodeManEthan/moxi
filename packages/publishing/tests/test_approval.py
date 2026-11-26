@@ -180,3 +180,16 @@ def test_disable_removes_the_piece(repo, capsys):
     assert cli.main(["approval", "disable", str(repo)]) == 0
     assert flag.registered(str(repo)) == {}
     assert "nothing to remove" in approval.disable(repo)[0]
+
+
+def test_a_root_with_a_space_is_quoted_in_the_closing_line(template, gitenv, tmp_path):
+    import shutil
+
+    from moxi_repo.api import quote_arg
+
+    spaced = tmp_path / "my proj"
+    shutil.copytree(template, spaced, symlinks=True)
+    lines = approval.enable(spaced, ["main"])
+    assert lines[-1] == ("an agent's push of main, or of any tag, needs the word in "
+                         f"{quote_arg(str(spaced))}")
+    assert quote_arg(str(spaced)) != str(spaced)

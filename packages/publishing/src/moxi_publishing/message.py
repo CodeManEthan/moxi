@@ -169,19 +169,20 @@ def keeps_clean(ctx) -> bool:
 def no_flag(ctx, piece_id: str, *, clean: bool = False):
     """The refusal of a piece registered in a repo without its flag: the public flag, or
     with `clean` the clean or public flag."""
-    from moxi_repo.api import Outcome
+    from moxi_repo.api import Outcome, quote_arg
 
+    root = quote_arg(ctx.root or ".")
     if clean:
         return Outcome.refuse(
             f"{piece_id} is registered here but the repo is marked neither clean nor "
             "public (moxi-publishing.clean, moxi-publishing.public); keep its history "
-            f"clean with: moxi publishing clean-history enable {ctx.root}, or mark it "
-            f"public with: moxi publishing enable {ctx.root}; or take the pieces out "
-            f"with: moxi publishing clean-history disable {ctx.root}")
+            f"clean with: moxi publishing clean-history enable {root}, or mark it "
+            f"public with: moxi publishing enable {root}; or take the pieces out "
+            f"with: moxi publishing clean-history disable {root}")
     return Outcome.refuse(
         f"{piece_id} is registered here but the repo isn't marked public "
         "(moxi-publishing.public); guard it with: moxi publishing enable "
-        f"{ctx.root}, or take the pieces out with: moxi publishing disable {ctx.root}")
+        f"{root}, or take the pieces out with: moxi publishing disable {root}")
 
 
 def _next_step(ctx) -> str:

@@ -6,7 +6,11 @@ the tag gate) and `moxi-publishing.interpreter` (the Python the hook entries wer
 with, which the doctor compares). The clean flag, `moxi-publishing.clean = true`, is a
 repo's choice to keep its history publishable without being public (`clean.py`). The push
 piece reads the public flag first, and the message and content pieces the clean or public
-flag; a piece registered in a repo without its flag refuses.
+flag; a piece registered in a repo without its flag refuses. The left-out mark,
+`moxi-publishing.left-out = true`, keeps `moxi projects add` from turning clean history or
+push approval on in the repo, whatever its answers or `project_add.*` presets say
+(`projects_link`); `moxi publishing project-add disable PATH` writes it and `project-add
+enable PATH` removes it.
 
 `enable` registers the three pieces through repo's API, each piece's settings seeded
 from publishing's `defaults.*` keys and overridden by `--set`, then writes the flag. It
@@ -30,6 +34,7 @@ FLAG = "moxi-publishing.public"
 CLEAN = "moxi-publishing.clean"
 GITHUB = "moxi-publishing.github"
 INTERPRETER = "moxi-publishing.interpreter"
+LEFT_OUT = "moxi-publishing.left-out"
 MESSAGE = "publishing/message"
 CONTENT = "publishing/content"
 PUSH = "publishing/push"
@@ -119,6 +124,12 @@ def is_clean(root: str) -> bool:
     """Whether the repo keeps clean history: the clean flag, or the public flag, since a
     public repo always does."""
     return _is_true(root, CLEAN) or is_public(root)
+
+
+def is_left_out(root: str) -> bool:
+    """Whether the repo is left out of `moxi projects add`'s clean history and push
+    approval."""
+    return _is_true(root, LEFT_OUT)
 
 
 def _pieces(root: str, owner: str) -> dict[str, dict]:
@@ -307,7 +318,7 @@ def enable(path: str | os.PathLike, *, github: str | None = None,
         report = api.add(root, *PIECES, *prepared.named, sets=given + prepared.sets)
     except api.Failure as exc:
         raise Failure(exc.text, exc.code) from None
-    prepared.record(root)
+    prepared.remember(root)
     if not clean_before:
         done = _git(root, "config", clean.CLEAN_WITH_PUBLIC, "true")
         if done.returncode != 0:
@@ -368,10 +379,11 @@ def disable(path: str | os.PathLike) -> list[str]:
 # -- the listing -------------------------------------------------------------------------
 
 def listing() -> list[dict]:
-    """Every repo repo has indexed that keeps a clean history, has push approval or is
-    marked public: {"root", "github", "interpreter", "public", "clean", "approval" (its
-    branch patterns, or None without the piece), "pieces": {id: {"enabled", "settings"}
-    or None when missing}}, sorted by root. `pieces` holds the pieces the repo's choices
+    """Every repo repo has indexed that keeps a clean history, has push approval, is
+    marked public or is left out of project add: {"root", "github", "interpreter",
+    "public", "clean", "approval" (its branch patterns, or None without the piece),
+    "left_out", "pieces": {id: {"enabled", "settings"} or None when missing}}, sorted by
+    root. `pieces` holds the pieces the repo's choices
     want (the three for a public repo, message and content for a clean one) and the
     approval piece where it is registered. A repo that can't be opened is left out."""
     from moxi_repo import api
@@ -390,7 +402,8 @@ def listing() -> list[dict]:
         public, kept = is_public(root), is_clean(root)
         have = registered(root)
         approved = have.get(approval.PIECE_ID)
-        if not (public or kept or approved):
+        left_out = is_left_out(root)
+        if not (public or kept or approved or left_out):
             continue
         wanted = PIECES if public else clean.PIECES if kept else ()
         if approved:
@@ -400,11 +413,12 @@ def listing() -> list[dict]:
                     "clean": kept,
                     "approval": (approval.patterns_of(approved["settings"]) if approved
                                  else None),
+                    "left_out": left_out,
                     "pieces": {piece: have.get(piece) for piece in wanted}})
     return sorted(out, key=lambda item: item["root"])
 
 
-__all__ = ["FLAG", "CLEAN", "GITHUB", "INTERPRETER", "PIECES", "Failure", "config_get",
-           "config_get_all", "disable", "enable", "free_ref_problem", "is_clean",
-           "is_public", "listing", "looks_like_release_tag", "piece_settings",
-           "registered", "resolve", "work_tree"]
+__all__ = ["FLAG", "CLEAN", "GITHUB", "INTERPRETER", "LEFT_OUT", "PIECES", "Failure",
+           "config_get", "config_get_all", "disable", "enable", "free_ref_problem",
+           "is_clean", "is_left_out", "is_public", "listing", "looks_like_release_tag",
+           "piece_settings", "registered", "resolve", "work_tree"]

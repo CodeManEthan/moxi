@@ -36,8 +36,8 @@ carries those lines as `asked`, and the answers acted on as `answered`, each onl
 there is one. An answer that fails leaves the project added: a warning names the
 failure and the command to run.
 
-A refusal prints its reason and the command that fixes it to stderr, and exits 1 (an error), 2 (usage), 3 (refused) or 75 (the store stayed locked;
-try again).
+A refusal prints its reason and the command that fixes it to stderr, and exits 1 (an
+error), 2 (usage), 3 (refused) or 75 (the store stayed locked; try again).
 """
 
 from __future__ import annotations
