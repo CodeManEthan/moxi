@@ -496,21 +496,29 @@ def test_cmd_values_and_control_words():
     ("timeout -s KILL -k 2 5 kill 1", "kill"), ("timeout --foreground 5 kill 1", "kill"),
     ("setsid -f kill 1", "kill"), ("stdbuf -oL kill 1", "kill"),
     ("sudo nohup env A=1 kill 1", "kill"),
+    ("sudo -B kill 1", "kill"), ("sudo -N kill 1", "kill"), ("sudo -T 5 kill 1", "kill"),
+    ("sudo -BNT5 kill 1", "kill"), ("timeout -f 5 kill 1", "kill"),
+    ("timeout -p -f 5 kill 1", "kill"), ("env -a x kill 1", "kill"), ("env -v kill 1", "kill"),
+    ("env -S 'A=1' kill 1", "kill"), ("env -va x A=1 kill 1", "kill"),
 ])
 def test_command_word_past_each_wrapper(text, name):
     assert runs(text) == [name]
 
 
 #: Each long form a wrapper's tool takes for a short option the table names.
-LONG_PLAIN = [("sudo", o) for o in ("--askpass", "--background", "--preserve-env",
+LONG_PLAIN = [("sudo", o) for o in ("--askpass", "--background", "--bell", "--preserve-env",
                                     "--set-home", "--reset-timestamp", "--non-interactive",
-                                    "--preserve-groups", "--stdin")] + [
-    ("env", "--ignore-environment"), ("env", "--null"), ("timeout 5", "--verbose"),
+                                    "--no-update", "--preserve-groups", "--stdin")] + [
+    ("env", o) for o in ("--ignore-environment", "--null", "--debug", "--block-signal",
+                         "--default-signal", "--ignore-signal", "--list-signal-handling")] + [
+    ("timeout 5", "--verbose"), ("timeout 5", "--foreground"),
+    ("timeout 5", "--preserve-status"),
     ("setsid", "--ctty"), ("setsid", "--fork"), ("setsid", "--wait")]
 LONG_VALUED = [("sudo", o) for o in ("--close-from", "--chdir", "--group", "--host",
-                                     "--prompt", "--role", "--chroot", "--type", "--user",
-                                     "--other-user")] + [
-    ("env", "--unset"), ("env", "--chdir"), ("nice", "--adjustment"),
+                                     "--prompt", "--role", "--chroot", "--type",
+                                     "--command-timeout", "--user", "--other-user")] + [
+    ("env", "--argv0"), ("env", "--unset"), ("env", "--chdir"), ("env", "--split-string"),
+    ("nice", "--adjustment"),
     ("timeout 5", "--signal"), ("timeout 5", "--kill-after"), ("stdbuf", "--input"),
     ("stdbuf", "--output"), ("stdbuf", "--error")]
 
@@ -525,6 +533,13 @@ def _long(wrapper: str, option: str, value: str | None) -> str:
 @pytest.mark.parametrize("wrapper, option", LONG_PLAIN)
 def test_command_word_past_a_long_option_without_a_value(wrapper, option):
     assert runs(_long(wrapper, option, None)) == ["kill"]
+
+
+def test_env_s_value_is_a_value_and_what_it_runs_is_not_read():
+    assert runs("env -S 'kill 1'") == [None]
+    assert runs("env --split-string='kill 1'") == [None]
+    assert runs("env -S kill 1") == ["1"]
+    assert runs("env --block-signal=INT kill 1") == ["kill"]
 
 
 @pytest.mark.parametrize("wrapper, option", LONG_VALUED)
@@ -557,6 +572,8 @@ def test_command_word_in_powershell_and_cmd():
     "$x %= kill 1", "$x ??= kill 1", "$x+= kill 1", "$a, $b = kill 1", "$a,$b = kill 1",
     "$x.y = kill 1", "$a[0] = kill 1", "$env:X = kill 1", "${x} = kill 1",
     "$script:x = kill 1", "$x = $y = kill 1", "$x = . kill 1",
+    "$x=kill 1", "$x =kill 1", "$x+=kill 1", "[int]$x=kill 1", "$x=$y=kill 1",
+    "$env:X=kill 1", "$a , $b = kill 1", "$a ,$b = kill 1",
 ])
 def test_ps_an_assignment_s_pipeline_is_a_command(text):
     assert runs(text, "powershell") == ["kill"]
@@ -568,11 +585,24 @@ def test_ps_what_is_not_an_assignment_keeps_its_first_word():
     assert runs("$x.Kill()", "powershell") == ["$x.Kill\x00"]
     assert runs("$x = 1 | kill 2", "powershell") == ["1", "kill"]
     assert runs("$x = if ($a) { kill 1 }", "powershell") == [None, "kill", None]
-    # An operator joined to the command word leaves one word, which isn't split.
-    assert runs("$x=kill 1", "powershell") == ["$x=kill"]
-    assert runs("$x =kill 1", "powershell") == ["$x"]
+    assert runs(", $a = kill 1", "powershell") == [","]
     # In `sh` an assignment word is `NAME=value`, as before.
     assert runs("$x = kill 1") == ["$x"]
+
+
+def test_ps_an_operator_written_against_the_pipeline_ends_a_word():
+    assert words("$x=kill 1", "powershell") == [["$x=", "kill", "1"]]
+    assert words("$x =kill 1", "powershell") == [["$x", "=", "kill", "1"]]
+    assert words("$x=$y=kill", "powershell") == [["$x=", "$y=", "kill"]]
+    split = read_shell("$x=(kill 1)", dialect="powershell").commands[0].words
+    assert [(w.text, w.position, w.subs, w.is_sub) for w in split] == [
+        ("$x=", 0, (), False), ("\0", 3, ("kill 1",), True)]
+    # Not at an assignment, or the operator quoted or escaped: one word, as written.
+    for text in ("Write-Host $x=1", '"$x=kill"', "$x`=kill", "$x -eq 1 =kill"):
+        assert len(words(text, "powershell")[0]) == len(text.split())
+    assert words('$h["a"]=kill', "powershell") == [["$h[a]=kill"]]
+    # `sh` reads `NAME=value` as before.
+    assert words("x=kill 1") == [["x=kill", "1"]]
 
 
 def test_ps_an_assignment_s_shell_gives_its_script():

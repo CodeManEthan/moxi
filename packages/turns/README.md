@@ -44,7 +44,7 @@ experimental: no real run has confirmed it yet.
 
 turns is a library with no command of its own; `moxi doctor turns` checks it. Its API is
 the `moxi_turns` package, and the wire under it is described in
-[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.8/packages/turns/contracts/socket-protocol.md).
+[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.9/packages/turns/contracts/socket-protocol.md).
 
 ## Install
 
@@ -305,4 +305,4 @@ the other modules give them.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.8/packages/turns/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.9/packages/turns/LICENSE).
