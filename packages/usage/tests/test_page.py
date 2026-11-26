@@ -328,9 +328,9 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
                                                "used.rows[].name"}
 
 
-def test_the_page_serves_its_four_components_and_the_build_stamp():
-    assert loopback().export(page.PAGE)["assets"] == ["build-stamp.txt", "cost.js",
-                                                      "limits.js", "page.js", "row.js"]
+def test_the_page_serves_its_five_components_and_the_build_stamp():
+    assert loopback().export(page.PAGE)["assets"] == ["build-stamp.txt", "cost.js", "limits.js",
+                                                      "page.js", "project-facts.js", "row.js"]
 
 
 def test_the_announcement_offers_the_page_its_blocks_its_row_and_the_ui_extra():
