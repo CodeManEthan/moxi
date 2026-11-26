@@ -6,6 +6,10 @@
   the file's bytes as well as its time and size. On Windows two writes in one step of the
   clock (about 15 ms) share a time, so a session's write of the same size was missed and
   the rename overwrote it.
+- Each entry of `/api/running` and of the `running` topic carries `model` and `effort`:
+  the values the launch's row records, spelled as the command line spells them, null
+  where the launch set none. Both are plain strings with no mark, so the phone's gateway
+  sends them as they are. `running()`'s `Running` carries them too, None by default.
 - The launch defaults, `[defaults]` of `presets.toml`, are a table `moxi config` shows and
   changes (`CONFIG_TABLES`, `moxi_launcher.defaults`): `moxi config launcher show` lists
   them as `defaults.<row>`, and `moxi config set launcher defaults.<row> VALUE` and

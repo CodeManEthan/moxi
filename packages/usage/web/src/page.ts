@@ -52,6 +52,13 @@
 //   div[data-part=foot]         when the sessions were last read, the files, the act
 //   div[data-part=lines]        dim lines: what the figures leave out, reads that failed
 //
+// With launcher installed the page also reads launcher's `/api/running` when it opens and
+// when the tab is shown again, and at the desk follows its topic `running`
+// (`launched-model.ts`). A session a running launch holds takes the launch's name where
+// none was typed, `slot 4` or `terminal` before its where, and on its opened `Session`
+// line the effort it was launched with. Without launcher, or while its read fails, none
+// of these is drawn and the page reads as it does without them.
+//
 // The view places what its models return and words nothing itself: a piece whose fact
 // no read carries is not in the model and is not drawn. The range and the filters are
 // one state (`filter-model.ts`), held for the document's life; every read under the
@@ -72,7 +79,7 @@ import { Directive, directive, PartType } from "lit/directive.js";
 import type { ElementPart, PartInfo } from "lit/directive.js";
 import { keyed } from "lit/directives/keyed.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, installed, navigate, readLater, subscribe } from "/m/ui/client.js";
+import { api, gateway, installed, navigate, readLater, subscribe } from "/m/ui/client.js";
 
 import {
   addressPath, addressWrite, addsHistoryEntry, limitAddress, NOTHING_OPEN, parseAddress, sameAddress, sessionAddress,
@@ -98,6 +105,8 @@ import {
 } from "./filter-model.ts";
 import type { FilterLine, Menu, MenuItem, PageState } from "./filter-model.ts";
 import { HEAT_LABEL, HEAT_SIZE, heatDraw, heatModel, LESS, MORE } from "./heat-model.ts";
+import { launchOf, parseLaunched, RUNNING_PATH, RUNNING_TOPIC } from "./launched-model.ts";
+import type { Launched } from "./launched-model.ts";
 import type { HeatModel } from "./heat-model.ts";
 import {
   COPIED, COPY, costPath, frameModel, hasBelow, newestDay, passLine, READING, shouldPass,
@@ -546,6 +555,8 @@ export class UsagePage extends LitElement {
   #placedPath: string | null = null;
   /** Today's two dearest sessions under no filter, for the Cost row's `most to`. */
   #mostToday: Feed<Report<SessionRow>> | null = null;
+  /** Launcher's running launches, with launcher installed. */
+  #launched: Feed<Launched> | null = null;
   #mostPath: string | null = null;
   /** Token kinds' and Prices' cost terms, under every filter, and the price table's rates
    * of their models, read once the terms have answered. */
@@ -582,7 +593,16 @@ export class UsagePage extends LitElement {
     void this.#limits?.refresh();
     void this.#status?.refresh();
     void this.#window?.refresh();
+    void this.#launched?.refresh();
   };
+
+  /** The running launches as the page draws them: null without launcher, before its
+   * first answer and while its last read failed. */
+  #running(): Launched | null {
+    const feed = this.#launched;
+    if (feed === null || feed.failure !== null || feed.refused !== null || feed.gone) return null;
+    return feed.value;
+  }
 
   /** The newest day the page's answers carried, else this browser's. */
   #today(): string {
@@ -612,6 +632,15 @@ export class UsagePage extends LitElement {
       }
     });
     void daily.refresh();
+    if (installed("launcher")) {
+      const launched = new Feed<Launched>(() => api("launcher", RUNNING_PATH), parseLaunched, update);
+      this.#launched = launched;
+      void launched.refresh().then(() => {
+        if (this.#launched === launched && !gateway()) {
+          this.#stops.push(subscribe("launcher", RUNNING_TOPIC, (data) => launched.topic(data)));
+        }
+      });
+    }
     this.#stops.push(watchState(update));
     this.#resize = new ResizeObserver((entries) => {
       const found = Math.floor(entries[0]?.contentRect.width ?? 0);
@@ -625,8 +654,8 @@ export class UsagePage extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    for (const feed of [this.#limits, this.#status, this.#daily, this.#mostToday]) feed?.close();
-    this.#limits = this.#status = this.#daily = this.#mostToday = null;
+    for (const feed of [this.#limits, this.#status, this.#daily, this.#mostToday, this.#launched]) feed?.close();
+    this.#limits = this.#status = this.#daily = this.#mostToday = this.#launched = null;
     this.#mostPath = null;
     this.#closeBoard();
     this.#closeOpened();
@@ -1072,7 +1101,8 @@ export class UsagePage extends LitElement {
     const opened = at.piece !== "limit" || openedSource === null ? null : {
       key: `${at.harness}/${at.limit}/${at.minutes}`,
       model: openedLimit({ window: this.#window?.value ?? null, loading: this.#window?.loading ?? true,
-                           row: openedSource, now: limits.now(), name: (ref) => sessionName(ref, today).name }),
+                           row: openedSource, now: limits.now(),
+                           name: (ref) => sessionName(ref, today, LOCAL, launchOf(this.#running(), ref)).name }),
     };
     const frame = frameModel({
       limits, status, daily, event: this.#event, pass: this.#pass, most: this.#most(today), range, others,
@@ -1090,7 +1120,7 @@ export class UsagePage extends LitElement {
       : chartGroup(report, chartRange, state.measure, today, this.tabled, this.#chartTerms?.value ?? null, state.split);
     // With nothing in the range or under the filters no section is drawn.
     const sections = !frame.below ? [] : group?.nothing ? (this.#placed === null ? [] : [this.#sessions(null, today)]) : [
-      this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today), today),
+      this.#sessions(sessionsClosed(this.#sessionsTop?.value ?? null, today, LOCAL, this.#running()), today),
       this.#section(this.#folders() ? "folders" : "projects", this.#placesSection,
                     placesSection(this.#placesSection?.value ?? null, this.#folders())),
       this.#section("models", this.#modelsSection, modelsSection(this.#modelsSection?.value ?? null)),
@@ -1446,7 +1476,8 @@ export class UsagePage extends LitElement {
   /** `most to <session> $4.21, <session> $3.67`: today's two dearest sessions, named. */
   #most(today: string): string | null {
     const rows = this.#mostToday?.value?.rows ?? [];
-    return mostTo(rows.map((row) => ({ name: sessionName(row, today).name, cost: row.cost })));
+    const launched = this.#running();
+    return mostTo(rows.map((row) => ({ name: sessionName(row, today, LOCAL, launchOf(launched, row)).name, cost: row.cost })));
   }
 
   /** Sessions: the range's dearest session and how many there are; opened, the session
@@ -1495,7 +1526,8 @@ export class UsagePage extends LitElement {
     const own = this.#at.piece === "sessions" && this.#at.session === placed.id;
     const row = placedRow(session.value, own ? this.#openedReads?.requests.value?.rows ?? null : null);
     if (row === null) return nothing;
-    return html`<div class="ses" data-list="placed">${this.#sessionRow(sessionLine(row, today, !this.#folders()))}</div>`;
+    return html`<div class="ses" data-list="placed">${
+      this.#sessionRow(sessionLine(row, today, !this.#folders(), LOCAL, this.#running()))}</div>`;
   }
 
   /** The opened section: the session the address named, then the table. */
@@ -1506,7 +1538,8 @@ export class UsagePage extends LitElement {
       ${board === null ? nothing : board.value === null
         ? (board.loading ? html`<p class="none" data-part="reading">${READING}</p>` : nothing)
         : this.#boardTable(sessionsBoard(board.value, this.boardBy, today, !this.#folders(),
-                                         this.#places?.value?.home ?? this.#placesSection?.value?.home ?? null))}`;
+                                         this.#places?.value?.home ?? this.#placesSection?.value?.home ?? null,
+                                         LOCAL, this.#running()))}`;
   }
 
   /** The Sessions table: a header button per column it sorts by, the rows read, and the
@@ -1639,8 +1672,9 @@ export class UsagePage extends LitElement {
     const opened = this.#openedReads;
     if (opened === null) return nothing;
     const today = this.#today();
+    const effort = launchOf(this.#running(), { harness, session_id: id })?.effort ?? null;
     const model: OpenedSession = openedSession({ harness, id, requests: opened.requests, terms: opened.terms,
-                                                 session: opened.session, restart: opened.restart, today });
+                                                 session: opened.session, restart: opened.restart, today, effort });
     const requests = opened.requests.value;
     const width = this.#detWidth();
     const chart = requests === null ? null : sessionChart(requests, heldState().measure, width, this.#textWidth, today);

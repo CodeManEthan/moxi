@@ -12,6 +12,12 @@
   a Bash command may be written in Git Bash's drive form (`/c/Users/...`), which is read
   as the drive path it names; it was resolved as a folder `c` on the current drive and
   refused, so an agent on Git Bash was refused its own hand-off commit.
+- Where the launcher module is installed, the page reads its `/api/running` (and follows
+  its `running` topic) and matches each session to a running launch by harness and
+  session id. A matched session with no typed name is named by the launch, its where
+  leads with `slot 4` or `terminal`, and its opened harness, model and start line gives
+  the effort it was launched with. Without the launcher, or while its read fails, the
+  page reads as before.
 - `marks.default` is gone: a session with no `MOXI_USAGE_WARN_AT` stamp gets no notice,
   whether the launcher started it with no `warn_at` (a Codex launch that sets none) or
   did not start it. Nothing reads a config default; the key is retired, and a config that

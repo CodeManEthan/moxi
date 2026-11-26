@@ -109,6 +109,10 @@ test("the subagents line counts the agents but main and gives their share of the
 test("the session line gives harness, newest model and start, each absent when unknown", () => {
   assert.equal(words(sessionLine("claude", "m-opus", at("2026-11-08 12:45"), TODAY, UTC)), "claude · m-opus · started today 12:45");
   assert.equal(words(sessionLine("codex", null, null, TODAY, UTC)), "codex");
+  // The effort a running launch was launched with follows the model.
+  assert.equal(words(sessionLine("claude", "m-opus", at("2026-11-08 12:45"), TODAY, UTC, "high")),
+               "claude · m-opus · high · started today 12:45");
+  assert.equal(words(sessionLine("codex", null, null, TODAY, UTC, "low")), "codex · low");
   assert.equal(newestModel([request(1, null), request(2, null, { model: "m-b" }), request(3, null, { model: null })]), "m-b");
 });
 
@@ -237,4 +241,16 @@ test("an addressed session's row comes from the session answer over its whole li
   assert.deepEqual(row.context, { tokens: 10, window: 100 });
   assert.equal(placedRow(report([], {}, { ref: REF }), null), null);
   assert.equal(placedRow(report([agent("main", 1)], {}, { ref: null }), null), null);
+});
+
+test("the opened session's Session line carries the effort it is given, and none without one", () => {
+  const rows = [request(1, "2026-11-08 12:45")];
+  const requests = { value: report(rows, {}, { total: { ...sums({ requests: 1 }), ...requestsTotal() } }), loading: false };
+  const session = { value: report([agent("main", 1)], { cost: 1 }, { ref: REF }), loading: false };
+  const out = { value: null, loading: true };
+  const line = (effort) => words(openedSession({ harness: "claude", id: "s-1", requests, terms: out, session, restart: null,
+                                                 today: TODAY, effort }, UTC).items.find((item) => item.key === "session").parts);
+  assert.equal(line("high"), "claude · m-opus · high · started today 12:45");
+  assert.equal(line(null), "claude · m-opus · started today 12:45");
+  assert.equal(line(undefined), "claude · m-opus · started today 12:45");
 });

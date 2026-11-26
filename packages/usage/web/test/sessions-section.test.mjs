@@ -6,6 +6,7 @@ import {
 } from "../src/sessions-section.ts";
 import { boardPath, listRead, sessionsPath } from "../src/sessions-model.ts";
 import { START } from "../src/filter-model.ts";
+import { parseLaunched } from "../src/launched-model.ts";
 
 const UTC = {
   time: (at) => new Date(at * 1000).toISOString().slice(11, 16),
@@ -306,4 +307,27 @@ test("a failed next page is read again only by a scroll or a press, never as the
   assert.equal(board.feed.failure, null);
   await board.showNear();
   assert.equal(board.feed.value.rows.length, 1100);
+});
+
+const launched = parseLaunched({ state: "up", detail: null, count: 1, sessions: [{ request_id: "r-1", harness: "claude",
+  session_id: "s-1", name: "builder-1", identity: null,
+  where: { target: "slot", slot: "4", project_key: "atlas-api", folder: "atlas-api" }, started_at: "2026-11-08T11:00:00Z",
+  model: "opus", effort: "high", cache: null, waits: null, covered: false, coverable: null, activity: null }] });
+
+test("a session a running launch holds takes its name and where it runs, in the row, the table and the closed row", () => {
+  const line = sessionLine(row("s-1", 4.21, { project: "atlas-api" }), TODAY, true, UTC, launched);
+  assert.deepEqual([line.name, line.where], ["builder-1", "slot 4 · atlas-api"]);
+  const other = sessionLine(row("s-2", 1), TODAY, true, UTC, launched);
+  assert.deepEqual([other.name, other.where], ["proj-a · started Nov 3 08:52", null]);
+  assert.equal(sessionsClosed(answer([row("s-1", 4.21)], { count: 3 }), TODAY, UTC, launched).closed,
+               "most to builder-1, $4.21");
+  const board = sessionsBoard(listRead(answer([row("s-1", 4.21), row("s-2", 1)])), BOARD_START, TODAY, false, null, UTC,
+                              launched);
+  assert.deepEqual(board.rows.map((one) => one.cells[1]), ["builder-1", "proj-a · started Nov 3 08:52"]);
+});
+
+test("without launcher's read every session reads as it does without launcher", () => {
+  const line = sessionLine(row("s-1", 4.21), TODAY, true, UTC, null);
+  assert.deepEqual([line.name, line.where], ["proj-a · started Nov 3 08:52", null]);
+  assert.deepEqual(sessionLine(row("s-1", 4.21), TODAY, true, UTC, null), sessionLine(row("s-1", 4.21), TODAY, true, UTC));
 });

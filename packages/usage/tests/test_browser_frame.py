@@ -160,8 +160,9 @@ def lines_of(panel):
 # --- the contract --------------------------------------------------------------------------
 
 def test_the_frame_keeps_the_contract_in_text_tokens(seeded, seeded_page, ui_component_check):
+    # The page reads launcher's running launches, with launcher installed.
     check = ui_component_check(seeded_page, "usage", "page", {"route": ""},
-                               tokens=("text", "text-dim"), keep=True)
+                               tokens=("text", "text-dim"), keep=True, allow=("launcher",))
     assert check.element == "moxi-usage-page"
     for read in ("limits", "status", "daily?"):
         assert any(f"/m/usage/api/{read}" in url for url in check.requests), check.requests
