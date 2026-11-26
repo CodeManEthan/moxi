@@ -18468,3 +18468,8 @@ rounds	packages/rounds/tests/test_page.py	return {"id": ruled.id, "text": ruled.
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": BUSY, "id": "C9"}),	keep	round	round
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": "kestrel/nowhere", "id": "C1"}))	keep	round	round
 rounds	packages/rounds/tests/test_page.py	assert missing == nowhere == {"gone": True, "record": None}	keep	record	record
+moxi	packages/moxi/tests/test_units_home.py	env = {"HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}	keep	HOME	HOME
+statusline	packages/statusline/src/moxi_statusline/detect.py	absolute paths, and processes that leave the group, still escape. On Windows only `HOME`	keep	HOME	HOME
+statusline	packages/statusline/tests/test_doctor.py	monkeypatch.setattr(shell, "find", lambda env=None, now=now: shell.Shell(	keep	find	find
+ui	packages/ui/tests/test_push.py	await until(lambda: len(client.live()) == 1 and client.open[0].closed,	keep	closed	closed
+usage	packages/usage/tests/test_allowlist.py	monkeypatch.setenv("USERPROFILE", p["HOME"])    # Windows' home	keep	HOME	HOME

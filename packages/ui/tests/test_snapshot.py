@@ -493,13 +493,31 @@ def test_the_announcement_declares_the_shell_its_page_and_components():
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the logon task is planned on Windows")
 def test_on_windows_the_shell_is_planned_as_a_logon_task_with_no_socket(monkeypatch):
+    import importlib.metadata
+
     from moxi import units
-    from moxi.units import _plan
+    from moxi.paths import HOME_ENV
 
     # Units are written only from an installed release, and the suite runs ui from its
-    # source under the fence's module homes; both refusals are lifted so a plan is made.
-    monkeypatch.setattr(_plan, "_editable", lambda found: False)
-    monkeypatch.setattr(_plan, "locators_set", lambda module, env=None: ())
+    # source under the fence's module homes: the module's own locators are unset and its
+    # distribution reads as installed, so a plan is made. Nothing is applied.
+    for name in Layout("ui").locators():
+        if name != HOME_ENV:
+            monkeypatch.delenv(name, raising=False)
+    real = importlib.metadata.distribution
+
+    class Installed:
+        def __init__(self, found):
+            self.found = found
+
+        def __getattr__(self, name):
+            return getattr(self.found, name)
+
+        def read_text(self, filename):
+            return None if filename == "direct_url.json" else self.found.read_text(filename)
+
+    monkeypatch.setattr(importlib.metadata, "distribution",
+                        lambda name: Installed(real(name)))
     changes = units.plan("ui")
     assert [(c.kind, c.action) for c in changes] == [("daemon", "add")], changes[0].reason
     assert "<LogonTrigger>" in changes[0].text

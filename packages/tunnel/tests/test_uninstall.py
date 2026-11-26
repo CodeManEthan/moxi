@@ -444,7 +444,7 @@ def _a_dir_in_its_place(path):
     pytest.param(_mode_by_hand, id="mode", marks=pytest.mark.skipif(
         sys.platform == "win32",
         reason="Windows: no POSIX mode bits, so a mode changed by hand is not seen there")),
-    pytest.param(_a_dir_in_its_place, id="folder")])
+    pytest.param(_a_dir_in_its_place, id="dir")])
 def test_another_modules_uninstall_keeps_its_cloudflare_entry_while_the_file_cant_be_written(
         three, tailscale, units, yes, capsys, unwritable):
     acts.add("alpha/gateway", provider_name="cloudflare", hostname="g.example.com", ask=yes)
