@@ -364,6 +364,10 @@ test("a round's card, open and closed", () => {
                             ends: [{ stage: "B1", how: "landed" }, { stage: "B2", how: "dropped" }] }, ctx);
   assert.equal(closed.sections[1].head, "Ended Nov 20 09:00, closed");
   assert.deepEqual(closed.sections[1].rows.map((row) => row.map((one) => one.text).join("")), ["B1 landed", "B2 dropped"]);
+  const facts = (card) => card.sections[1].rows.map((row) => row.map((one) => one.text).join(""));
+  assert.ok(!facts(open).some((one) => one.startsWith("left at finish")));
+  const left = cardView({ name: "kestrel/c", project: "kestrel", description: "c", kept: 2, rulings: 0 }, ctx);
+  assert.ok(facts(left).includes("left at finish 2 (moxi rounds show lists each)"));
 });
 
 test("a strip card: its words and the step it opens", () => {

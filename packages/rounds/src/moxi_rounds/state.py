@@ -1049,6 +1049,7 @@ _HANDLERS: dict[str, Callable[[State, dict], None]] = {
     "brief.sized": _kept,
     "finish.action": _kept,
     "finish.done": _kept,
+    "finish.kept": _kept,
     "lock.cleared": _kept,
     "build.dropped": _kept,
     "round.dropped": _round_dropped,

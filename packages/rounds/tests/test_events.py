@@ -16,6 +16,7 @@ def test_the_types_are_the_ones_a_log_holds():
         "question.asked", "question.changed", "stage.declared", "stage.changed",
         "ruling.recorded", "ruling.shown", "build.commissioned", "check.ran", "ci.read",
         "finding.marked", "wait.marked", "brief.sized", "finish.action", "finish.done",
+        "finish.kept",
         "queue.join", "queue.left", "queue.batch", "queue.landed", "queue.ejected",
         "queue.requeued",
         "lock.cleared", "build.dropped", "round.dropped", "thread.decided", "repair",

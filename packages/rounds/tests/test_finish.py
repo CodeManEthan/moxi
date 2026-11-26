@@ -591,10 +591,14 @@ def test_a_trash_entry_a_stopped_finish_left_is_deleted_by_the_next_armed_sweep(
 
 def test_with_keep_branch_the_cleanup_removes_the_dirs_and_keeps_the_branch(
         ready, repo, configure):
+    path, _tree = ready
     configure("keep_branch = true")
     done = finishing.finish(ROUND, "B1", by="coder")
     assert len(done.removed) == 2 and done.branch is None
     assert repo.git("branch", "--list", "work").strip().endswith("work")
+    assert [(one["what"], one["where"], one["why"])
+            for one in of_type(path, "finish.kept")] == [
+        ("branch", "work", finishing.KEEP_BRANCH)]
 
 
 def test_the_command_says_what_the_cleanup_removed_and_kept(ready, repo, capsys):
@@ -615,6 +619,88 @@ def test_the_command_says_what_the_cleanup_removed_and_kept(ready, repo, capsys)
     assert [line for line in lines if line.startswith("branch: ")] == [
         "branch: kept: its worktree was kept, and git deletes no branch a worktree has "
         "checked out"]
+
+
+# -- what a finish left, on record ---------------------------------------------------------
+
+def _ignored_file_in(repo, tree) -> Path:
+    """A file the repo ignores, written in the build's worktree: work git doesn't track,
+    which the removal rule keeps the worktree for."""
+    exclude = repo.root / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("generated/\n", encoding="utf-8")
+    made = tree.root / "generated" / "types.d.ts"
+    made.parent.mkdir()
+    made.write_text("// written by a tool\n", encoding="utf-8")
+    return made
+
+
+def test_a_finish_that_keeps_an_uncommitted_file_records_it_and_still_finishes(
+        ready, repo):
+    path, tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+    _ignored_file_in(repo, tree)
+    tip = tree.rev()
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert done.event is not None and done.unrecorded is None
+    assert build_of(path).ended == builds.FINISHED
+    (worktree,) = [one for one in done.kept if one.kind == "worktree"]
+    kinds = [one["type"] for one in events(path)]
+    assert kinds.index("finish.done") < kinds.index("finish.kept")
+    found = of_type(path, "finish.kept")
+    assert [(one["stage"], one["tip"], one["what"], one["where"]) for one in found] == [
+        ("B1", tip, "worktree", places.contract_home(made["worktree"])),
+        ("B1", tip, "branch", "work")]
+    assert found[0]["why"] == worktree.line()
+    assert found[0]["why"].startswith("B3: ") and "(generated/)" in found[0]["why"]
+    assert found[1]["why"] == ("its worktree was kept, and git deletes no branch a "
+                               "worktree has checked out")
+    assert Path(made["worktree"]).is_dir()
+
+
+def test_a_finish_that_keeps_nothing_records_nothing_kept(ready, repo):
+    path, _tree = ready
+    done = finishing.finish(ROUND, "B1", by="coder")
+    assert (done.kept, done.branch) == ((), "deleted")
+    assert of_type(path, "finish.kept") == []
+    assert "kept" not in of_type(path, "finish.action")[0]
+
+
+def test_show_lists_what_a_finish_kept_a_merge_checkout_included(
+        ready, repo, monkeypatch, capsys):
+    path, tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+    _ignored_file_in(repo, tree)
+    repo.switch("elsewhere", new_from="main")
+    place = places.worktree_dir(own.load()) / "proj-a" / ".finish-main"
+
+    def kept_checkout(_root, at, **_keys):
+        return removal.Kept(Path(at), "B3", "it holds work that is not committed",
+                            ("?? left.txt",))
+
+    monkeypatch.setattr(removal, "checkout_removal", kept_checkout)
+    finishing.finish(ROUND, "B1", by="coder")
+    (action,) = of_type(path, "finish.action")
+    assert action["kept"] == {"where": places.contract_home(place),
+                              "why": "B3: it holds work that is not committed "
+                                     "(?? left.txt)"}
+    capsys.readouterr()
+
+    assert main(["show", ROUND]) == 0
+    lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    kept = [line for line in lines if line.startswith("kept ")]
+    assert [line.split(": ")[0] for line in kept] == [
+        f"kept merge checkout {place}", f"kept worktree {made['worktree']}",
+        "kept branch work"]
+    assert kept[0].endswith("B3: it holds work that is not committed (?? left.txt) "
+                            f"(line {action['n']})")
+
+    assert main(["show", ROUND, "--json"]) == 0
+    (build,) = json.loads(capsys.readouterr().out)["builds"]
+    assert [(one["what"], one["where"]) for one in build["kept"]] == [
+        ("checkout", str(place)), ("worktree", made["worktree"]), ("branch", "work")]
 
 
 # -- the command ---------------------------------------------------------------------------

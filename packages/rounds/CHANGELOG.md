@@ -2,6 +2,14 @@
 
 ## 0.1.5 (unreleased)
 
+- `finish` records what it leaves behind. Each folder its cleanup keeps (a worktree that
+  holds files git doesn't track, a scratch folder a process uses) and the branch,
+  whenever it stays, goes on the round's log as a `finish.kept` event of its own, with
+  where it is and why in the words finish prints. A checkout of the target that the
+  merge added and could not remove is recorded in the merge's own record. The build
+  still finishes. A queue landing records them the same way.
+- `moxi rounds show` lists what each build's finish left, under the build, and `--json`
+  gives them as the build's `kept`. A round's card on the page counts them.
 - The page acts, at a desk. An item's popover and the walk take the operator's answer:
   an option picked, an answer in the operator's own words, a request to explain, a park,
   an unpark, a ruling read back or corrected, a decision accepted or rejected, a job

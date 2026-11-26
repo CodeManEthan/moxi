@@ -37,7 +37,13 @@ tip as read (its head, once the branch is gone), in this order:
    folder a process came to use after step 1 is not moved
    (`sweeping.remove_build_dirs`). A folder kept, or a branch git won't delete, is named
    with why in `Finished`, and the finish stands: a later sweep takes the folder once
-   the rule holds and no process uses it.
+   the rule holds and no process uses it. Each thing the cleanup leaves, a folder kept
+   and the branch whenever it stays (kept by `keep_branch`, by its kept worktree, by
+   git, or because no merge put the work on the target or the branch moved), is then
+   recorded as a `finish.kept` event of its own (`KEPT`): what it is, where, and why in
+   the words `Finished` gives. A record that can't be written leaves the finish as it
+   is, and `Finished.unrecorded` says why. A sweep or a removal by hand later records
+   nothing more.
 7. Remove CI's own refs from the remote, those the build's check recorded pushing and
    those its repo's `ci` templates (`ref`, `full_ref`) give its branch, under the keep
    rule (`ci_refs.remove`). A ref it could not remove is named with why in `Finished`,
@@ -61,7 +67,7 @@ aborted and refused with the way through: merge the target into the branch in th
 build's worktree, check, and finish again. A merge that fails otherwise (a hook refused
 it, say) is aborted too, and recorded as failed. A checkout added for the merge is
 removed after it under the removal rule's no-lost-work half; one that half keeps is left
-and named in the action's `kept`.
+and named in the action's `kept`, which its record holds too.
 
 **A merge found in git.** Before a merge is made, the build is read as step 3 read it:
 when it is already `merged` (by a hand merge, or by a fast-forward of the target onto
@@ -110,9 +116,11 @@ from . import state as states
 from .errors import RoundsError, Refused, Unmet
 from .gitreads import Git, GitError, git_env
 
-#: The event of one finish action's result, and of a whole finish done.
+#: The event of one finish action's result, of a whole finish done, and of one thing a
+#: finish left behind.
 ACTION = finish_actions.ACTION
 DONE = "finish.done"
+KEPT = finish_actions.KEPT
 #: The states of a finish action's record: run and passed, run and failed, or a merge
 #: found already on the target.
 OK, FAILED, FOUND = finish_actions.OK, finish_actions.FAILED, finish_actions.FOUND
@@ -166,7 +174,8 @@ class Action:
     at the tip already settled it or the operator skipped it (`skipped_by`, the operator's ruling;
     `state` is then `SKIPPED`); a merge's `landing` and `target_before`; what it
     printed, or for a merge found made by hand (`hand_merge`), what that merge put on
-    the target. A command's `started` record that runs it again after an earlier start
+    the target; for a merge, the checkout of the target it added and could not remove
+    (`kept`). A command's `started` record that runs it again after an earlier start
     with no result says why in `again` (`REPEAT`, `AGAIN`) and when that one started in
     `started_at`."""
 
@@ -177,7 +186,7 @@ class Action:
     landing: str | None = None
     target_before: str | None = None
     output: str = ""
-    kept: str | None = None
+    kept: removal.Kept | None = None
     hand_merge: bool = False
     again: str | None = None
     started_at: str | None = None
@@ -192,8 +201,9 @@ class Finished:
     cleanup did: the folders it `removed`, those it `kept` with why, and the branch:
     `deleted`, or why it stayed (None when the repo keeps its branches or no merge put
     the work on the target); what became of each of CI's own `refs` the build
-    pushed; and `unscanned`, a line saying the scratch gate was not run, where the
-    processes could not be read."""
+    pushed; `unscanned`, a line saying the scratch gate was not run, where the
+    processes could not be read; and `unrecorded`, why what the cleanup left could not
+    be recorded as `finish.kept`, None when it was or nothing was left."""
 
     name: str
     stage: str
@@ -208,6 +218,7 @@ class Finished:
     branch: str | None = None
     refs: tuple = ()
     unscanned: tuple[str, ...] = ()
+    unrecorded: str | None = None
 
 
 def finish(name: str, stage: str, *, by: str, settings=None,
@@ -344,24 +355,72 @@ def finish(name: str, stage: str, *, by: str, settings=None,
         released = finish_lock.release(taken)
     cleaned = _clean_up(view.state, name, build, tip, done, root, settings=settings,
                         env=env)
+    left = _record_kept(where, build, tip, cleaned, by=by, wait_s=wait_s, at=at, env=env)
     refs = ci_refs.remove(written.view.state, build, settings)
     return Finished(name=name, stage=stage, tip=tip, actions=tuple(done),
                     cleared=None if taken.cleared is None else taken.cleared.line,
                     event=written.events[-1] if written.events else None,
-                    released=released, failed=written.failed, removed=cleaned.removed,
-                    kept=cleaned.kept, branch=cleaned.branch, refs=refs,
-                    unscanned=tuple(dict.fromkeys(unscanned + cleaned.unscanned)))
+                    released=released, failed=written.failed + left.failed,
+                    removed=cleaned.removed, kept=cleaned.kept, branch=cleaned.branch,
+                    refs=refs,
+                    unscanned=tuple(dict.fromkeys(unscanned + cleaned.unscanned)),
+                    unrecorded=left.unrecorded)
 
 
 def _record_action(where: write.Where, stage: str, tip: str, result: Action, *, by: str,
                    wait_s: float, at: str | None, env) -> None:
-    """Append `result` as the `finish.action` of the stage's build at `tip`."""
-    write.record(where, by=by, event=lambda _view, _result: (
-        write.Entry(ACTION, {"stage": stage, "tip": tip, "id": result.id,
-                             "kind": result.kind, "state": result.state,
-                             "landing": result.landing,
-                             "target_before": result.target_before})),
-        wait_s=wait_s, at=at, env=env)
+    """Append `result` as the `finish.action` of the stage's build at `tip`, with the
+    checkout it kept when it kept one."""
+    fields = {"stage": stage, "tip": tip, "id": result.id, "kind": result.kind,
+              "state": result.state, "landing": result.landing,
+              "target_before": result.target_before}
+    if result.kept is not None:
+        fields["kept"] = {"where": places.contract_home(result.kept.place),
+                          "why": result.kept.line()}
+    write.record(where, by=by, event=lambda _view, _result: write.Entry(ACTION, fields),
+                 wait_s=wait_s, at=at, env=env)
+
+
+@dataclass(frozen=True)
+class _Left:
+    """What recording the things a cleanup left did: the after-append callbacks that
+    failed, and why nothing could be recorded (None when it was, or nothing was
+    left)."""
+
+    failed: tuple = ()
+    unrecorded: str | None = None
+
+
+def _kept_entries(stage: str, tip: str, build: builds.Build,
+                  cleaned: _Cleaned) -> list[write.Entry]:
+    """A `finish.kept` entry for each thing the cleanup of `build` at `tip` left: each
+    folder it kept, then the branch when it stays."""
+    entries = [write.Entry(KEPT, {"stage": stage, "tip": tip, "what": one.kind,
+                                  "where": places.contract_home(one.place),
+                                  "why": one.line()})
+               for one in cleaned.kept]
+    if cleaned.branch_kept is not None:
+        entries.append(write.Entry(KEPT, {"stage": stage, "tip": tip,
+                                          "what": finish_actions.BRANCH,
+                                          "where": build.branch,
+                                          "why": cleaned.branch_kept}))
+    return entries
+
+
+def _record_kept(where: write.Where, build: builds.Build, tip: str, cleaned: _Cleaned, *,
+                 by: str, wait_s: float, at: str | None, env) -> _Left:
+    """Record each thing the cleanup left as a `finish.kept` of its own, in one write.
+    The finish stands whatever happens here: a write that fails is said, not raised."""
+    entries = _kept_entries(build.stage, tip, build, cleaned)
+    if not entries:
+        return _Left()
+    try:
+        written = write.record(where, by=by, event=lambda _view, _result: entries,
+                               wait_s=wait_s, at=at, env=env)
+    except RoundsError as exc:
+        return _Left(unrecorded=f"what the finish left could not be recorded: "
+                                f"{exc.reason}")
+    return _Left(failed=written.failed)
 
 
 def _record_done(where: write.Where, name: str, stage: str, tip: str,
@@ -405,8 +464,9 @@ def finish_member(name: str, stage: str, *, tip: str, by: str, settings,
     recorded `found` unless a record at `tip` already settles it. Then `finish.done` is
     appended at `tip` when the gates read on the log still hold there (`_record_done`),
     and the worktree, scratch folder, branch and CI's refs are cleaned up as a finish
-    cleans them. A commit made on the branch after the lander's re-read leaves the
-    branch and its folders in place and does not refuse the record. A gate that turned
+    cleans them, what the cleanup left recorded as `finish.kept`. A commit made on the
+    branch after the lander's re-read leaves the branch and its folders in place and
+    does not refuse the record. A gate that turned
     since the re-read is refused after the merge's record, so the build reads merged
     and not finished, as after a finish refused after its merge.
 
@@ -450,11 +510,13 @@ def finish_member(name: str, stage: str, *, tip: str, by: str, settings,
                            wait_s=wait_s, at=at, env=env)
     cleaned = _clean_up(view.state, name, build, tip, done, root, settings=settings,
                         env=env)
+    left = _record_kept(where, build, tip, cleaned, by=by, wait_s=wait_s, at=at, env=env)
     refs = ci_refs.remove(written.view.state, build, settings)
     return Finished(name=name, stage=stage, tip=tip, actions=tuple(done),
                     event=written.events[-1] if written.events else None,
-                    failed=written.failed, removed=cleaned.removed, kept=cleaned.kept,
-                    branch=cleaned.branch, refs=refs, unscanned=cleaned.unscanned)
+                    failed=written.failed + left.failed, removed=cleaned.removed,
+                    kept=cleaned.kept, branch=cleaned.branch, refs=refs,
+                    unscanned=cleaned.unscanned, unrecorded=left.unrecorded)
 
 
 def _acts(recorded: list[str], done: list[Action], build: builds.Build,
@@ -481,8 +543,8 @@ def _said(result: Action) -> str:
 def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
               done: list[Action], root: Path, *, settings, env) -> _Cleaned:
     """Step 6: remove what the finish of `build` at `tip` leaves, under the removal
-    rule, and give what was done; `branch` is said on the result. Nothing here undoes
-    the finish."""
+    rule, and give what was done; `branch` is said on the result, and `branch_kept`
+    says why the branch stays whenever it does. Nothing here undoes the finish."""
     commissioned = checking.commission_of(state, build)
     merged = any(one.kind == own.MERGE and one.state in (OK, FOUND) for one in done)
     recorded = {kind: Path(places.expand_home(commissioned[kind]))
@@ -492,11 +554,12 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
         cleaned, unread = sweeping.remove_build_dirs(
             name, commissioned, (removal.SCRATCH,), stage=build.stage,
             settings=settings, env=env, after_gate=True)
-        stays = tuple(removal.Kept(there[kind], "no merge", "no merge action put the "
-                                   "work on the target, so the worktree and the "
-                                   "branch stay", kind=kind)
+        stays_why = ("no merge action put the work on the target, so the worktree and "
+                     "the branch stay")
+        stays = tuple(removal.Kept(there[kind], "no merge", stays_why, kind=kind)
                       for kind in there if kind == removal.WORKTREE)
-        return _Cleaned(cleaned.removed, stays + cleaned.kept, unscanned=unread)
+        return _Cleaned(cleaned.removed, stays + cleaned.kept, unscanned=unread,
+                        branch_kept=stays_why if _is_branch(root, build.branch) else None)
     try:
         now = Git(root).branch(build.branch)
         why = (f"the branch {build.branch} is gone" if now is None else
@@ -505,32 +568,54 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
     except GitError as exc:
         now, why = None, f"the branch {build.branch} can't be read: {exc.reason}"
     if now != tip:
-        return _Cleaned(kept=tuple(removal.Kept(place, "tip", f"{why}, so its folders "
-                                                "and the branch stay", kind=kind)
-                                   for kind, place in there.items()))
+        stays_why = f"{why}, so its folders and the branch stay"
+        return _Cleaned(kept=tuple(removal.Kept(place, "tip", stays_why, kind=kind)
+                                   for kind, place in there.items()),
+                        branch_kept=None if now is None else stays_why)
     keep_branch = own.build_setting(settings, build.repo, "keep_branch")
     cleaned, unread = sweeping.remove_build_dirs(
         name, commissioned, stage=build.stage, settings=settings, env=env,
         deletes=None if keep_branch else build.branch, after_gate=True)
     if keep_branch:
-        return _Cleaned(cleaned.removed, cleaned.kept, unscanned=unread)
+        return _Cleaned(cleaned.removed, cleaned.kept, unscanned=unread,
+                        branch_kept=KEEP_BRANCH)
     if any(one.kind == removal.WORKTREE for one in cleaned.kept):
-        return _Cleaned(cleaned.removed, cleaned.kept,
-                        "kept: its worktree was kept, and git deletes no branch a "
-                        "worktree has checked out", unread)
+        return _kept_branch(cleaned, "its worktree was kept, and git deletes no branch a "
+                            "worktree has checked out", unread)
     try:
         Git(root)._run("branch", "-d", build.branch)
     except GitError as exc:
-        return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {exc.reason}", unread)
+        return _kept_branch(cleaned, exc.reason, unread)
     return _Cleaned(cleaned.removed, cleaned.kept, "deleted", unread)
+
+
+#: Why a branch stays in a repo whose `keep_branch` is set.
+KEEP_BRANCH = "the repo's keep_branch setting keeps it"
+
+
+def _kept_branch(cleaned: removal.Removed, why: str, unread: tuple[str, ...]) -> _Cleaned:
+    return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {why}", unread, branch_kept=why)
+
+
+def _is_branch(root: Path, branch: str) -> bool:
+    """Whether `branch` is a branch of the repo at `root`; False where git can't say."""
+    try:
+        return Git(root).branch(branch) is not None
+    except GitError:
+        return False
 
 
 @dataclass(frozen=True)
 class _Cleaned:
+    """What the cleanup did: the folders `removed` and `kept`, what became of the
+    branch as said (`branch`), the lines saying the scratch gate was not run, and
+    `branch_kept`, why the branch stays, None when it was deleted or is gone."""
+
     removed: tuple[Path, ...] = ()
     kept: tuple[removal.Kept, ...] = ()
     branch: str | None = None
     unscanned: tuple[str, ...] = ()
+    branch_kept: str | None = None
 
 
 # -- reading the build -------------------------------------------------------------------
@@ -736,7 +821,7 @@ def _merge(root: Path, build: builds.Build, tip: str, target_head: str, *, setti
         # The checkout made for the merge goes only when it holds nothing a removal
         # would lose; the merge it made stands either way.
         kept = removal.checkout_removal(root, place, settings=settings, repo=build.repo)
-    return made if kept is None else replace(made, kept=f"{kept.place}: {kept.line()}")
+    return made if kept is None else replace(made, kept=kept)
 
 
 def _merge_at(place: Path, build: builds.Build, tip: str, target_head: str, *,
@@ -783,7 +868,7 @@ def _left_checkout_removed(found: Action, root: Path, build: builds.Build,
     if place is None or not _is_own(place, build, settings):
         return found
     kept = removal.checkout_removal(root, place, settings=settings, repo=build.repo)
-    return found if kept is None else replace(found, kept=f"{kept.place}: {kept.line()}")
+    return found if kept is None else replace(found, kept=kept)
 
 
 class MergeGit(Git):
@@ -840,7 +925,7 @@ class MergeGit(Git):
         return done.returncode, said
 
 
-__all__ = ["ACTION", "DONE", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "REPEAT",
+__all__ = ["ACTION", "DONE", "KEPT", "KEEP_BRANCH", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "REPEAT",
            "AGAIN", "SKIPPED", "UNDER_LOCK",
            "AFTER", "CHECKOUT_PREFIX", "MERGE_TIMEOUT_S", "PUSH_TIMEOUT_S", "ActionFailed",
            "Action", "Finished", "finish", "finish_member", "open_build", "seen_now",

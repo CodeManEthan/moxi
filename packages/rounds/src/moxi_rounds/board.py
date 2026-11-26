@@ -47,7 +47,13 @@ its version was frozen while it still holds a commission to come), `wrapping` (`
 finished), `moving`.
 
 **The strip** (`strip`): a build's act is the newest event of its round's log that
-names its stage, from its commission on; the strip is the ten newest acts.
+names its stage, from its commission on, apart from what its finish left behind
+(`finish.kept`), which is part of the landing before it; the strip is the ten newest
+acts.
+
+**A round's card** (`card`) counts what the finishes of its builds left behind
+(`finish_actions.kept_of`): worktrees, scratch folders, branches and checkouts of a
+target that a merge added, under `kept`.
 """
 
 from __future__ import annotations
@@ -713,7 +719,8 @@ def _names_stage(event: Mapping, stage: str) -> bool:
 
 def acts(part_: Part) -> list[dict]:
     """Each build of the round with its act: the newest event of the log that names its
-    stage, from its commission up to the next commission of that stage."""
+    stage, from its commission up to the next commission of that stage, a record of
+    what its finish left behind apart."""
     history = part_.state.history
     made = []
     every = builds.builds(part_.state)
@@ -725,7 +732,7 @@ def acts(part_: Part) -> list[dict]:
             n = event.get("n", 0)
             if n < one.n or (end is not None and n >= end):
                 continue
-            if _names_stage(event, one.stage):
+            if _names_stage(event, one.stage) and event.get("type") != finish_actions.KEPT:
                 newest = event
         if newest is not None:
             made.append({"build": one, "event": newest})
@@ -744,7 +751,8 @@ ACT_WORDS: dict[str, str] = {
     "build.commissioned": "commissioned", "check.ran": "check ran", "ci.read": "CI read",
     "finding.marked": "finding marked", "wait.marked": "job marked",
     "brief.sized": "brief sized", "finish.action": "finish step run",
-    "finish.done": "landed", "lock.cleared": "finish lock cleared",
+    "finish.done": "landed", "finish.kept": "left at finish",
+    "lock.cleared": "finish lock cleared",
     "build.dropped": "dropped", "round.dropped": "round dropped",
     "thread.decided": "thread decided", "repair": "record repaired",
     "round.closed": "round closed", "lead.changed": "lead changed",
@@ -838,6 +846,7 @@ EVENT_STEPS: dict[str, str | None] = {
     "build.commissioned": steps.COMMISSION, "build.dropped": steps.COMMISSION,
     "ci.read": steps.CHECK, "finding.marked": steps.VERIFY_BUILD,
     "wait.marked": CLOSE, "finish.action": steps.FINISH, "finish.done": steps.FINISH,
+    "finish.kept": steps.FINISH,
     "lock.cleared": steps.FINISH, "repair": None, "round.closed": CLOSE,
     "round.dropped": CLOSE, "verdict.recorded": None, "ruling.recorded": None,
     "check.ran": None, "brief.sized": None, "lead.changed": None,
@@ -1199,9 +1208,9 @@ def ruling_record(holder: str, ruling: states.Ruling, state: states.State,
 
 def card(part_: Part, items: Items, found: Mapping | None = None) -> dict:
     """A round's card: what it is for, its project, its lead, flow, when it opened, its
-    standing, its stages counted, its rulings counted and the three newest, its phrase
-    and its events; for a round that has ended, how and when, and how each stage
-    ended."""
+    standing, its stages counted, what the finishes of its builds left behind counted
+    (`kept`), its rulings counted and the three newest, its phrase and its events; for
+    a round that has ended, how and when, and how each stage ended."""
     state = part_.state
     found = cells(part_, items) if found is None else found
     plan = stages.in_plan(state)
@@ -1215,6 +1224,8 @@ def card(part_: Part, items: Items, found: Mapping | None = None) -> dict:
                        "building": len(building),
                        "not_started": sum(one.id not in finished and one.id not in building
                                           for one in plan)},
+            "kept": sum(len(finish_actions.kept_of(state, one))
+                        for one in builds.builds(state)),
             "rulings": len(state.rulings),
             "newest_rulings": [{"id": one.id, "text": one.text or one.rules,
                                 "at": one.at} for one in list(state.rulings)[-3:][::-1]],

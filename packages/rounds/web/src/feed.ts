@@ -287,6 +287,8 @@ export interface RecordValue {
   opened?: string | null;
   standing?: string | null;
   stages?: { finished: number; building: number; not_started: number };
+  /** What the finishes of the round's builds left behind, counted. */
+  kept?: number;
   rulings?: number;
   newest_rulings?: { id: string; text: string | null; at: string | null }[];
   phrase?: PhrasePart[];
