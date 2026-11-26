@@ -137,7 +137,7 @@ const iso = (hhmm) => `2026-11-12T${hhmm}:00Z`;
 const entry = (identity, fields = {}) => ({
   request_id: `r-${identity}`, harness: "claude", session_id: `s-${identity}`, name: "planner's session", identity,
   where: { target: "slot", slot: "3", project_key: "atlas-api", folder: "atlas-api" }, started_at: iso("12:00"),
-  cache: { state: "warm", until: iso("20:04"), estimated: false }, waits: null, covered: false, coverable: null,
+  model: null, effort: null, cache: { state: "warm", until: iso("20:04"), estimated: false }, waits: null, covered: false, coverable: null,
   activity: null, ...fields,
 });
 const join = (r, entries) => joinRunning({ state: "up", detail: null, count: entries.length, sessions: entries }, r.rows, when);
@@ -149,7 +149,8 @@ test("with launcher: Session leads, linked to its transcript with sessions; laun
   assert.deepEqual(got.before, [
     { key: "session", label: "Session", value: "planner's session · claude", tail: null,
       link: { kind: "sessions", route: "claude/s-planner" } },
-    { key: "cache", label: "Cache", value: "warm until 20:04", tail: "kept warm while 1 agent works", link: { kind: "cache" } },
+    { key: "cache", label: "Cache", value: "warm until 20:04", tail: "kept warm while 1 agent works, next keep-alive 19:49",
+      link: { kind: "cache" } },
   ]);
   // Without sessions: no link.
   assert.equal(opened(r, mail(), "planner", { hasSessions: false }, launched).before[0].link, null);
@@ -165,6 +166,34 @@ test("with launcher: an estimated time says est.; a cold one since when; no cach
   const unread = join(r, [entry("planner", { cache: null })]);
   assert.deepEqual(opened(r, mail(), "planner", {}, unread).before.map((line) => [line.key, line.value]),
                    [["session", "planner's session · claude"], ["cache", "cold since 18:35"]]);
+});
+
+test("with launcher: the Session line names the model and effort it was started with, where it gives them", () => {
+  const r = roster([bound("planner")]);
+  const session = (fields) => opened(r, mail(), "planner", {}, join(r, [entry("planner", fields)])).before[0].value;
+  assert.equal(session({ model: "opus", effort: "high" }), "planner's session · claude · opus · high");
+  assert.equal(session({ model: "opus" }), "planner's session · claude · opus");
+  assert.equal(session({ effort: "xhigh" }), "planner's session · claude · xhigh");
+  assert.equal(session({}), "planner's session · claude");
+  // A launch that joins no row draws nothing of its own.
+  const other = join(r, [entry("reviewer", { model: "opus", effort: "high" })]);
+  assert.deepEqual(opened(r, mail(), "planner", {}, other).before, []);
+});
+
+test("with launcher: the next keep-alive only for a covered session, only while it is ahead", () => {
+  const r = roster([bound("planner")]);
+  const tail = (fields, now = NOW) => opened(r, mail(), "planner", { now }, join(r, [entry("planner", fields)])).before[1].tail;
+  const covered = { waits: { kind: "agents", count: 1 }, covered: true };
+  assert.equal(tail(covered), "kept warm while 1 agent works, next keep-alive 19:49");
+  assert.equal(tail({ ...covered, cache: { state: "warm", until: iso("20:04"), estimated: true } }),
+               "kept warm while 1 agent works, next keep-alive 19:49, est.");
+  // Its time passed: keep-warm's asks are already under way, so nothing of it.
+  assert.equal(tail(covered, at("19:49")), "kept warm while 1 agent works");
+  // Not covered: no keep-alive comes.
+  assert.equal(tail({}), null);
+  assert.equal(tail({ waits: { kind: "agents", count: 1 }, coverable: { cap: 3 } }), null);
+  // Cold: the cold words, no keep-alive.
+  assert.equal(tail({ ...covered, cache: { state: "cold", until: iso("18:40"), estimated: false } }), COLD_TAIL);
 });
 
 test("without launcher: no Session line", () => {

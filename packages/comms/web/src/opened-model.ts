@@ -2,9 +2,10 @@
 // speak for one address (`Session`, `Cache`, `Held`, `Waiting`, `Unread`, `Waits on`, `Details`) speak
 // for the address the box writes to: the row's lead, or the address pressed. `Directs` and
 // `Directed by` gather the name's addresses. Each line is there only when its fact is:
-// `Session` comes with launcher's join (`launched-model.ts`), whose cache read wins over
-// comms' on the `Cache` line as it does on the row; where launcher gives none, with
-// sessions' header of the session (`session-model.ts`).
+// `Session` comes with launcher's join (`launched-model.ts`), with the model and effort the
+// launch was started with, and launcher's cache read wins over comms' on the `Cache` line as
+// it does on the row, a covered session's next keep-alive after it; where launcher gives
+// none, with sessions' header of the session (`session-model.ts`).
 // Every string here goes into the page as text.
 
 import type { AgentRow, Ask } from "./agents-model.ts";
@@ -20,6 +21,7 @@ export const ADDRESS_LABEL = "Address";
 export const CACHE_LABEL = "Cache";
 export const CACHE_LINK = "Cache";
 export const COLD_TAIL = "the session still runs; mail does not wake it";
+export const NEXT_KEEP_ALIVE = "next keep-alive";
 export const WAITS_ON = "Waits on";
 export const THREAD_LINK = "Thread";
 export const DIRECTS = "Directs";
@@ -120,8 +122,9 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
   const before: Line[] = [];
   const launched = bound ? address?.launched ?? null : null;
   if (launched !== null) {
-    const { name, harness, route } = launched.session;
-    before.push({ key: "session", label: SESSION_LABEL, value: [name, harness].filter(Boolean).join(" · "), tail: null,
+    const { name, harness, model, effort, route } = launched.session;
+    before.push({ key: "session", label: SESSION_LABEL, value: [name, harness, model, effort].filter(Boolean).join(" · "),
+                  tail: null,
                   link: facts.hasSessions && route !== null ? { kind: "sessions", route } : null });
   } else if (bound && facts.session) {
     before.push({ key: "session", label: SESSION_LABEL, value: facts.session.value, tail: null,
@@ -136,7 +139,11 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
     const est = theirs.estimated ? ", est." : "";
     const at = theirs.until !== null ? ` ${when(theirs.until)}` : "";
     const value = theirs.warm ? `warm${at !== "" ? ` until${at}` : ""}${est}` : `cold${at !== "" ? ` since${at}` : ""}`;
-    before.push({ key: "cache", label: CACHE_LABEL, value, tail: theirs.warm ? theirs.kept : COLD_TAIL, link: cacheLink });
+    let tail = theirs.warm ? theirs.kept : COLD_TAIL;
+    if (theirs.warm && tail !== null && theirs.keepAlive !== null && theirs.keepAlive > facts.now) {
+      tail += `, ${NEXT_KEEP_ALIVE} ${when(theirs.keepAlive)}${est}`;
+    }
+    before.push({ key: "cache", label: CACHE_LABEL, value, tail, link: cacheLink });
   } else if (bound && cache !== null) {
     const warm = cache.kind === "warm" && cache.until > facts.now;
     before.push({ key: "cache", label: CACHE_LABEL, value: `${warm ? "warm until" : "cold since"} ${when(cache.until)}`,
