@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- The launch defaults, `[defaults]` of `presets.toml`, are a table `moxi config` shows and
+  changes (`CONFIG_TABLES`, `moxi_launcher.defaults`): `moxi config launcher show` lists
+  them as `defaults.<row>`, and `moxi config set launcher defaults.<row> VALUE` and
+  `unset` write one key, keeping every other byte of the file. The Settings page shows
+  them as the `Launch defaults` block. The rows are those a launch on this machine takes;
+  keys launches refuse or leave out are listed first, under `needs a fix`, to be cleared.
+  A write is refused only by the row's own check (its type, the values offered here, a
+  refused, unknown or retired name or value) or a file that can't be read; a value that
+  fails only on some launches is written, and the row carries the launcher's words for
+  it. A key held for a row this machine doesn't offer is kept and not listed. `moxi
+  config unset` prints the lines the table still carries. Needs `moxi>=0.1.11` for `moxi
+  config` to reach the table; an older core ignores it.
+- `moxi launcher presets check` warns, at `defaults`, of what a launch of either harness
+  with no preset and nothing typed meets from `[defaults]`: a rule between rows that
+  refuses it, or a self-relaunch item that a `recycle_at_limit = "relaunch"` fails before
+  the launch has a folder (the harness, a slot target, slots running here, scratch).
 - On the Projects page, each running session's line in the opened project's `Sessions`
   row says it runs (`runs`) and its `last active` part that it holds only while the
   session is not in a turn (`idle_only`), so the page can join turns' `working` there.

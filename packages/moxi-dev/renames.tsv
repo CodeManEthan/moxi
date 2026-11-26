@@ -3533,6 +3533,17 @@ launcher	packages/launcher/src/moxi_launcher/compose/common.py	short_env	name	wi
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	switched = any((base.get(name) or "").strip().lower() not in ("", "0", "false")	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	these and `preview` shows them), which `environment` lays over the scrubbed caller's	keep	environment	environment
 launcher	packages/launcher/src/moxi_launcher/compose/common.py	value, which is never recorded. Each is kept under the name as `environ` spells it.	keep	environ	environ
+launcher	packages/launcher/src/moxi_launcher/defaults.py	Each row carries the launcher's words for what its value meets: `refused` for what	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	A change. `set` reads the text as the row's type and checks it by the row's own check	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	changed, and the launcher's lines: after a `set`, what the new value meets; after	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	if op == "set":	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	if op != "set":	keep	set	set
+launcher	packages/launcher/src/moxi_launcher/defaults.py	return need.refused, need.hint	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"clear_only": True, "refused": _said(refused),	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"refused": _said(refused), "warning": _said(warning)})	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"""Each key's `refused` and `warning` lines for what `held` meets: each	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	"""Every listed key's `refused` and `warning` lines for what `held` meets, in the order	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/defaults.py	row.check(new)	keep	ok	ok
 launcher	packages/launcher/src/moxi_launcher/doctor.py	if any("asks" not in record for record in fresh):	keep	any	any
 launcher	packages/launcher/src/moxi_launcher/doctor.py	keep_warm_row	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/exits.py	"not-exited": codes.ERROR, "refused": codes.REFUSED}	keep	refused	refused
@@ -6284,6 +6295,12 @@ moxi	packages/moxi/src/moxi/cli.py	help="print one JSON object, {changed, proble
 moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	set	set
 moxi	packages/moxi/src/moxi/cli.py	failed = op in ("set", "unset") and any(	keep	any	any
 moxi	packages/moxi/src/moxi/cli.py	print(json.dumps({"changed": changed, "problem": problem, "fix": fix, "units": units}))	keep	changed	changed
+moxi	packages/moxi/src/moxi/cli.py	if schema is None and not (tabled and args.action == "show"):	keep	show	show
+moxi	packages/moxi/src/moxi/cli.py	the module's `warning` or `refused` words; or the error a table's file gives. 1 when	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	for word in ("refused", "warning"):	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	and `applies` from the hook, and the row's `warning` and `refused` (null when it	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	item["refused"] = row.get("refused")	keep	refused	refused
+moxi	packages/moxi/src/moxi/cli.py	parser.add_argument("key", help="the setting's dotted name, or <table>.<row>")	keep	help	help
 moxi	packages/moxi/src/moxi/config.py	-	name	set	set_value
 moxi	packages/moxi/src/moxi/config.py	Key.__init__	name	type	value_type
 moxi	packages/moxi/src/moxi/config.py	_change(module, key, "set", value, by=by)	keep	set	set
@@ -6344,6 +6361,11 @@ moxi	packages/moxi/src/moxi/config.py	and `CONFIG_CHECK`, and each change prepar
 moxi	packages/moxi/src/moxi/config.py	_record_changes(module, keys, "set", by)	keep	set	set
 moxi	packages/moxi/src/moxi/config.py	with files.edit_toml(path, timeout=LOCK_TIMEOUT) as doc:	use	timeout=	timeout_s=
 moxi	packages/moxi/src/moxi/config.py	_prepared	kwonly	text	text
+moxi	packages/moxi/src/moxi/config.py	`set` or `unset` of such a key goes to the table's hook in place of the module's config	keep	set	set
+moxi	packages/moxi/src/moxi/config.py	A table's name may not be a top-level name of the module's own schema. The hook, `NAME`	keep	NAME	NAME
+moxi	packages/moxi/src/moxi/config.py	shape and named by the row alone; a row may add `warning` and `refused`	keep	refused	refused
+moxi	packages/moxi/src/moxi/config.py	top = set() if schema is None else {name.split(".")[0] for name in schema.keys}	keep	set	set
+moxi	packages/moxi/src/moxi/config.py	changed, warnings = hook.change(row, op, value, by=by, env=env)	keep	env	env
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	__all__ = ["STATES", "RECORDS_FILE", "Row", "is_needs_value", "record", "clear", "health", "floor_ms"]	keep	record	record
 moxi	packages/moxi/src/moxi/doctor/__init__.py	can call `record`. The doctor's runner and checks live in `moxi.doctor._run`, which the	keep	record	record
@@ -6877,6 +6899,38 @@ moxi	packages/moxi/tests/test_config_set.py	for argv in (("set", "demo", "block"
 moxi	packages/moxi/tests/test_config_set.py	assert code == 2 and out["changed"] is False	keep	changed	changed
 moxi	packages/moxi/tests/test_config_set.py	"changed": False,	keep	changed	changed
 moxi	packages/moxi/tests/test_config_set.py	code, out = change_json(capsys, "set", "demo", "local.retain_days", "seven")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	its rows after the module's keys, and `set` and `unset` of `<table>.<row>` go to the	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	#: `bad` is refused, `held` meets a held lock, `warn` is written with a warning line; an	keep	bad	bad
+moxi	packages/moxi/tests/test_config_tables.py	monkeypatch.setenv("HOME", str(tmp_path))	keep	HOME	HOME
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = run(capsys, "config", module, "show", "--json")	keep	show	show
+moxi	packages/moxi/tests/test_config_tables.py	assert (row["warning"], row["refused"], row["clear_only"]) == (None, None, False)	keep	refused	refused
+moxi	packages/moxi/tests/test_config_tables.py	assert set(own) <= set(row)	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert (typo["refused"], typo["clear_only"], typo["value"]) == (	keep	refused	refused
+moxi	packages/moxi/tests/test_config_tables.py	run(capsys, "config", "set", "demo", "rows.mode", "warn")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert not any(field.startswith("table_") or field in ("applies", "clear_only")	keep	any	any
+moxi	packages/moxi/tests/test_config_tables.py	assert code == 1 and set(error) == {"error", "fix"}	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = run(capsys, "config", "set", "demo", "block", "true")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert set(error) == {"error", "fix", "keys"}	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = change_json(capsys, "set", "demo", "rows.mode", "b")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert code == 0 and out["changed"] is True	keep	changed	changed
+moxi	packages/moxi/tests/test_config_tables.py	code, out, err = run(capsys, "config", "set", "demo", "rows.mode", "b", "--by", "ui")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert [(r["op"], r["by"]) for r in records] == [("set", "ui"), ("unset", "cli")]	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert all(set(r) == {"module", "key", "op", "by", "at"} for r in records)	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, out, _ = run(capsys, "config", "set", "demo", "rows.mode", "warn")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, err = change_json(capsys, "set", "demo", "rows.mode", "warn")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert (code, answer) == (0, {"changed": True, "problem": None, "fix": None,	keep	changed	changed
+moxi	packages/moxi/tests/test_config_tables.py	code, _, _ = run(capsys, "config", "set", "demo", "rows.two.parts", "x")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert config.history("demo", "rows.two.parts")[0]["op"] == "set"	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "bad"), 2, "cannot be 'bad'", "give a or b"),	keep	bad	bad
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "bad"), 2, "cannot be 'bad'", "give a or b"),	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "--add", "x"), 2,	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "--remove", "x"), 2,	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	(("set", "demo", "rows.mode", "held"), 75, None, "try again once it is free"),	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	assert answer["changed"] is False and answer["fix"] == fix	keep	changed	changed
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, _ = change_json(capsys, "set", "demo", "rows.", "a")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, _, err = run(capsys, "config", "set", "nothere", "rows.mode", "a")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, _ = change_json(capsys, "set", "lost", "rows.mode", "a")	keep	set	set
+moxi	packages/moxi/tests/test_config_tables.py	code, answer, _ = change_json(capsys, "set", "clash", "rows.mode", "a")	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	-	name	test_the_core_s_records_are_in_the_core_s_state_directory	test_the_core_s_records_are_in_the_core_s_state_dir
 moxi	packages/moxi/tests/test_doctor.py	assert set(got) == {"commit:abc", "other"}	keep	set	set
 moxi	packages/moxi/tests/test_doctor.py	assert set(records(home)) == {"a"}	keep	set	set
@@ -16064,6 +16118,12 @@ ui	packages/ui/src/moxi_ui/settings.py	return _result(key, "refused", problem=pr
 ui	packages/ui/src/moxi_ui/settings.py	results = [_result(key, "refused", problem=f"is not a setting of {module}")	keep	refused	refused
 ui	packages/ui/src/moxi_ui/settings.py	for key, value, reset, before in zip(keys, values, resets, was, strict=True):	keep	strict	strict
 ui	packages/ui/src/moxi_ui/settings.py	done = run(argv, timeout_s=WRITE_TIMEOUT_S, cwd=cwd, env=env)	keep	env	env
+ui	packages/ui/src/moxi_ui/settings.py	may carry `warning` and `refused` (the module's words for a value some or all of its uses	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	`failed` (a 422 on `set` and `unset`) with the error.	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	"warning": _STRING, "refused": _STRING, "clear_only": Out("bool"),	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	"mark": _mark(module, name, item.get("read"), set(switches), platform, logins,	keep	set	set
+ui	packages/ui/src/moxi_ui/settings.py	"warning": _text(item.get("warning")), "refused": _text(item.get("refused"))}	keep	refused	refused
+ui	packages/ui/src/moxi_ui/settings.py	**_page_fields({}), "json": "null", "default_json": "null", "changed": False,	keep	changed	changed
 ui	packages/ui/src/moxi_ui/snapshot.py	"mounted": export is not None,	keep	mounted	mounted
 ui	packages/ui/src/moxi_ui/snapshot.py	"refused": refused,	keep	refused	refused
 ui	packages/ui/src/moxi_ui/snapshot.py	_mtimes	name	directory	watched_dir
@@ -18045,6 +18105,19 @@ rounds	packages/rounds/tests/test_private_files.py	assert not any(one.startswith
 rounds	packages/rounds/tests/test_private_files.py	assert any(all(part in one for part in said) for one in reasons), reasons	keep	any	any
 rounds	packages/rounds/tests/test_private_files.py	tree.commit("notes/readme.md", "changed")	keep	changed	changed
 ui	packages/ui/src/moxi_ui/testing/__init__.py	before = set(this.children())	keep	set	set
+ui	packages/ui/tests/fixture/moxi_fixture/table.py	"source": "file", "clear_only": True, "refused": f"{name} {NO_ROW}"}	keep	refused	refused
+ui	packages/ui/tests/fixture/moxi_fixture/table.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+ui	packages/ui/tests/test_browser_settings.py	shell = ui_shells(site=[tabled_site], env={"MOXI_UI_LOCKED_SETTINGS": "fixture.defaults"})	keep	env	env
+ui	packages/ui/tests/test_settings.py	return {"HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / ".config")}	keep	HOME	HOME
+ui	packages/ui/tests/test_settings.py	"table_file": str(file), "applies": APPLIES, "warning": None, "refused": None,	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert (key["warning"], key["refused"], key["clear_only"]) == (	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert key["table_error"] is None and key["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert (typo["clear_only"], typo["refused"], typo["changed"]) == (True, "typo is not a row.",	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	assert (typo["clear_only"], typo["refused"], typo["changed"]) == (True, "typo is not a row.",	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert [plain[f] for f in ("table_title", "table_file", "warning", "refused",	keep	refused	refused
+ui	packages/ui/tests/test_settings.py	assert item["table_file"].startswith("~") and not item["changed"]	keep	changed	changed
+ui	packages/ui/tests/test_settings.py	bare = Run(code=1, stdout=json.dumps({"error": "bad", "fix": None}).encode(), schema=None)	keep	bad	bad
+ui	packages/ui/tests/test_settings_save.py	assert run.writes[-1][0][5:] == ["set", "--by", "ui", "--json", "--", "demo",	keep	set	set
 launcher	packages/launcher/src/moxi_launcher/relaunch.py	found = sessions.find(row.harness, session_id,	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	RELAUNCH	RELAUNCH
 launcher	packages/launcher/src/moxi_launcher/selfrecycle.py	"RECYCLE_AT_LIMIT", "RELAUNCH", "SCRATCH", "SLOT", "SLOTS", "WARN_AT", "missing",	keep	WARN_AT	WARN_AT
@@ -18055,6 +18128,57 @@ launcher	packages/launcher/src/moxi_launcher/target.py	and `find` does not wait.
 launcher	packages/launcher/src/moxi_launcher/target.py	For the callers that read a launch before `find`, so they find the launch `find`	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	return turns.find(session_id=session_id)	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/target.py	"Unclaimed", "by_process", "caller", "check_claim", "claims", "find", "replaces",	keep	find	find
+launcher	packages/launcher/tests/test_defaults.py	file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_defaults.py	return Table(available=available).change(name, op, value, by="test", env=os.environ)	keep	env	env
+launcher	packages/launcher/tests/test_defaults.py	assert len(listed) == len(set(listed))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert set(listed) == set(defaults.offered_rows(ALL))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("effort", "set", "high", here) == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("keep_warm", "set", "off", here)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert row["refused"] == ("relaunch at limit needs slots and a slot launch; launch it "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change("recycle_at_limit", "set", "relaunch", only("turns", "usage", "slots"))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert item["source"] == "file" and item["refused"]	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert first[0]["refused"] == ("session_id is set by the launcher itself; leave "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert first[1]["refused"].startswith("takes_policy_directors can't be set in "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert first[2]["refused"] == ("typo_row is not a launcher row or a row of any "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	True, [first[1]["refused"][:-1], first[2]["refused"][:-1]])	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	True, [first[2]["refused"][:-1]])	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert row["refused"] == ("effort is an int, not a string; set effort to a string "	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert change("effort", "set", "low") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert rows()["effort"]["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert change("permission_mode", "set", "plan") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("effort", "set", "high")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("model", "set", "opus")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("effort", "set", "low")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("add_dir", "set", f'["{extra_dir.replace(chr(92), chr(92) * 2)}"]')	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("remote_control", "set", "true")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("remote_control", "set", "laptop")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("remote_control", "set", "laptop") == (False, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("instructions_file", "set", "~/agents/planner.md", ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change(name, "set", value, ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("session_id", "set", "y")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert (row["refused"], row["warning"]) == (None, LIMIT_AT_LEFT_OUT)	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert (row["refused"], row["warning"]) == (None, COMPACT_LEFT_OUT)	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change("limit_at", "set", "1x", ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("recycle_at_limit", "set", "compact", ALL)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	changed, warnings = change("recycle_at_limit", "set", "relaunch", RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert row["warning"] == REFUSED_BARE + "." and row["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change(name, "set", values[name], RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert row["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	change("recycle_at_limit", "set", "relaunch", RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("target", "set", "slot", RECYCLES)	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	change("project", "set", "moxi")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	changed, warnings = change("cwd", "set", str(tmp_path))	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert listed[name]["refused"] == warnings[0] + "."	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert rows()["cwd"]["refused"] is None	keep	refused	refused
+launcher	packages/launcher/tests/test_defaults.py	assert change("effort", "set", "high") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	config.change_table("launcher", "defaults.effort", "set", "high", by="test")	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	config_file.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_defaults.py	assert config.change_table("launcher", "defaults.effort", "set", "high",	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	code = cli.main(["config", "set", "launcher", "defaults.permission_mode", "plan",	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert (code, answer["changed"], answer["problem"]) == (0, True, None)	keep	changed	changed
+launcher	packages/launcher/tests/test_defaults.py	assert [(r["op"], r["by"]) for r in records] == [("set", "ui")]	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (False, [])	keep	set	set
 launcher	packages/launcher/tests/test_recycle.py	store.end_run(conn, first.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records`: the id's main transcript, whose first records have	keep	find	find
 launcher	packages/launcher/tests/test_relaunch.py	assert "stale" in caught.value.problem and later.asked == [CLEARED]	keep	stale	stale

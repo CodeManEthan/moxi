@@ -12,6 +12,13 @@
 // (`elsewhere`). ui's `gateway.*` keys are drawn by the Phone group, not among the pane's
 // rows, and are drawn keys only while that group shows. The read's `count` leaves them
 // out; the page adds them here.
+//
+// A module's table keys (rows of a table it keeps in a file of its own, `table_title` set)
+// are drawn after its other keys and their `More` line, one open block per table under
+// its title and line. A table whose file can't be read is one item holding `table_error`
+// in place of its rows: it is no key, so it is never drawn as a row or counted. When the
+// module's own config file can't be read, its section holds the error and its tables'
+// keys alone, which stay editable (`readKeys`, `readonlyKey`).
 
 import type { FieldDescriptor } from "./client.ts";
 
@@ -74,6 +81,19 @@ export interface Setting extends FieldDescriptor {
   default_json?: string;
   /** The value is not the default (a switch table: an entry is on). */
   changed?: boolean;
+  /** A table key: its table's title, line and file (the home folder written `~`). */
+  table_title?: string | null;
+  table_line?: string | null;
+  table_file?: string | null;
+  /** The module's words for a value some of its uses refuse or leave out. */
+  warning?: string | null;
+  /** The module's words for a value every use refuses. */
+  refused?: string | null;
+  /** The key can only be removed: its value is a word and Reset its only control. */
+  clear_only?: boolean;
+  /** The one item of a table whose file can't be read: why, and the fix. */
+  table_error?: string | null;
+  table_fix?: string | null;
 }
 
 /** One module's section of the read. */
@@ -118,14 +138,38 @@ export function isPhoneKey(module: string, key: Setting): boolean {
   return module === PHONE_MODULE && key.name.startsWith(PHONE_PREFIX);
 }
 
+/** Whether `key` is a row of a table the module keeps in a file of its own, or the item of
+ * one that can't be read. */
+export function isTableKey(key: Setting): boolean {
+  return words(key.table_title) !== null;
+}
+
+/** Whether `key` is the item that stands for a table whose file can't be read. */
+export function isTableError(key: Setting): boolean {
+  return words(key.table_error) !== null;
+}
+
+/** The section's keys that were read: all of them, or, when the module's own config file
+ * can't be read, its tables' keys alone. */
+export function readKeys(section: Section): Setting[] {
+  const keys = Array.isArray(section.keys) ? section.keys : [];
+  return section.error === null ? keys : keys.filter(isTableKey);
+}
+
+/** Whether `key` is read-only for its section: a key of a file that can't be read. A
+ * table key's file is its own, so a module's unreadable config file leaves it editable. */
+export function readonlyKey(section: Section, key: Setting): boolean {
+  return section.readonly === true && !isTableKey(key);
+}
+
 /**
  * The module's drawn keys, in schema order: every key but one whose `needs` module is
- * absent and one edited on another page; ui's `gateway.*` keys only while `phone`, the
- * Phone group, shows.
+ * absent, one edited on another page, and a table that can't be read; ui's `gateway.*`
+ * keys only while `phone`, the Phone group, shows.
  */
 export function drawnKeys(module: string, keys: readonly Setting[], phone: boolean): Setting[] {
   return keys.filter((key) => typeof key?.name === "string" && key.needs_absent !== true && !words(key.elsewhere)
-                              && (phone || !isPhoneKey(module, key)));
+                              && !isTableError(key) && (phone || !isPhoneKey(module, key)));
 }
 
 /** The drawn keys the pane draws as rows: the Phone group's keys are its own. */
@@ -140,9 +184,9 @@ export function countOf(section: Section, phone: boolean): number {
   return base + drawnKeys(section.module, section.keys, true).filter((key) => isPhoneKey(section.module, key)).length;
 }
 
-/** How many of the section's drawn keys are changed from their default. */
+/** How many of the section's drawn keys that were read are changed from their default. */
 export function changedCount(section: Section, phone: boolean): number {
-  return drawnKeys(section.module, section.keys, phone).filter((key) => key.changed === true).length;
+  return drawnKeys(section.module, readKeys(section), phone).filter((key) => key.changed === true).length;
 }
 
 /**
@@ -157,7 +201,7 @@ export function moduleOrder(listed: readonly string[]): string[] {
 /**
  * The total of changed drawn keys over every listed module, or null while a listed
  * module's section has not arrived, so the total is never a part read as the whole. A
- * section that can't be read counts none.
+ * section that can't be read counts only its tables' keys.
  */
 export function totalChanged(listed: readonly string[], sections: ReadonlyMap<string, Section>,
                              phone: boolean): number | null {
@@ -165,7 +209,7 @@ export function totalChanged(listed: readonly string[], sections: ReadonlyMap<st
   for (const name of new Set(listed)) {
     const section = sections.get(name);
     if (section === undefined) return null;
-    if (section.error === null) total += changedCount(section, phone);
+    total += changedCount(section, phone);
   }
   return total;
 }
@@ -268,6 +312,12 @@ export interface Row {
   defaults: { words: string; reset: boolean } | null;
   /** The shell refuses a write to the key for this run: its control is off. */
   locked: boolean;
+  /** The module's words for a value every use refuses, drawn under the row as a save's
+   * refusal is; null for none. */
+  refused: string | null;
+  /** The module's words for a value some uses refuse or leave out, under the row after
+   * its mark; null for none. */
+  warning: string | null;
 }
 
 /** The plain words a key leads with: its label, else its dotted key. */
@@ -309,6 +359,9 @@ function enumControl(key: Setting, value: unknown): Control {
   const words = new Map((key.choices ?? []).map((row) => [row.value, row.words]));
   const options = values.map((v) => ({ value: v, words: words.get(v) ?? v }));
   const selected = typeof value === "string" ? value : "";
+  // A value the list doesn't offer stays in it as the chosen one, so choosing it again is
+  // no change; the key's warning or refused line says why it is not offered.
+  if (selected !== "" && !values.includes(selected)) options.push({ value: selected, words: words.get(selected) ?? selected });
   return { kind: key.pick === true || values.length >= PICK_FROM ? "pick" : "choices", options, selected };
 }
 
@@ -328,7 +381,7 @@ function listControl(key: Setting, value: unknown): Control {
 /** The control `key` is drawn with, by its type (a terminal key: its value as a word). */
 export function controlOf(key: Setting): Control {
   const value = valueOf(key);
-  if (terminalOf(key)) return { kind: "word", text: valueWords(key, value) };
+  if (terminalOf(key) || key.clear_only === true) return { kind: "word", text: valueWords(key, value) };
   if (key.switch_table === true) {
     const entries = Array.isArray(key.entries) ? key.entries : [];
     return { kind: "switches", toggles: entries.filter((entry) => typeof entry?.key === "string").map((entry) => ({
@@ -351,7 +404,8 @@ export function controlOf(key: Setting): Control {
     case "table":
       return { kind: "toml", text: typeof key.value === "string" ? key.value : "" };
     default: {
-      const text = typeof value === "string" ? value : "";
+      // A text key holding another kind of value (a flag's bare `true`) shows its spelling.
+      const text = typeof value === "string" ? value : typeof key.value === "string" ? key.value : "";
       if (text.length > LONG_TEXT || /[\r\n]/.test(text)) return { kind: "long", text, first: text.split(/\r?\n/)[0] };
       return { kind: "text", text, path: key.type === "path" };
     }
@@ -410,6 +464,8 @@ export function rowOf(key: Setting): Row {
     terminal: terminalLine(key),
     defaults: defaultsOf(key),
     locked: key.locked === true && key.switch_table !== true,
+    refused: words(key.refused),
+    warning: words(key.warning),
   };
 }
 
@@ -423,6 +479,44 @@ export function splitMore(keys: readonly Setting[]): { first: Setting[]; more: S
   if (!keys.some((key) => key.common === true)) return { first: [...keys], more: null };
   const more = keys.filter((key) => key.common !== true);
   return { first: keys.filter((key) => key.common === true), more: more.length > 0 ? more : null };
+}
+
+/** The keys of a module that are not table keys: the ones `More` splits. */
+export function ownKeys(keys: readonly Setting[]): Setting[] {
+  return keys.filter((key) => !isTableKey(key));
+}
+
+/** One table's block: its title, its line, its file, and its drawn keys, or why its file
+ * can't be read. */
+export interface TableBlock {
+  title: string;
+  line: string | null;
+  file: string | null;
+  keys: Setting[];
+  error: string | null;
+  fix: string | null;
+}
+
+/**
+ * The tables among `keys` (a section's keys), in the order they first appear: each with
+ * its keys among `drawn`, or its error and fix and no key.
+ */
+export function tablesOf(keys: readonly Setting[], drawn: readonly Setting[]): TableBlock[] {
+  const out: TableBlock[] = [];
+  for (const key of keys) {
+    const title = words(key.table_title);
+    if (title === null || out.some((table) => table.title === title)) continue;
+    const error = isTableError(key);
+    out.push({ title, line: words(key.table_line), file: words(key.table_file),
+               keys: error ? [] : drawn.filter((row) => row.table_title === title),
+               error: error ? words(key.table_error) : null, fix: error ? words(key.table_fix) : null });
+  }
+  return out;
+}
+
+/** The foot's line for a table's file. */
+export function tableFileWords(table: TableBlock): string | null {
+  return table.file !== null ? `${table.title} are kept in ${table.file}` : null;
 }
 
 /** A run of keys under one sub-head (none for keys with no `group`). */
@@ -486,7 +580,7 @@ export function listEntries(listed: readonly string[], sections: ReadonlyMap<str
   return moduleOrder(listed).map((module) => {
     const section = sections.get(module);
     const unreadable = section !== undefined && section.error !== null;
-    const n = section === undefined || unreadable ? 0 : changedCount(section, phone);
+    const n = section === undefined ? 0 : changedCount(section, phone);
     return { module, changed: n > 0 ? n : null, unreadable };
   });
 }
@@ -497,8 +591,10 @@ export type PaneState = "reading" | "unreadable" | "empty" | "rows";
 
 export function paneState(section: Section | undefined): PaneState {
   if (section === undefined) return "reading";
-  if (section.error !== null) return "unreadable";
-  return paneKeys(section.module, section.keys).length === 0 ? "empty" : "rows";
+  // A module's own file that can't be read still shows its tables' blocks.
+  const tables = tablesOf(section.keys, []).length > 0;
+  if (section.error !== null) return tables ? "rows" : "unreadable";
+  return paneKeys(section.module, section.keys).length === 0 && !tables ? "empty" : "rows";
 }
 
 export const NOTHING_HERE = "Nothing here can be changed on this page.";

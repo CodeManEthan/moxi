@@ -754,15 +754,17 @@ usage: moxi config <module> [show [--json]|path|check|init]
 def _config(argv: list[str]) -> int:
     if argv and argv[0] in ("set", "unset"):
         return _config_change(argv[0], argv[1:])
-    parser = _parser("config", "A module's settings and its config file. `moxi config "
-                     "set` and `moxi config unset` change one key; `moxi` names the "
-                     "core's own settings.")
+    parser = _parser("config", "A module's settings and its config file, and any table "
+                     "the module keeps in a file of its own (its rows named "
+                     "<table>.<row>). `moxi config set` and `moxi config unset` change "
+                     "one key or row; `moxi` names the core's own settings.")
     parser.usage = _CONFIG_USAGE.removeprefix("usage: ")
     parser.add_argument("module")
     parser.add_argument("action", nargs="?", default="show",
                         choices=("show", "path", "check", "init"),
                         help="show (the default): every key with its value, source, doc, "
-                             "when it is read and who last set it; path: the file's path; "
+                             "when it is read and who last set it, then each table's rows; "
+                             "path: the file's path; "
                              "check: exit non-zero when the file cannot be read or the "
                              "module refuses it; init: "
                              "write the file with every key commented out at its default")
@@ -795,7 +797,8 @@ def _config(argv: list[str]) -> int:
     except config.ConfigError as exc:
         _error(f"{module}'s settings schema cannot be read: {exc}")
         return 1
-    if schema is None:
+    tabled = found is not None and bool(found.config_tables)
+    if schema is None and not (tabled and args.action == "show"):
         if args.json:
             print("[]")
             return 0
@@ -835,6 +838,19 @@ def _config(argv: list[str]) -> int:
         return 0
     if args.json:
         return _config_json(module, found, schema)
+    code = 0
+    if schema is not None:
+        code = _show_keys(module, schema, path)
+    if tabled:
+        code = max(code, _show_tables(module, found))
+    return code
+
+
+def _show_keys(module: str, schema, path) -> int:
+    """`moxi config <module> show`'s lines for the module's own keys; 1 when its config
+    file can't be read."""
+    from . import config
+
     try:
         settings = config.load(module, schema)
     except config.ConfigError as exc:
@@ -861,6 +877,101 @@ def _config(argv: list[str]) -> int:
 _DONE = {"set": "set", "unset": "unset", "add": "added to", "remove": "removed from"}
 
 
+def _show_tables(module: str, found) -> int:
+    """`moxi config <module> show`'s lines for the tables the module declares: per table
+    its title, file, line and when a change applies, then each row as a key is shown, with
+    the module's `warning` or `refused` words; or the error a table's file gives. 1 when
+    some table can't be read."""
+    from . import config
+
+    items, failed = _table_items(found)
+    last = _last_set(config.history(module, tail=None), {item["name"] for item in items})
+    title = None
+    for item in items:
+        if "table_error" in item:
+            print(f"# {item['table_title']}: {item['table_file'] or '(no file)'}")
+            print(f"    error: {item['table_error']}; fix: {item['table_fix']}")
+            title = None
+            continue
+        if item["table_title"] != title:
+            title = item["table_title"]
+            print(f"# {title}: {item['table_file']}")
+            for said in (item["table_line"], item["applies"]):
+                if said:
+                    print(f"#   {said}")
+        value = item["value"]
+        shown = "(none)" if value is None else _toml_value(value)
+        print(f"{item['name']} = {shown}    [{item['source']}]")
+        print(f"    {item['doc']}")
+        for word in ("refused", "warning"):
+            if item[word]:
+                print(f"    {word}: {item[word]}")
+        record = last.get(item["name"])
+        if record is not None:
+            print(f"    last {_DONE.get(record.get('op'), 'changed')} by "
+                  f"{record.get('by')} at {record.get('at')}")
+    return 1 if failed else 0
+
+
+#: The fields of a config key in `show --json` that a table's row may give, each with the
+#: value it takes when the row leaves it out.
+_TABLE_ROW_JSON = {"type": "string", "default": None, "doc": "", "values": None,
+                   "read": "use", "env": None, "needs": None, "items": None,
+                   "label": None, "line": None, "common": False, "group": None,
+                   "unit": None, "choices": None, "pick": False, "hurts": None,
+                   "terminal": None, "elsewhere": None, "value": None,
+                   "source": "default"}
+
+
+def _table_items(found) -> tuple[list[dict], bool]:
+    """The rows of each table module `found` declares in `CONFIG_TABLES`, as `show
+    --json` prints them, through each table's hook (see `moxi.config`): each in a config
+    key's shape, named `<table>.<row>`, with `table_title`, `table_line`, `table_file`
+    and `applies` from the hook, and the row's `warning` and `refused` (null when it
+    gives none) and `clear_only` (false when it gives none). A table whose hook can't run
+    or whose file can't be read is one item named by the table, holding `table_title`,
+    `table_line`, `table_file`, `table_error` and `table_fix` in place of its rows; the
+    bool is true when some table is."""
+    from . import config
+
+    env = os.environ
+    try:
+        hooks = config.table_hooks(found)
+    except config.ConfigError as exc:
+        return [_table_error(table, None, exc, env) for table in found.config_tables], True
+    out: list[dict] = []
+    failed = False
+    for table, hook in hooks.items():
+        try:
+            rows = list(hook.keys(env))
+        except config.ConfigError as exc:
+            out.append(_table_error(table, hook, exc, env))
+            failed = True
+            continue
+        head = {"table_title": hook.title, "table_line": hook.line,
+                "table_file": str(hook.file(env)), "applies": hook.applies}
+        for row in rows:
+            item = {"name": f"{table}.{row['name']}"}
+            item.update({field: _plain_json(row.get(field, default))
+                         for field, default in _TABLE_ROW_JSON.items()})
+            item.update(head)
+            item["warning"] = row.get("warning")
+            item["refused"] = row.get("refused")
+            item["clear_only"] = bool(row.get("clear_only"))
+            out.append(item)
+    return out, failed
+
+
+def _table_error(table: str, hook, exc, env) -> dict:
+    """The one item that stands for table `table` when its hook can't run (`hook`
+    None) or its file can't be read."""
+    return {"name": table,
+            "table_title": table if hook is None else hook.title,
+            "table_line": None if hook is None else hook.line,
+            "table_file": exc.file if hook is None else str(hook.file(env)),
+            "table_error": exc.problem, "table_fix": exc.fix}
+
+
 def _config_json(module: str, found, schema) -> int:
     """`moxi config <module> show --json`: one JSON list, one object per live key.
 
@@ -874,16 +985,37 @@ def _config_json(module: str, found, schema) -> int:
     `{name, value, source, named_by}` per entry in the file and per entry the module's
     units, wraps and questions name as a switch (see `_switch_names`). When the file
     cannot be read the output is one `{"error", "fix"}` object instead, and the exit 1.
+
+    A module that declares tables in `CONFIG_TABLES` lists their rows after its own keys
+    (`_table_items`), and exits 1 when a table's file can't be read; when its own config
+    file can't be read, the error object holds them as `keys`.
     """
     import json
 
     from . import config
 
-    try:
-        settings = config.load(module, schema)
-    except config.ConfigError as exc:
-        print(json.dumps({"error": exc.problem, "fix": exc.fix}, indent=2))
-        return 1
+    tables, failed = ([], False)
+    if found is not None and found.config_tables:
+        tables, failed = _table_items(found)
+    out: list = []
+    if schema is not None:
+        try:
+            settings = config.load(module, schema)
+        except config.ConfigError as exc:
+            error = {"error": exc.problem, "fix": exc.fix}
+            if found is not None and found.config_tables:
+                error["keys"] = tables
+            print(json.dumps(error, indent=2))
+            return 1
+        out = _keys_json(module, found, schema, settings)
+    print(json.dumps(out + tables, indent=2))
+    return 1 if failed else 0
+
+
+def _keys_json(module: str, found, schema, settings) -> list[dict]:
+    """The module's own live keys as `show --json` prints them."""
+    from . import config
+
     names: list = []
     out = []
     for key in schema.live():
@@ -904,8 +1036,7 @@ def _config_json(module: str, found, schema) -> int:
                 item["declarations"] = "unavailable"
                 item["reason"] = unavailable
         out.append(item)
-    print(json.dumps(out, indent=2))
-    return 0
+    return out
 
 
 def _page_json(key) -> dict:
@@ -1000,14 +1131,17 @@ def _last_set(records: list[dict], keys) -> dict[str, dict]:
 def _config_change(op: str, argv: list[str]) -> int:
     """`moxi config set` and `moxi config unset`."""
     if op == "set":
-        description = ("Set one key of a module's config file. The value is read by the "
-                       "key's type; a list or a table is one TOML value. --add and "
-                       "--remove change one item of a list.")
+        description = ("Set one key of a module's config file, or one row of a table "
+                       "the module keeps in a file of its own (<table>.<row>, which the "
+                       "module checks and writes). The value is read by the key's type; a "
+                       "list or a table is one TOML value. --add and --remove change one "
+                       "item of a list, and not a table's row.")
     else:
-        description = "Remove one key from a module's config file, so it reads its default."
+        description = ("Remove one key from a module's config file, or one row from a "
+                       "table it keeps in a file of its own, so it reads its default.")
     parser = _parser(f"config {op}", description)
     parser.add_argument("module", help="the module, or moxi for the core's own settings")
-    parser.add_argument("key", help="the setting's dotted name")
+    parser.add_argument("key", help="the setting's dotted name, or <table>.<row>")
     if op == "set":
         parser.add_argument("value", nargs="?", help="the new value")
         group = parser.add_mutually_exclusive_group()
@@ -1034,15 +1168,12 @@ def _config_change(op: str, argv: list[str]) -> int:
         value = None
     from . import config
 
+    if config.table_of(args.module, args.key) is not None:
+        return _table_change(args, op, value)
     try:
         changed = config._change(args.module, args.key, op, value, by=args.by, text=True)
     except config.ConfigError as exc:
-        if args.json:
-            _change_json(changed=False, problem=_json_problem(exc, args.module, args.key),
-                         fix=exc.fix, units=[])
-        else:
-            _error(str(exc))
-        return exc.exit_code
+        return _change_refused(args, exc)
     if args.json:
         units: list[str] = []
         failed = op in ("set", "unset") and any(
@@ -1062,6 +1193,44 @@ def _config_change(op: str, argv: list[str]) -> int:
         applied = config.apply_units(args.module, args.key)
         if any(not a.ok for a in applied):
             return 1
+    return 0
+
+
+def _change_refused(args, exc) -> int:
+    """Say the refusal `exc` of `moxi config set` or `unset`, and return its exit."""
+    if args.json:
+        _change_json(changed=False, problem=_json_problem(exc, args.module, args.key),
+                     fix=exc.fix, units=[])
+    else:
+        _error(str(exc))
+    return exc.exit_code
+
+
+def _table_change(args, op: str, value) -> int:
+    """`moxi config set` and `unset` of a row of a table the module declares
+    (`moxi.config.change_table`): the same lines, exits and `--json` object as a config
+    key's, then the module's warning lines, `warning: <line>` each, on stdout (on stderr
+    with `--json`). A row applies no units."""
+    from . import config
+
+    try:
+        changed, warnings = config.change_table(args.module, args.key, op, value,
+                                                by=args.by)
+    except config.ConfigError as exc:
+        return _change_refused(args, exc)
+    if args.json:
+        for line in warnings:
+            print(f"warning: {line}", file=sys.stderr)
+        _change_json(changed=changed, problem=None, fix=None, units=[])
+        return 0
+    if not changed and op == "unset":
+        print(f"{args.module}: {args.key} is not set in the file; nothing changed")
+    elif not changed:
+        print(f"{args.module}: {args.key} already holds that value; nothing changed")
+    else:
+        print(f"{args.module}: {args.key} {op} (by {args.by})")
+    for line in warnings:
+        print(f"warning: {line}")
     return 0
 
 
