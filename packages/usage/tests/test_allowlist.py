@@ -20,6 +20,15 @@ COMMANDS = (("make", "handoff"), ("moxi", "repo", "rules"),
             ("make", "trailers", "<key>"))
 
 
+#: Windows makes a path whole, `..` collapsed, before it follows a link in it, so a write
+#: to `<link>/../x` lands at `x` beside the link, not past the link's target: written
+#: through Windows' own file calls (Node's, as Claude Code's Write and Edit, and Python's
+#: open) or added with `git add -- <link>/..`, it lands inside the root there. Every
+#: reading of where it lands is inside, so the reader's allow is the rule's answer.
+#: Elsewhere `..` follows the link and lands outside.
+DOTS_BEFORE_LINKS = sys.platform == "win32"
+
+
 def build_tree(t):
     t = os.path.realpath(t)
     home = os.path.join(t, "home")
@@ -364,14 +373,15 @@ def table(p):
         expect_bash("add -- through an in-dir link, .. lexically inside <dir> [%s]" % shape, fmt % "L/../x", want=True)
         expect_bash("add -- an in-dir link [%s]" % shape, fmt % "L/x", want=True)
     expect_bash("add -- a link in the repository leading above it", "git -C %s add -- up/x" % repo, want=False)
-    expect_bash("add -- a link leading above the repository, then ..", "git -C %s add -- up/.." % repo, want=False)
+    expect_bash("add -- a link leading above the repository, then .. (inside on Windows)",
+                "git -C %s add -- up/.." % repo, want=DOTS_BEFORE_LINKS)
     expect_bash("add -- a link leading above the repository, cd shape", "cd %s && git add -- up/x" % repo, want=False)
     for name in ("Write", "Edit"):
         expect_tool("a link from outside the hand-off root into it", name, {"file_path": e + "/notelink/r.md"}, want=False)
         expect_tool("a link inside the hand-off root, then .. (stays inside)", name,
                     {"file_path": notes + "/dlink/../x.md"}, want=True)
-        expect_tool("a link out of the hand-off root, then .. (lexically inside)", name,
-                    {"file_path": notes + "/uplink/../outside.md"}, want=False)
+        expect_tool("a link out of the hand-off root, then .. (lexically inside; inside on Windows)",
+                    name, {"file_path": notes + "/uplink/../outside.md"}, want=DOTS_BEFORE_LINKS)
     expect_tool("bounded read through a link from outside into the root", "Read",
                 {"file_path": e + "/notelink/build-report.md", "limit": 50}, want=False)
 
@@ -453,8 +463,8 @@ def table(p):
     expect_patch("a .md link under the root leading outside", patch(update(notes + "/link.md", *change)), want=False)
     expect_patch("a directory link under the root leading outside",
                  patch(add(notes + "/uplink/new.md", "x")), want=False)
-    expect_patch("a link out of the root, then .. (lexically inside)",
-                 patch(add(notes + "/uplink/../outside.md", "x")), want=False)
+    expect_patch("a link out of the root, then .. (lexically inside; inside on Windows)",
+                 patch(add(notes + "/uplink/../outside.md", "x")), want=DOTS_BEFORE_LINKS)
     expect_patch("a link from outside into the root", patch(add(e + "/notelink/r.md", "x")), want=False)
     expect_patch("a .md name leading to source", patch(update(notes + "/src.md", *change)), want=False)
     expect_patch("a sibling with the root as name prefix", patch(add(notes + "2/r.md", "x")), want=False)
