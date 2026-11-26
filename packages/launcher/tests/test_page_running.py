@@ -81,13 +81,13 @@ def test_a_live_launch_is_sent_with_its_dir_and_nothing_joined(conn):
 
 
 def test_the_model_and_effort_are_the_launchs_own_and_null_where_it_set_none(conn):
-    launched(conn, "set", values={"model": "sonnet", "effort": "high"},
+    launched(conn, "both", values={"model": "sonnet", "effort": "high"},
              at="2026-03-01T10:00:00.000000Z")
     launched(conn, "unset", values={}, at="2026-03-01T09:00:00.000000Z")
     launched(conn, "empty", values={"model": "", "effort": ""},
              at="2026-03-01T08:00:00.000000Z")
     by_id = {entry["request_id"]: entry for entry in pagehandlers.gather_running()["sessions"]}
-    assert (by_id["set"]["model"], by_id["set"]["effort"]) == ("sonnet", "high")
+    assert (by_id["both"]["model"], by_id["both"]["effort"]) == ("sonnet", "high")
     assert (by_id["unset"]["model"], by_id["unset"]["effort"]) == (None, None)
     assert (by_id["empty"]["model"], by_id["empty"]["effort"]) == (None, None)
 

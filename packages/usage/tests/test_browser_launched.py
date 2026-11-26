@@ -40,9 +40,9 @@ TERMINAL = "0190b000-0000-7000-8000-000000000302"
 BY_HAND = "0190b000-0000-7000-8000-000000000303"
 #: Three sessions of the last hours, dearest first: one launched in slot 4 at high effort,
 #: one launched in a terminal with no effort set, one started by hand.
-SESSIONS = [{"session": SLOT, "folder": "atlas-api", "hours_ago": 0.3, "requests": 12},
-            {"session": TERMINAL, "folder": "kestrel-web", "hours_ago": 0.2, "requests": 6},
-            {"session": BY_HAND, "folder": "harbor-infra", "hours_ago": 0.1, "requests": 3}]
+SESSIONS = [{"session": SLOT, "project_dir": "atlas-api", "hours_ago": 0.3, "requests": 12},
+            {"session": TERMINAL, "project_dir": "kestrel-web", "hours_ago": 0.2, "requests": 6},
+            {"session": BY_HAND, "project_dir": "harbor-infra", "hours_ago": 0.1, "requests": 3}]
 LAUNCHES = [{"request_id": "r-slot", "session": SLOT, "target": "slot", "slot": "4",
              "cwd": "/work/atlas-api",
              "values": {"name": "builder-1", "model": "opus", "effort": "high"}},
@@ -58,7 +58,7 @@ from moxi_sessions import api as sessions
 T = sessions.testing
 now = time.time()
 for spec in json.loads(sys.argv[1]):
-    cwd = "/work/" + spec["folder"]
+    cwd = "/work/" + spec["project_dir"]
     start = now - spec["hours_ago"] * 3600
     t = T.ClaudeTranscript(Path(sessions.root("claude")), session_id=spec["session"],
                            project=cwd.replace("/", "-"), cwd=cwd, start=start)
@@ -139,9 +139,9 @@ def session_line(panel):
     return panel.locator("[data-part=session] [data-line=session] .f")
 
 
-def by_hand(folder: str) -> re.Pattern:
+def by_hand(project_dir: str) -> re.Pattern:
     """The name of a session no launch holds: its folder and start."""
-    return re.compile(rf"^{folder} · started {DAY} {TIME}$")
+    return re.compile(rf"^{project_dir} · started {DAY} {TIME}$")
 
 
 def test_a_launched_session_is_named_by_its_launch_and_one_started_by_hand_as_before(page):
