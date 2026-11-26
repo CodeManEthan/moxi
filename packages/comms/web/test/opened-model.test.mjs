@@ -156,6 +156,32 @@ test("with launcher: Session leads, linked to its transcript with sessions; laun
   assert.equal(opened(r, mail(), "planner", { hasSessions: false }, launched).before[0].link, null);
 });
 
+test("with launcher: a warm Cache line ends in the next keep-alive, a time or due; none where launcher gives none", () => {
+  const r = roster([bound("planner", { cache: { kind: "warm", until: at("19:50") } })]);
+  const covered = { waits: { kind: "agents", count: 1 }, covered: true };
+  const line = (fields, now = NOW) =>
+    opened(r, mail(), "planner", { now }, join(r, [entry("planner", { ...covered, ...fields })])).before[1];
+  assert.deepEqual(line({ next_keep_alive_at: iso("19:49") }),
+                   { key: "cache", label: "Cache", value: "warm until 20:04",
+                     tail: "kept warm while 1 agent works, next keep-alive 19:49", link: { kind: "cache" } });
+  // a time already come, and the same time once the clock passes it: due
+  assert.equal(line({ next_keep_alive_at: iso("19:02") }).tail, "kept warm while 1 agent works, next keep-alive due");
+  assert.equal(line({ next_keep_alive_at: iso("19:49") }, at("19:49")).tail,
+               "kept warm while 1 agent works, next keep-alive due");
+  // null and missing: the line as before
+  assert.equal(line({ next_keep_alive_at: null }).tail, "kept warm while 1 agent works");
+  assert.equal(line({}).tail, "kept warm while 1 agent works");
+  // a time on a session launcher does not word as covered still says it, alone
+  const plain = join(r, [entry("planner", { next_keep_alive_at: iso("19:49") })]);
+  assert.equal(opened(r, mail(), "planner", {}, plain).before[1].tail, "next keep-alive 19:49");
+  // a cold cache keeps its own tail
+  const cold = join(r, [entry("planner", { ...covered, cache: { state: "cold", until: iso("18:40"), estimated: false },
+                                           next_keep_alive_at: iso("18:25") })]);
+  assert.equal(opened(r, mail(), "planner", {}, cold).before[1].tail, COLD_TAIL);
+  // no launcher: comms' own line, with nothing of it
+  assert.equal(opened(r, mail(), "planner").before[0].tail, null);
+});
+
 test("with launcher: an estimated time says est.; a cold one since when; no cache read keeps comms'", () => {
   const r = roster([bound("planner", { cache: { kind: "cold", until: at("18:35") } })]);
   const est = join(r, [entry("planner", { cache: { state: "warm", until: iso("20:04"), estimated: true } })]);

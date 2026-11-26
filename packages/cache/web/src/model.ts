@@ -13,7 +13,8 @@
 // - An opened row's lines, and the page's last lines.
 // - Where launcher or usage is installed, what each says of a row (`launched.ts`,
 //   `cost.ts`): a launch's name, where it runs, its effort and its keep-warm case, the loud
-//   row first; what going cold costs. A piece another module did not give is not drawn.
+//   row first, and its next keep-alive; what going cold costs. A piece another module did
+//   not give is not drawn.
 //
 // Every string here goes into the page as text.
 
@@ -22,7 +23,7 @@ import type { ApiResult } from "/m/ui/client.js";
 import type { ClockRow } from "./band.ts";
 import { costOf, ESTIMATE, IF_COLD_LABEL, ifColdWords, restCost, USAGE_LINK, usageRoute } from "./cost.ts";
 import type { Cost, Rates, UsageFacts } from "./cost.ts";
-import { caseOf, factOf, keepWarmLine, keepWarmOf, keepWarmStateOf, launchOf, leadOf, NO_PRESSES, UNLESS_KEPT,
+import { caseOf, factOf, keepAliveOf, keepWarmLine, keepWarmOf, keepWarmStateOf, launchOf, leadOf, NO_PRESSES, UNLESS_KEPT,
          whereText } from "./launched.ts";
 import type { KeepWarms, Launch, Launched, Presses } from "./launched.ts";
 import { parseClocks } from "./feed.ts";
@@ -613,7 +614,9 @@ export function todayOf(kept: Kept | null, names: NamesAnswer | null): string | 
  * warm, launcher's case wins: `kept warm while …` when covered, a heavy `goes cold at …`
  * with a heavy `waiting on …` in place of the last request when it waits uncovered, and
  * `, est.` where launcher marks the time estimated. Line two ends in what going cold costs,
- * except on a covered row, which is not going cold.
+ * except on a covered row, which is not going cold. A warm row whose launch carries a next
+ * keep-alive ends in it instead (`next keep-alive 19:49`, or `… due`): keep-warm will nudge
+ * it, so it is not going cold either.
  */
 export function rowModel(row: ClockRow, now: number, names: Map<string, NameItem>, today: string | null,
                          open: boolean, clock: Clock = LOCAL, others: Others = NO_OTHERS): RowModel {
@@ -637,11 +640,13 @@ export function rowModel(row: ClockRow, now: number, names: Map<string, NameItem
   const rest = `last request ${whenWord(row.last_request as number, today, clock)}`;
   const cost = rowCost(row, others);
   const tail = cost === null ? null : restCost(cost, isNowCold);
-  const own = { ...base, fact: `${isNowCold ? "cold since" : "warm until"} ${when}${est}`, code: null, rest, tail };
+  const alive = launch === null || isNowCold ? null : keepAliveOf(launch, now, (at) => whenWord(at, today, clock));
+  const own = { ...base, fact: `${isNowCold ? "cold since" : "warm until"} ${when}${est}`, code: null, rest,
+                tail: alive ?? tail };
   const seat = warmCase(row, now, launch);
   if (seat === "ordinary") return own;
   const said = factOf(launch as Launch, (at) => whenWord(at, today, clock));
-  if (seat === "covered") return { ...own, fact: said?.text ?? own.fact, tail: null };
+  if (seat === "covered") return { ...own, fact: said?.text ?? own.fact, tail: alive };
   const fact = launch?.cache?.until != null && said !== null ? said.text : `goes cold at ${when}${est}`;
   const keepWarm = keepWarmOf(launch as Launch, others.desk);
   return { ...own, fact, factHeavy: true, lead: leadOf(launch as Launch), rest: null, keepWarm,
