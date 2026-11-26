@@ -18,6 +18,11 @@
 // the route's answer and the next value of `running` after it, or for `PRESS_WAIT_MS`. A
 // refusal's words are the row's note until the next value.
 //
+// A session keep-warm covers carries when its next keep-alive is due, launcher's
+// `next_keep_alive_at`: line two says `next keep-alive 19:49`, or `next keep-alive due` once
+// that time has come, since the nudge then goes at keep-warm's next ask. Where launcher
+// gives no such time the piece is not drawn.
+//
 // The opened row's `Keep warm` line is launcher's state of the launch: on, with the holds it
 // keeps the cache for; or off, with what keep-warm would do. Without launcher, or with a
 // read failing, nothing is matched and the page draws none of it.
@@ -76,6 +81,8 @@ export interface Launch {
   covered: boolean;
   /** At most `cap` nudges in a row a press would send; null where a press would not cover it. */
   coverable: { cap: number } | null;
+  /** When keep-warm's next nudge is due, as launcher writes it; null where it gives none. */
+  next_keep_alive_at: string | null;
 }
 
 /** The running launches by `<harness>/<session id>`. */
@@ -122,6 +129,7 @@ function parseLaunch(value: unknown): Launch | null {
     waits: parseWaits(value.waits),
     covered: value.covered === true,
     coverable: parseCoverable(value.coverable),
+    next_keep_alive_at: filled(value.next_keep_alive_at),
   };
 }
 
@@ -226,6 +234,22 @@ export function keepWarmTitle(cap: number): string {
 export function keepWarmOf(launch: Launch, desk: boolean): string | null {
   if (!desk || launch.coverable === null || caseOf(launch) !== "uncovered") return null;
   return keepWarmTitle(launch.coverable.cap);
+}
+
+/** How line two's piece of the next keep-alive begins. */
+export const NEXT_KEEP_ALIVE = "next keep-alive";
+/** What it says once the time has come. */
+export const KEEP_ALIVE_DUE = "due";
+
+/**
+ * Line two's piece of the next keep-alive: `next keep-alive <time>`, or `next keep-alive
+ * due` at or after that time (`now`, epoch seconds), since the nudge then goes at
+ * keep-warm's next ask. Null where launcher gives no time. `clock` words a time of day.
+ */
+export function keepAliveOf(launch: Launch, now: number, clock: (at: number) => string): string | null {
+  const at = stampOf(launch.next_keep_alive_at);
+  if (at === null) return null;
+  return `${NEXT_KEEP_ALIVE} ${at <= now ? KEEP_ALIVE_DUE : clock(at)}`;
 }
 
 /** What the opened `Goes cold` line says after the time of a covered session. */
