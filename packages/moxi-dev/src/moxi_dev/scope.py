@@ -622,10 +622,11 @@ def _spawn(argv: list[str], env: Mapping[str, str], started_fd: int) -> Child:
 class Waiter:
     """Waits up to a time for a caller's signal or a ready descriptor.
 
-    The real one catches SIGINT, SIGTERM and SIGHUP while it is open and wakes through
-    `signal.set_wakeup_fd`, so a signal is seen at once."""
+    The real one catches SIGINT, SIGTERM and SIGHUP (each the platform has) while it is
+    open and wakes through `signal.set_wakeup_fd`, so a signal is seen at once."""
 
-    SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    SIGNALS = tuple(getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP")
+                    if hasattr(signal, name))
 
     def __init__(self) -> None:
         self.caught: list[int] = []

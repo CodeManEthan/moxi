@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -18,6 +20,32 @@ from moxi_dev.scope import (Figures, Host, Outer, Sample, ScopeError, System, Wa
                             MIB)
 
 HOST = Host(client=258, manager=258, line_figures=True)
+
+
+# --- a platform with fewer signals -----------------------------------------------------
+
+#: Imports the scope and runs `moxi-dev check --help` and `moxi-dev cap --help` in a
+#: Python whose `signal` has no SIGHUP, as on Windows.
+NO_SIGHUP = """\
+import signal, sys
+del signal.SIGHUP
+import moxi_dev.scope
+assert signal.SIGINT in moxi_dev.scope.Waiter.SIGNALS
+from moxi_dev.cli import main
+for verb in ("check", "cap"):
+    try:
+        code = main([verb, "--help"])
+    except SystemExit as exc:
+        code = exc.code
+    assert code in (0, None), (verb, code)
+"""
+
+
+def test_the_scope_and_the_verbs_import_where_there_is_no_sighup(tmp_path):
+    done = subprocess.run([sys.executable, "-c", NO_SIGHUP], cwd=tmp_path,
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    assert "usage" in done.stdout
 
 
 # --- the figures -----------------------------------------------------------------------
