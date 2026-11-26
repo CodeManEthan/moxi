@@ -796,6 +796,40 @@ def test_sigint_with_an_inner_that_stops_needs_no_stop(tmp_path):
     assert rig.run().signum == signal.SIGINT and rig.systemctl("stop") == []
 
 
+@pytest.mark.parametrize("kind", ["check", "cap"])
+def test_sigint_whose_inner_exits_fast_still_stops_a_scope_with_a_leftover(tmp_path,
+                                                                           kind):
+    rig = Rig(tmp_path, kind=kind, child=Child(code=-signal.SIGINT, alive=3))
+    (rig.cgroup / "cgroup.procs").write_text("77\n")
+    rig.waiter.steps = [None, signal.SIGINT]
+    real = rig.calls.__call__
+    stopped = []
+
+    def calls(argv):
+        if "stop" in argv:
+            stopped.append(argv)
+            (rig.cgroup / "cgroup.procs").write_text("")
+        if "--property=ActiveState" in argv:
+            return 0, ("inactive" if stopped else "active") + "\n"
+        return real(argv)
+
+    rig.outer.system.output = calls
+    outcome = rig.run()
+    assert outcome.signum == signal.SIGINT
+    assert stopped == [["systemctl", "--user", "stop", "--no-block", "u.scope"]]
+    assert outcome.is_gone            # so the outer sweeps, as on every other path
+    assert rig.clock[0] < scope.INT_GRACE_S
+
+
+def test_sigint_before_the_cgroup_is_read_finds_it_by_the_unit(tmp_path):
+    rig = Rig(tmp_path, child=Child(code=-signal.SIGINT, alive=2))
+    (rig.cgroup / "cgroup.procs").write_text("77\n")
+    rig.waiter.steps = [signal.SIGINT]          # caught while waiting for the started byte
+    assert rig.run().signum == signal.SIGINT
+    assert rig.systemctl("stop") == [["systemctl", "--user", "stop", "--no-block",
+                                      "u.scope"]]
+
+
 def test_a_unit_still_holding_processes_after_a_check_is_stopped_with_no_line(tmp_path):
     rig = Rig(tmp_path, child=Child(code=0, alive=1))
     rig.waiter.steps = [rig.stat(10, high=0),

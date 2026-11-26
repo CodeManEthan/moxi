@@ -39,8 +39,9 @@ last `LINE_HOLD_S` samples and the `memory.events` `high` count rose over them, 
 prints why before the kill. Pressure, the `high` count and `memory.current` alone never
 end a run. A run that reaches MemoryMax first is killed by the kernel, and the outer
 reads the unit's `Result` and names it. A caller's SIGINT, SIGTERM or SIGHUP prints the
-scope's memory state at once, queues the scope's stop (at once for SIGTERM and SIGHUP,
-20 s later for SIGINT), and the outer then ends by the same signal.
+scope's memory state at once, queues the scope's stop (at once for SIGTERM and SIGHUP;
+for SIGINT, 20 s later, or as soon as the work ends while the scope still holds a
+process it left), and the outer then ends by the same signal.
 """
 
 from __future__ import annotations
@@ -906,14 +907,24 @@ class Outer:
             count = end_leftovers(group)
             if count:
                 self.tell(ended_line(count, self.what))
-        elif group is not None:
-            try:
-                left = (group / "cgroup.procs").read_text().split()
-            except OSError:
-                left = []
-            if left:
-                self._stop_scope(queued=False)
+        elif group is not None and self._holds_processes():
+            self._stop_scope(queued=False)
         return Outcome(rc, self.field() if self.kind == "cap" else None)
+
+    def _holds_processes(self) -> bool:
+        """Whether the scope's cgroup still lists a process; False where it is gone or
+        can't be found."""
+        group = self.cgroup_dir
+        if group is None:
+            code, said = self.system.systemctl("show", "--property=ControlGroup",
+                                               "--value", self.unit)
+            if code != 0 or not said.strip():
+                return False
+            group = self.system.cgroup_dir(said)
+        try:
+            return bool((group / "cgroup.procs").read_text().split())
+        except OSError:
+            return False
 
     def _stopped(self, child: Child, waiter: Waiter, signum: int) -> Outcome:
         """A caller's signal: say the memory state, stop the scope, end by the signal."""
@@ -923,7 +934,9 @@ class Outer:
             deadline = self.clock() + INT_GRACE_S
             while child.poll() is None and self.clock() < deadline:
                 waiter.wait(min(1.0, max(0.0, deadline - self.clock())))
-            if child.poll() is None:
+            # The work may have ended and left a process in the scope: stop it too, so
+            # the leftover ends and the unit can be seen gone.
+            if child.poll() is None or self._holds_processes():
                 self._stop_scope(queued=True)
         else:
             self._stop_scope(queued=True)
