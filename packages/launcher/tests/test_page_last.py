@@ -215,7 +215,7 @@ def test_a_replay_records_neither_and_the_log_takes_no_new_step(world):
     replayed = stored("r2")
     assert "sources" not in replayed.values and "filled" not in replayed.values
     assert replayed.values["model"] == "opus"
-    assert len(store.STEPS) == 4
+    assert len(store.STEPS) == 5
 
 
 def test_filled_goes_through_the_request_file():

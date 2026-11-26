@@ -5,7 +5,8 @@ the newest sessions, and one session's turns.
     moxi sessions root [--json]
     moxi sessions list [--harness H] [--since TIME] [--folder PATH] [--limit N] [--text]
                        [--json]
-    moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--json]
+    moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all]
+                       [--results] [--json]
 
 `find` prints where the session's records are (a Claude Code transcript, every rollout
 file of a Codex thread, or the OpenCode database that holds the session), or every root it
@@ -39,11 +40,20 @@ not a failure: nothing is printed for it.
 `read` prints part of one session the way sessions' page shows it (`moxi_sessions.view`):
 the last `--turns` turns (5 unless asked, at most 50), or with `--around TIME` the turns
 around that time, or with `--all` the whole session. A tool call prints as its one-line
-summary and a tool result as its size and whether it failed, with every flag: no flag
-prints a tool's input past its summary, or its output. With the secrets module each
-message, tool call line and title is redacted with secrets' `credentials` and `broad` sets
-before it is cut; without it the read prints as written and says so once, on stderr.
-`--json` prints the same rows as one JSON object. Without `--harness`, `read` asks each
+summary and a tool result as its size and whether it failed: no flag prints a tool's input
+past its summary. With the secrets module each message, tool call line and title is
+redacted with secrets' `credentials` and `broad` sets before it is cut; without it the
+read prints as written and says so once, on stderr. `--json` prints the same rows as one
+JSON object.
+
+`--results` also prints each tool result's output below its `Result:` line (and gives
+each tool result row of `--json` its `output`, `output_cut_chars` and `withheld_why`,
+as `moxi_sessions.view` says): redacted the same way, then cut to its first and last
+4,000 characters with a line naming how many were cut between them. A result whose call's
+input names a secret path, or whose call is not among the records read, prints why its
+output is withheld instead. `--results` needs the redaction: without the secrets module
+(or with one that offers no `secret_path`) it refuses, exit 3, naming why and
+`moxi install secrets`. Without `--harness`, `read` asks each
 harness's live root for the session, the way `find` does, and reads the one that holds it;
 only when no live root holds it does it test every harness's archive folders together (one
 wait) and ask them. With `--harness`, it asks that harness's live root, then its archive
@@ -131,9 +141,9 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi sessions") -> i
         "read", help="print part of one session",
         description="Print a session's last turns, the turns around a time, or the whole "
                     "session, the way sessions' page shows them: a tool call as its "
-                    "summary line and a tool result as its size, never a tool's input or "
-                    "output. Redacted with secrets' credentials and broad sets when the "
-                    "secrets module is installed.")
+                    "summary line and a tool result as its size, never a tool's input, "
+                    "and its output only with --results. Redacted with secrets' "
+                    "credentials and broad sets when the secrets module is installed.")
     reader.add_argument("session", metavar="SESSION", help="the session or thread id")
     reader.add_argument("--harness", choices=HARNESSES,
                         help="whose session it is (default: the harness whose root holds "
@@ -145,6 +155,10 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "moxi sessions") -> i
     which.add_argument("--all", action="store_true", help="the whole session")
     reader.add_argument("--turns", type=int, metavar="N",
                         help=f"how many turns (default {TURNS_DEFAULT}, at most {TURNS_MAX})")
+    reader.add_argument("--results", action="store_true",
+                        help="also print each tool result's output, redacted, its first "
+                             "and last 4,000 characters when long (needs the secrets "
+                             "module)")
     reader.add_argument("--json", action="store_true", help="print one JSON object")
 
     args = parser.parse_args(argv)
@@ -391,22 +405,33 @@ def _read(args, prog: str) -> int:
         except ValueError as exc:
             print(f"{prog} read: {exc}", file=sys.stderr)
             return 2
+    redactor = view.redactor() if args.results else None
+    outputs = None
+    if redactor is not None:
+        why = (redactor.reason if redactor.redact is None
+               else "the secrets module offers no secret_path"
+               if redactor.secret_path is None else None)
+        if why is not None:
+            print(f"{prog} read: --results needs the redaction, and there is none: {why}; "
+                  "run moxi install secrets", file=sys.stderr)
+            return 3
+        outputs = view.Outputs(redactor.secret_path)
     harness, source, why, code = _source(args.harness, session, prog)
     if source is None:
         print(why, file=sys.stderr)
         return code
     args.harness = harness
-    redactor = view.redactor()
+    redactor = redactor or view.redactor()
     if redactor.redact is None:
         print(f"{prog} read: not redacted: {redactor.reason}; install the secrets module "
               "to redact what this prints", file=sys.stderr)
     try:
         if args.all:
-            shown = view.whole(source, redactor.redact)
+            shown = view.whole(source, redactor.redact, outputs=outputs)
         elif at is not None:
-            shown = view.around(source, at, turns, redactor.redact)
+            shown = view.around(source, at, turns, redactor.redact, outputs=outputs)
         else:
-            shown = view.last(source, turns, redactor.redact)
+            shown = view.last(source, turns, redactor.redact, outputs=outputs)
         if args.json:
             _read_json(args, session, source, shown, redactor)
         else:

@@ -126,15 +126,21 @@ way), and it adds four commands:
   `--folder` an absolute path. Nothing a person or a model said is printed unless
   `--text` is given; then the newest thing said in each session follows its line, cut at
   300 bytes. A root that can't be listed is named on stderr and the others are listed.
-- `moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--json]`
-  prints part of one session, the way the page below shows a transcript: the last five turns, or
+- `moxi sessions read SESSION [--harness H] [--around TIME] [--turns N] [--all] [--results]
+  [--json]` prints part of one session, the way the page below shows a transcript: the last five turns, or
   `--turns` of them (at most 50); with `--around TIME` (ISO 8601 such as
   `2026-11-06T14:03:22Z`, a time with no zone read as local time, or epoch seconds) the
   turns around that time; with `--all` the whole session. Each line starts with its time
   in UTC, in the form `--around` takes. A message shows as its text, cut at 64 KiB with
   the cut said; a tool call as one line naming the tool and what it was called on, cut at
   160 characters; a tool result as its size and whether it failed. No flag prints more of
-  a tool's input than that line, or any of a tool's output. Without `--harness` it reads
+  a tool's input than that line. `--results` also prints each tool result's output below
+  its `Result:` line, redacted as the messages are and then cut to its first and last
+  4,000 characters, with a line saying how many were cut between them. A result whose
+  call names a secret path (secrets' `secret_path`), or whose call is not among the turns
+  read, says its output is withheld instead. `--results` needs the secrets module and
+  refuses without it (exit 3), naming why and `moxi install secrets`; without the flag
+  no tool output is printed. Without `--harness` it reads
   the session from whichever harness's live root holds it, and asks the archive folders
   only when none does; when more than one harness holds it, it names them and exits 2 for
   `--harness` to choose. With `--harness` it asks that harness's live root, then its
@@ -144,7 +150,10 @@ way), and it adds four commands:
 
 With `--json`, each command prints one JSON object that starts with the shape version.
 `read --json` holds the same rows the page is sent, under `records`, with the header and
-whether earlier or later turns were left out. `list --json` holds the counts (`all`,
+whether earlier or later turns were left out. With `--results`, each tool result row also
+carries `output` (its first and last 4,000 characters put end to end, or null when
+withheld), `output_cut_chars` (how many were cut from between them) and `withheld_why`
+(null, or why the output is withheld). `list --json` holds the counts (`all`,
 `total`, one per harness that was read), the roots that could not be listed and the
 sessions under `rows`; a row's `activity` and `prompt` carry their `text` only with
 `--text`.
@@ -399,9 +408,16 @@ you turn it on, with `guard.transcript_read` (the install asks) or by adding
 
 When it is on, turns refuses, before it runs, an agent's call that names a path under a
 transcript root: Claude Code's Read, Grep and Glob, and a shell command on Claude Code or
-Codex. A shell command is split into simple commands, each judged on its own, and one is
-refused when one of its words is such a path. The refusal points the agent to `moxi
-sessions read <session>`. The roots are each harness's root, the configured one included,
+Codex. turns' shell reader splits a shell command into simple commands, each judged on its
+own, and so are the commands of each substitution in it, a `$(...)` in double quotes or
+in an unquoted heredoc's body included; one is refused when one of its words, or the file
+one of its redirects names, is such a path. Where bash splits an unquoted `${...}`
+default or alternate into words (`cat ${x:- <transcript> }`), each of them is judged as a
+word. A script a command hands a shell is read the
+same way, in that shell's language: a `-c` argument (`bash -lc`, `bash --login -c`,
+`bash -co pipefail`), a heredoc or here-string fed to a shell, literal text `echo` or
+`cat` pipes into one, and `pwsh -Command` and `cmd /c` scripts. The refusal points the
+agent to `moxi sessions read <session>`. The roots are each harness's root, the configured one included,
 and each archive folder. An archive folder is compared by its path as written, with a
 trailing `/`, `//`, `.` and `x/..` folded by the text alone, and is never resolved, so
 judging a call touches no archive folder.
@@ -422,12 +438,16 @@ installed, since then nothing enforces it.
 The guard is a nudge, not a boundary. Its known gaps:
 
 - A relative path after `cd`, a variable, or a path a script builds gets past it.
+- A heredoc's body fed to anything but a shell is not read as commands; only the
+  substitutions of an unquoted one are.
 - A path counts only when it is a transcript root or lies under one, so a search that
   starts above a root passes: `grep -r x ~/.claude`, Grep with the path `~/.claude` and
   the glob `projects/**`, or Glob with the path `~/.claude` and the pattern
   `**/projects/*.jsonl`.
-- A shell's `-c` script is read only when the options before it are short ones:
-  `bash -l -c '...'` and `bash -lc '...'` are read, `bash --login -c '...'` is not.
+- A script is read only where turns' shell reader finds one: a script file, text handed
+  to a program other than a shell (`python -c`, `ssh`), a file or another program's
+  output piped into a shell, and a shell option the reader doesn't know get past it. A
+  script inside a script is read three deep; past that its words are judged as words.
 - A path that reaches an archive folder through a symbolic link passes, since the guard
   compares an archive folder by its written path and never resolves it.
 - OpenCode's root is its database file, so the `opencode.db-wal` and `opencode.db-shm`
@@ -435,8 +455,8 @@ The guard is a nudge, not a boundary. Its known gaps:
 - The doctor's `ok` means the switch is on and turns is installed. It doesn't check that
   turns' guard loader has the guard on, so a loader that misses it without reporting a
   problem still reads `ok`.
-- A word that starts with `/` is read as a path even when it is text, quotes or not: a
-  heredoc line naming a transcript, or `echo '<transcript path>'`, is refused. A quoted
+- A word that starts with `/` is read as a path even when it is text, quotes or not:
+  `echo '<transcript path>'` is refused. A quoted
   sentence that holds such a path is one word that doesn't start with `/`, and passes.
 
 ## The page

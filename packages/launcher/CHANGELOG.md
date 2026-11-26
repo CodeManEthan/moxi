@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- A handoff waits until its seat takes it. A seat's start no longer marks the handoff it
+  points to as picked, so the pointer comes back at every start until the handoff is
+  taken, given to a launch, or a newer one of the key is. The pointer now ends "then run:
+  moxi launcher handoff take <path>". A handoff an older launcher marked as shown stays
+  picked.
+- The handoff lines show after a `/clear` too (a compaction still shows nothing). A
+  launched session keeps its claim across the clear, so it is pointed to its own handoff.
+- New `moxi launcher handoff take [FILE] [--key KEY] [--json]` records a handoff as taken:
+  this session's waiting one with no FILE. It refuses, writing nothing, with no key, with
+  nothing waiting, and for a FILE that is missing, named for another key, or outside the
+  session's handoff folder unless `--key` names its key. A session the launcher didn't
+  start reads the handoff folder of the folder it started in, where turns knows it,
+  so a `cd` after the start doesn't refuse the pointer's own command. The pointer's
+  command quotes a path that needs it.
+- The launch log moves to schema version 5: the `picks` table is rebuilt so a pick may be
+  `taken`, keeping every row.
+- Each entry of `/api/running` and of the `running` topic carries `next_keep_alive_at`:
+  when keep-warm's next nudge is due, `cache.until` less 900 s (`keepwarm.OPEN_S`), the
+  moment keep-warm's window opens, as a UTC time in whole seconds with `Z`. It is set only
+  while `covered` is true and null otherwise, and a time already past means the timer's
+  next ask nudges. It carries no mark, so the phone's gateway sends it as it is.
+  `keepwarm.window_opens(expires_at)` gives that moment for any expiry.
 - Each entry of `/api/running` and of the `running` topic carries `model` and `effort`:
   the values the launch's row records, spelled as the command line spells them, null
   where the launch set none. Both are plain strings with no mark, so the phone's gateway
@@ -85,6 +107,40 @@
   own address wins when it has one, since the address can change at each login.
   Elsewhere the name is absent and nothing changes. A seat already relaunched without it
   gets it back at its next launch or relaunch from a process that has it.
+- The wake guard `launcher.wake` (turns' guard, on where cache runs; `wake_guard.enabled`
+  turns it off) refuses a shell call that would end a process under another live session
+  whose cache reads cold, and names a relaunch command for each such session. It reads
+  the call through turns' shell reader: every command `read_shell` gives, each
+  substitution's text, and each script `shell_scripts` finds handed to a shell (a `-c`,
+  `-Command` or `/c` argument, a heredoc or here-string, literal text piped in), three
+  shells deep at most; what the reader doesn't read goes through. It resolves `kill`,
+  `pkill`, `killall` (macOS's `-m` as a pattern), `pgrep`/`pidof` substitutions,
+  `pgrep | xargs kill`, `taskkill` (`/PID`, `/IM`, and Git Bash's `//PID`, `//IM`) and
+  PowerShell's `Stop-Process` (its `-Id:211` and `-Name:x` forms too, and on the right of
+  an assignment, `$null = Stop-Process ...`); a redirection is no target, and a `${...}`
+  default bash splits gives the words bash gives (`kill ${x:- 211 }`). On Windows a Codex
+  shell call is read as PowerShell, and Git Bash's `kill`, `pkill` and `killall`, which
+  take the MSYS runtime's pids, are let through unjudged. Without turns, or with a turns
+  that has no shell reader, it resolves no target and every call goes through. The
+  `turns` extra asks for moxi-turns 0.2.9 or later.
+- The `stop_at` row (needs usage, turns and slots; unset unless set) sets a hard stop past
+  the relaunch line, a multiple `<k>x` such as `2.5x`. It is taken only on a launch that
+  relaunches itself and is warned at a `warn_at` mark below it. A `stop_at` typed or set
+  by the preset is refused (`stop-mark`, exit 3) off the `<k>x` form, on a launch with no
+  `warn_at` mark (set `warn_at` first), at or below `warn_at`, or on a launch that can't
+  relaunch itself; one from `[defaults]` is left out of a launch that can't relaunch
+  itself, with a warning. `presets check` flags a preset whose `stop_at` has no
+  `warn_at` mark under it or is not past it, and warns of one on a launch it can show
+  can't relaunch itself (`recycle_at_limit` not `relaunch`, a Codex preset, a scratch
+  folder); the handoff folder is left to the launch. A `[defaults]` `stop_at` is left
+  out of what `presets check` tests for a launch it can show can't relaunch itself, as
+  the launch leaves it out, so a Codex preset or a launch with no preset that has no
+  `warn_at` mark is not flagged for it. Beside a `[defaults]`
+  `recycle_at_limit = compact`, which the launch holds `off`, a stop is refused or left
+  out as on any launch that can't relaunch itself, and `presets check` names it the same
+  way. A launch with a stop stamps
+  `MOXI_USAGE_STOP_AT` and `MOXI_USAGE_STOP_HANDOFFS` (its handoff folder) through usage's
+  interface 3, and both join the stamps a launch from inside a session scrubs.
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from

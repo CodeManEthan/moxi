@@ -371,7 +371,8 @@ def test_without_turns_the_row_is_off_and_says_what_needs_it(monkeypatch):
     found = row("turns")
     assert found.state == "off"
     assert found.detail == ("turns is not installed: Claude limits, Codex limits from the "
-                            "app-server, the warn-at mark and the worker ceiling need turns")
+                            "app-server, the warn-at mark, the worker ceiling and the stop "
+                            "need turns")
 
 
 def test_with_turns_the_row_is_ok_and_names_what_usage_registers(monkeypatch):
@@ -381,8 +382,9 @@ def test_with_turns_the_row_is_ok_and_names_what_usage_registers(monkeypatch):
     assert found.detail == (
         "turns is installed; usage registers after-tool (the warn-at mark, with its "
         "floor), gone (forgetting a session's fired marks), usage (Claude limits), "
-        "codex_limits (Codex limits from the app-server), and the guard usage.ceiling "
-        "(the worker ceiling, off until turned on)")
+        "codex_limits (Codex limits from the app-server), and the guards usage.ceiling "
+        "(the worker ceiling, off until turned on) and usage.stop (the stop, on in a "
+        "session whose launch set a stop mark)")
 
 
 # --- marks -------------------------------------------------------------------------------
@@ -401,9 +403,26 @@ def test_the_marks_row_sweeps_old_files_and_counts():
     found = row("marks")
     assert found.state == "ok"
     assert found.detail == ("1 session with fired marks kept; deleted 1 fired-mark file "
-                            "older than 7 days and the ceiling markers of 0 agents older "
-                            "than 7 days")
+                            "and 0 stop latches older than 7 days and the ceiling markers "
+                            "of 0 agents older than 7 days")
     assert sorted(p.name for p in marks_dir.iterdir()) == ["claude-new.json"]
+
+
+def test_the_marks_row_sweeps_old_stop_latches_at_marks_max_age_days():
+    import os
+
+    from moxi_usage import stop
+
+    stop_dir = stop.state_dir()
+    stop_dir.mkdir(parents=True)
+    for name, age in (("claude-old.json", 8), ("claude-old.json.lock", 8),
+                      ("claude-new.json", 1)):
+        (stop_dir / name).write_text('{"schema": 1}')
+        os.utime(stop_dir / name, (NOW - age * 86400, NOW - age * 86400))
+    found = row("marks")
+    assert found.state == "ok"
+    assert "deleted 0 fired-mark files and 1 stop latch older than 7 days" in found.detail
+    assert sorted(p.name for p in stop_dir.iterdir()) == ["claude-new.json"]
 
 
 def test_the_marks_row_with_nothing_kept_is_ok():
@@ -417,9 +436,10 @@ def test_the_announcement_loads_with_its_stores_doctor_and_stamps():
     assert found.ok, found.reason
     assert found.doctor == "moxi_usage.doctor:rows"
     assert set(found.stores) == {"index", "index_lock", "readings", "marks", "ceiling",
-                                 "restart_point", "snapshot"}
+                                 "stop", "restart_point", "snapshot"}
     assert all(entry["private"] and entry["lazy"] for entry in found.stores.values())
-    assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT"}
+    assert set(found.session_env) == {"MOXI_USAGE_WARN_AT", "MOXI_USAGE_CROSSING_AT",
+                                      "MOXI_USAGE_STOP_AT", "MOXI_USAGE_STOP_HANDOFFS"}
     assert set(found.optional) == {"turns", "projects", "ui"}
     assert dict(found.budgets) == {"hook_ms": 2.0}
     assert set(found.timers) == {"measure"}
@@ -435,6 +455,9 @@ def test_the_announcement_loads_with_its_stores_doctor_and_stamps():
     assert where["index_lock"] == store.lock_path()
     assert where["readings"] == readings.path()
     assert where["snapshot"] == models.snapshot_path()
+    from moxi_usage import stop
+
+    assert where["stop"] == stop.state_dir()
 
 
 def test_the_cores_doctor_runs_usages_rows_and_its_stores(capsys):

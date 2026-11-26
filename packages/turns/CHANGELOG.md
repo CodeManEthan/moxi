@@ -1,7 +1,70 @@
 # Changelog
 
+## 0.2.9 (unreleased)
+
+- `command_word_index` reads every option of each wrapper that still runs the command,
+  short and long, as the tool's own manual gives it, with a value in the next word or
+  after `=`: `sudo`'s `-B`/`--bell`, `-N`/`--no-update`, `-T`/`--command-timeout`,
+  `--askpass`, `--background`, `--set-home`, `--reset-timestamp`, `--non-interactive`,
+  `--preserve-groups`, `--stdin`, `--close-from`, `--chdir`, `--host`, `--prompt`,
+  `--role`, `--chroot`, `--type` and `--other-user`; `env`'s `-a`/`--argv0`,
+  `-v`/`--debug`, `-S`/`--split-string`, `--ignore-environment`, `--null`, `--unset`,
+  `--chdir` and the signal options; `nice`'s `--adjustment`; `timeout`'s `-f`, `-p`,
+  `--verbose`, `--signal` and `--kill-after`; `setsid`'s `--ctty`, `--fork` and
+  `--wait`; `stdbuf`'s `--input`, `--output` and `--error`. So `sudo --non-interactive
+  kill 1`, `sudo --bell kill 1` and `env --unset=X kill 1` name `kill`, where the read
+  used to end at the option. `env -S`'s value is read as a value: the command line in
+  it isn't read.
+- In PowerShell, `command_word_index` finds the command word past an assignment: the
+  pipeline on the right of `$x = ...`, `$null = ...`, `[int]$x = ...`, `$a, $b = ...`
+  (`$a , $b` too), the compound forms (`+=`, `-=`, `*=`, `/=`, `%=`, `??=`) and a chain
+  of them is a command. `read_shell` ends a word where an assignment's operator is
+  written against the pipeline (`$x=Stop-Process` gives `$x=` and `Stop-Process`, `$x
+  =Stop-Process` gives `=` and `Stop-Process`), as PowerShell ends a variable there; a
+  quoted or escaped `=`, and one in an argument, stay in their word. `shell_scripts`
+  reads the command as any other (`$x = pwsh -c '...'`).
+
 ## 0.2.8 (unreleased)
 
+- Before a Claude Code session's first guard table, the runner refuses what the last
+  table's guards could have refused, with a reason that says the table didn't load: a
+  subagent's `Agent` or `Task` call when no-nested-agents was on, a `Bash` command the
+  removal guard's pre-filter matches when the removal guard was on, and a bypass-mode
+  permission ask (not `ExitPlanMode` or `EnterPlanMode`) when an ask-step guard was on.
+  It reads the record once, at the first session start; with no usable record it refuses
+  all three. Headless sessions and sessions with a table are unchanged. The runner is
+  version 0.3.3, so `moxi install turns` updates an install at user scope.
+- The Claude endpoint records the guard table it hands the runner, at its first line and
+  at each ready, in `STATE/turns/guards-seen.json`: the time, and whether the table held
+  the removal guard, the no-nested-agents guard and any ask-step guard (all false for an
+  empty table). A table made while turns' config doesn't read is not recorded, so the
+  record before it stands. A launch names the path in `MOXI_TURNS_GUARDS_SEEN` (in `INTERNAL_ENV`
+  and `SESSION_ENV`), setup writes it as `guards_seen` in `endpoint.json`, and the store
+  is declared as `guards-seen`. `moxi_turns.guards.seen` reads and writes it.
+- Setup still replaces its own placed Claude plugin copy whatever it holds, moving the
+  old copy to the core's displaced folder: it passes the placer's new `accept_diff`, since
+  the copy is turns' own and setup runs with no one to ask. Needs `moxi>=0.1.11`.
+- The guard API gains a shell reader, exported from `moxi_turns`: `read_shell(text,
+  dialect="sh")` reads `sh`, `powershell` or `cmd` command text (`DIALECTS`) without
+  running it, as a `ShellText` of `ShellCommand`s (words, redirects, and the operator
+  that ended each, `ended_by`) and `ShellMark`s, everything a strict guard may refuse, in
+  text order, each of a kind in `MARK_KINDS`. A `ShellWord` keeps each substitution's text in `subs`, with a NUL in its
+  `text`, and in `fields` the words bash makes of it when a `${...}` default or alternate
+  outside double quotes (`-`, `:-`, `+`, `:+`, `=`, `:=`) is used and split at its
+  blanks; a `ShellRedirect` keeps its operator, fd and target, and a heredoc's `body` and,
+  when its delimiter is unquoted, the substitutions in it. `command_word_index` finds the
+  word that names what a command runs, past assignments, reserved words and the wrappers
+  `sudo`, `doas`, `env`, `nohup`, `builtin`, `exec`, `command`, `nice`, `timeout`,
+  `setsid` and `stdbuf` with the options each takes. `shell_scripts` gives the text a
+  command hands a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`, `ash`, `pwsh`,
+  `powershell`, `cmd`) to run, as a `ShellScript`: its `-c`, `-Command` or `/c` argument,
+  a heredoc or here-string on it, or literal text piped into it from `echo` or `cat` (its
+  `source`, one of `SCRIPT_SOURCES`), with the indexes of the command's words it was made
+  from (`word_indexes`). A shell is named by its command word's last part across `/` and
+  `\`, with `.exe` dropped, in any case. A POSIX
+  shell's option cluster is all flags, except that each `o` or `O` in it takes the next
+  word (`bash -co pipefail 'cmd'`). What needs
+  evaluating to know what runs is not read. The reader never raises.
 - A `project-facts` component for the Projects page. It reads turns' own `/api/sessions`
   and `sessions` topic, and reports, by session claim, whether each session turns can read
   is in a turn (`live`, `{in_turn, state}`), so the page can mark a running line
@@ -51,6 +114,20 @@
   its own text as the prompt where the note is gone; the first turn's `turn.ended` then
   does not name it. A steer a request carried ends with its turn as before. The runner is version 0.3.1, so
   `moxi install turns` updates an install at user scope.
+- The panel names a Claude Code session by the name typed for it (`--name` or `/rename`),
+  read from Claude Code's own record of the process, ahead of a launch's name and the
+  folder. The sessions route sends it as `typed_name`.
+- The endpoint keeps when the session's last turn ended and sends it in the facts
+  (`Facts.ended_at`), so a session the panel finds already idle says since when.
+- The facts say whether the prompt box was read: `Facts.box` is `draft`, `empty`, or None
+  when it was not read, and the route's `facts.draft` is null then. The panel says
+  `draft not sent` for a draft and `not known` for a box it could not read, which it no
+  longer shows as a draft. The runner sends the box (version 0.3.3), so `moxi install
+  turns` updates an install at user scope.
+- Why a read failed: `Facts.live_error` is `timeout` or `failed` when the live part did
+  not read, and `TurnsError.why` names the kind of each failed read (`client.WHYS`). The
+  panel gives one reason per kind, such as `the session did not answer in time`, in
+  place of one sentence for all.
 
 ## 0.2.7
 

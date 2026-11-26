@@ -11,12 +11,20 @@
 // - The watcher: one total function of the reading, the records and the time.
 // - The names: `/api/names`, asked one request at a time, and when each row is drawn.
 // - An opened row's lines, and the page's last lines.
+// - Where launcher or usage is installed, what each says of a row (`launched.ts`,
+//   `cost.ts`): a launch's name, where it runs, its effort and its keep-warm case, the loud
+//   row first; what going cold costs. A piece another module did not give is not drawn.
 //
 // Every string here goes into the page as text.
 
 import type { ApiResult } from "/m/ui/client.js";
 
 import type { ClockRow } from "./band.ts";
+import { costOf, ESTIMATE, IF_COLD_LABEL, ifColdWords, restCost, USAGE_LINK, usageRoute } from "./cost.ts";
+import type { Cost, Rates, UsageFacts } from "./cost.ts";
+import { caseOf, factOf, keepWarmLine, keepWarmOf, keepWarmStateOf, launchOf, leadOf, NO_PRESSES, UNLESS_KEPT,
+         whereText } from "./launched.ts";
+import type { KeepWarms, Launch, Launched, Presses } from "./launched.ts";
 import { parseClocks } from "./feed.ts";
 import type { Clocks, Failure } from "./feed.ts";
 import { folderWords, harnessWords, isDay, LOCAL, lifetimeWords, newestDay, sessionName, spanWords,
@@ -124,8 +132,9 @@ export interface Sorted {
 }
 
 /** The records at `now`: warm rows soonest cold first, cold rows the most recently cold
- * first, ties in either by session id; the rest by session id. */
-export function sortRows(rows: readonly ClockRow[], now: number): Sorted {
+ * first, ties in either by session id; the rest by session id. A warm row that is `loud`
+ * (a session waiting uncovered) comes before every other warm row. */
+export function sortRows(rows: readonly ClockRow[], now: number, loud: (row: ClockRow) => boolean = () => false): Sorted {
   const warm: ClockRow[] = [];
   const cold: ClockRow[] = [];
   const untimed: ClockRow[] = [];
@@ -134,7 +143,8 @@ export function sortRows(rows: readonly ClockRow[], now: number): Sorted {
     else (isCold(row, now) ? cold : warm).push(row);
   }
   const at = (row: ClockRow): number => coldAt(row) as number;
-  warm.sort((a, b) => at(a) - at(b) || bySession(a, b));
+  const first = (row: ClockRow): number => (loud(row) ? 0 : 1);
+  warm.sort((a, b) => first(a) - first(b) || at(a) - at(b) || bySession(a, b));
   cold.sort((a, b) => at(b) - at(a) || bySession(a, b));
   untimed.sort(bySession);
   return { warm, cold, untimed };
@@ -448,8 +458,22 @@ export interface RowModel {
   fact: string;
   /** The record's code, shown dim after the fact of a row with no clock time. */
   code: string | null;
-  /** Line two: `last request 18:52`; null on a row with no clock time. */
+  /** Line two: `last request 18:52`; null on a row with no clock time, and on a loud one. */
   rest: string | null;
+  /** The fact is heavy: a session waiting with nothing to keep it warm. */
+  factHeavy: boolean;
+  /** Line two's heavy lead on that row: `waiting on 2 agents`. */
+  lead: string | null;
+  /** Line two's last phrase: what going cold costs. */
+  tail: string | null;
+  /** The running launch's request id, which a press of `Keep warm` posts. */
+  request: string | null;
+  /** `Keep warm`'s title where the act is drawn; null where it is not. */
+  keepWarm: string | null;
+  /** A press of `Keep warm` waits for its answer: the act is disabled. */
+  pressing: boolean;
+  /** The dim third line: a refused press's words. */
+  note: string | null;
   open: boolean;
 }
 
@@ -525,7 +549,43 @@ export interface PageInput {
   opened: ReadonlySet<string>;
   /** The rows with no clock time are shown. */
   untimedShown: boolean;
+  /** What launcher and usage say, where they are installed. */
+  others?: Others;
   clock?: Clock;
+}
+
+/** What other modules say of the rows: each null where the module is not installed or its
+ * read gave nothing. */
+export interface Others {
+  launched: Launched | null;
+  keepWarms: KeepWarms | null;
+  /** usage's facts of a record by its key, and the prices; null without usage. */
+  usage: { facts: (key: string) => UsageFacts | null; rates: Rates | null } | null;
+  presses: Presses;
+  /** At the desk, where `Keep warm` may be pressed. */
+  desk: boolean;
+}
+
+/** Nothing from another module. */
+export const NO_OTHERS: Others = { launched: null, keepWarms: null, usage: null, presses: NO_PRESSES, desk: true };
+
+/** The running launch of a row whose cache is warm by its record, where launcher says it
+ * waits: launcher's case is only taken while cache's own clock still counts it warm. */
+function warmCase(row: ClockRow, now: number, launch: Launch | null): "ordinary" | "covered" | "uncovered" {
+  if (launch === null || !timed(row) || isCold(row, now)) return "ordinary";
+  return caseOf(launch);
+}
+
+/** A row is loud: a warm session waiting on others with nothing to keep it warm. */
+export function isLoud(row: ClockRow, now: number, launched: Launched | null): boolean {
+  return warmCase(row, now, launchOf(launched, keyOf(row))) === "uncovered";
+}
+
+/** What going cold costs the record, from usage's facts; null where usage gave none. */
+export function rowCost(row: ClockRow, others: Others): Cost | null {
+  const usage = others.usage;
+  if (usage === null || !timed(row)) return null;
+  return costOf(row.ttl, usage.facts(keyOf(row)), usage.rates);
 }
 
 /** The page's last lines, only while true: the names that could not be read, dim; a read
@@ -547,16 +607,45 @@ export function todayOf(kept: Kept | null, names: NamesAnswer | null): string | 
   return newestDay(kept?.value.today, names?.today);
 }
 
-/** One row as drawn at `now`. */
+/**
+ * One row as drawn at `now`. A row a running launch holds is named by the launch where no
+ * name was typed, and its where is where the launch runs. While cache's clock counts it
+ * warm, launcher's case wins: `kept warm while …` when covered, a heavy `goes cold at …`
+ * with a heavy `waiting on …` in place of the last request when it waits uncovered, and
+ * `, est.` where launcher marks the time estimated. Line two ends in what going cold costs,
+ * except on a covered row, which is not going cold.
+ */
 export function rowModel(row: ClockRow, now: number, names: Map<string, NameItem>, today: string | null,
-                         open: boolean, clock: Clock = LOCAL): RowModel {
-  const { name, where } = sessionName(namingOf(row, names), today, clock);
-  const base = { key: keyOf(row), session: row.session, harness: row.harness, name, where, open };
+                         open: boolean, clock: Clock = LOCAL, others: Others = NO_OTHERS): RowModel {
+  const naming = namingOf(row, names);
+  let { name, where } = sessionName(naming, today, clock);
+  const launch = launchOf(others.launched, keyOf(row));
+  if (launch !== null) {
+    const typed = typeof naming.name === "string" ? naming.name.replace(/\s+/g, " ").trim() : "";
+    name = typed !== "" ? typed : launch.name;
+    where = whereText(launch.where) || null;
+  }
+  const request = launch?.request_id ?? null;
+  const base = { key: keyOf(row), session: row.session, harness: row.harness, name, where, open, factHeavy: false,
+                 lead: null, tail: null, request, keepWarm: null, pressing: false,
+                 note: request !== null && others.desk ? others.presses.notes[request] ?? null : null };
   const cold = coldAt(row);
   if (cold === null) return { ...base, fact: untimedFact(row), code: row.code ?? null, rest: null };
   const when = whenWord(cold, today, clock);
-  return { ...base, fact: isCold(row, now) ? `cold since ${when}` : `warm until ${when}`, code: null,
-           rest: `last request ${whenWord(row.last_request as number, today, clock)}` };
+  const isNowCold = isCold(row, now);
+  const est = launch?.cache?.estimated === true ? ", est." : "";
+  const rest = `last request ${whenWord(row.last_request as number, today, clock)}`;
+  const cost = rowCost(row, others);
+  const tail = cost === null ? null : restCost(cost, isNowCold);
+  const own = { ...base, fact: `${isNowCold ? "cold since" : "warm until"} ${when}${est}`, code: null, rest, tail };
+  const seat = warmCase(row, now, launch);
+  if (seat === "ordinary") return own;
+  const said = factOf(launch as Launch, (at) => whenWord(at, today, clock));
+  if (seat === "covered") return { ...own, fact: said?.text ?? own.fact, tail: null };
+  const fact = launch?.cache?.until != null && said !== null ? said.text : `goes cold at ${when}${est}`;
+  const keepWarm = keepWarmOf(launch as Launch, others.desk);
+  return { ...own, fact, factHeavy: true, lead: leadOf(launch as Launch), rest: null, keepWarm,
+           pressing: keepWarm !== null && request !== null && others.presses.waiting[request] !== undefined };
 }
 
 /**
@@ -571,6 +660,7 @@ export function rowModel(row: ClockRow, now: number, names: Map<string, NameItem
 export function pageModel(input: PageInput): PageModel {
   const { feed, kept, now, names, arrivals, nowMs, opened, untimedShown } = input;
   const clock = input.clock ?? LOCAL;
+  const others = input.others ?? NO_OTHERS;
   const last = lastLines(feed, names);
   const none = { waiting: null, watcher: null, groups: [], untimed: null, sentences: [], foot: null, last };
   if (feed.gone) return { ...none, state: "gone", last: [] };
@@ -583,9 +673,9 @@ export function pageModel(input: PageInput): PageModel {
   const today = todayOf(kept, names.answer);
   const found = watching(reading, rows, broken ? kept.at : now);
   const named = namesBy(names.answer);
-  const sorted = sortRows(rows, now);
+  const sorted = sortRows(rows, now, (row) => isLoud(row, now, others.launched));
   const draw = (list: ClockRow[]): RowModel[] => list.filter((row) => arrivals.shown(keyOf(row), nowMs))
-    .map((row) => rowModel(row, now, named, today, opened.has(keyOf(row)), clock));
+    .map((row) => rowModel(row, now, named, today, opened.has(keyOf(row)), clock, others));
   const groups: GroupModel[] = [];
   if (sorted.warm.length) groups.push({ kind: "warm", label: `${sorted.warm.length} warm`, count: sorted.warm.length, rows: draw(sorted.warm) });
   if (sorted.cold.length) groups.push({ kind: "cold", label: `${sorted.cold.length} cold`, count: sorted.cold.length, rows: draw(sorted.cold) });
@@ -616,11 +706,14 @@ export interface Part {
   dim: boolean;
 }
 
-/** One line of an opened row: its label, its value to the second, and dim tails after. */
+/** One line of an opened row: its label, its value to the second, dim words right after it
+ * (`after`), dim tails each after a middle dot, and a link at the line's right end. */
 export interface OpenedLine {
   label: string;
   value: string;
+  after?: string;
   tails: string[];
+  link?: { module: string; route: string; text: string };
 }
 
 /** `/api/session` for the opened row: out, or answered with a model or null. */
@@ -693,22 +786,44 @@ export class ModelReads {
 
 export const READ_TAIL = "not rewritten since; this reading may be old";
 
-/** A row opened at `now`. */
+export const KEEP_WARM_LABEL = "Keep warm";
+
+/**
+ * A row opened at `now`. Where launcher runs the session, its `Keep warm` line, and on a
+ * covered row `if nothing keeps it warm` after the cold time; where usage says what going
+ * cold costs, the `If cold` line with its `Usage` link. On a session that waits, the
+ * `Keep warm` line comes first; on any other, `If cold` does. The launch's effort follows
+ * the model on the `Session` line.
+ */
 export function openedModel(row: ClockRow, now: number, names: Map<string, NameItem>, home: string | null,
-                            model: ModelRead | null, today: string | null, clock: Clock = LOCAL): OpenedModel {
+                            model: ModelRead | null, today: string | null, clock: Clock = LOCAL,
+                            others: Others = NO_OTHERS): OpenedModel {
   const exact = (at: number): string => whenWord(at, today, clock, { exact: true });
   const lines: OpenedLine[] = [];
   const cold = coldAt(row);
+  const launch = launchOf(others.launched, keyOf(row));
+  const seat = warmCase(row, now, launch);
   if (cold !== null) {
     lines.push({ label: "Last request", value: exact(row.last_request as number), tails: [] });
-    lines.push({ label: isCold(row, now) ? "Went cold" : "Goes cold", value: exact(cold),
-                 tails: [countdown(row, now) as string, lifetimeWords(row.ttl as number)] });
+    const goes: OpenedLine = { label: isCold(row, now) ? "Went cold" : "Goes cold", value: exact(cold),
+                               tails: [countdown(row, now) as string, lifetimeWords(row.ttl as number)] };
+    lines.push(seat === "covered" ? { ...goes, after: UNLESS_KEPT } : goes);
   }
   if (isOld(row, now)) lines.push({ label: "Read", value: exact(row.seen_at), tails: [READ_TAIL] });
+  const warm = launch === null ? null : keepWarmLine(launch, keepWarmStateOf(others.keepWarms, launch));
+  const warmLine: OpenedLine | null = warm === null ? null : { label: KEEP_WARM_LABEL, value: warm.value, tails: warm.tails };
+  const cost = rowCost(row, others);
+  const costLine: OpenedLine | null = cost === null ? null : {
+    label: IF_COLD_LABEL, value: ifColdWords(cost), tails: [ESTIMATE],
+    link: { module: "usage", route: usageRoute(row.harness, row.session), text: USAGE_LINK },
+  };
+  const pair = seat === "ordinary" ? [costLine, warmLine] : [warmLine, costLine];
+  for (const line of pair) if (line !== null) lines.push(line);
   const item = names.get(keyOf(row));
   const session: Part[] = [{ text: harnessWords(row.harness), dim: false }];
   if (model?.state === "reading") session.push({ text: WAITING_LINE, dim: true });
   else if (model?.state === "read" && model.model !== null) session.push({ text: model.model, dim: true });
+  if (launch?.effort) session.push({ text: launch.effort, dim: true });
   if (item !== undefined && item.started !== null) {
     session.push({ text: `started ${whenWord(item.started, today, clock, { named: true })}`, dim: true });
   }

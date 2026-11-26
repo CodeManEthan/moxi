@@ -28,20 +28,18 @@ def test_enable_marks_the_repo_and_registers_the_three_pieces_with_seeds(repo, n
     assert config(repo, "moxi-repo.piece.publishing/message.drop-trailer") == [
         "Claude-Session", "Commit-Check"]
     assert config(repo, "moxi-repo.piece.publishing/message.pass-trailer") == []
-    assert have["publishing/push"]["settings"] == {"main": ["main"],
-                                                    "word-required": ["false"]}
+    assert have["publishing/push"]["settings"] == {"main": ["main"]}
     assert lines[0].startswith(f"marked {repo} public")
 
 
 def test_set_replaces_the_seed_of_its_key_and_leaves_the_others(repo, names):
     flag.enable(repo, sets=["drop-trailer=Claude-Session", "drop-trailer=Co-Authored-By",
-                            "pass-trailer=Commit-Check", "word-required=true"])
+                            "pass-trailer=Commit-Check", "main=trunk"])
     have = flag.registered(str(repo))
     assert have["publishing/message"]["settings"] == {
         "drop-trailer": ["Claude-Session", "Co-Authored-By"],
         "pass-trailer": ["Commit-Check"]}
-    assert have["publishing/push"]["settings"] == {"main": ["main"],
-                                                    "word-required": ["true"]}
+    assert have["publishing/push"]["settings"] == {"main": ["trunk"]}
 
 
 def test_enable_again_without_set_keeps_the_settings_the_repo_has(repo, names):
@@ -62,13 +60,14 @@ def test_after_disable_enable_seeds_again(repo, names):
 
 
 def test_seeds_come_from_publishings_config(repo, names):
+    # A config file that still sets the retired defaults.word_required reads as though
+    # it didn't, and seeds nothing.
     write_config("publishing", '[defaults]\ndrop_trailers = ["X-Trace"]\nmain = "trunk"\n'
                                'word_required = true\n')
     flag.enable(repo)
     have = flag.registered(str(repo))
     assert have["publishing/message"]["settings"] == {"drop-trailer": ["X-Trace"]}
-    assert have["publishing/push"]["settings"] == {"main": ["trunk"],
-                                                    "word-required": ["true"]}
+    assert have["publishing/push"]["settings"] == {"main": ["trunk"]}
 
 
 def test_a_set_key_alone_with_no_value_removes_the_seed(repo, names):
@@ -119,18 +118,28 @@ def test_free_ref_takes_a_pattern_outside_branches_and_release_tags(repo, names,
     assert config(repo, "moxi-repo.piece.publishing/push.free-ref") == [pattern]
 
 
-def test_word_required_takes_true_or_false(repo, names):
+@pytest.mark.parametrize("value", ["true", "false", "maybe"])
+def test_word_required_is_retired_and_takes_only_its_removal(repo, names, value):
     with pytest.raises(flag.Failure) as caught:
-        flag.enable(repo, sets=["word-required=maybe"])
-    assert caught.value.code == 2
+        flag.enable(repo, sets=[f"word-required={value}"])
+    assert caught.value.code == 2 and "the setting is retired" in caught.value.text
+    assert "moxi publishing approval enable PATH --branch PATTERN" in caught.value.text
+    assert flag.registered(str(repo)) == {}
+
+
+def test_word_required_removes_a_leftover(repo, names):
+    flag.enable(repo)
+    git(repo, "config", "moxi-repo.piece.publishing/push.word-required", "true")
+    flag.enable(repo, sets=["word-required="])
+    assert "word-required" not in flag.registered(str(repo))["publishing/push"]["settings"]
 
 
 def test_standing_branch_takes_good_patterns_and_keeps_the_other_keys(repo, names):
-    flag.enable(repo, sets=["word-required=true", "free-ref=refs/notes/*"])
+    flag.enable(repo, sets=["protected=release", "free-ref=refs/notes/*"])
     flag.enable(repo, sets=["standing-branch=ci/*", "standing-branch=ci-full/*"])
     settings = flag.registered(str(repo))["publishing/push"]["settings"]
     assert settings["standing-branch"] == ["ci/*", "ci-full/*"]
-    assert settings["word-required"] == ["true"]
+    assert settings["protected"] == ["release"]
     assert settings["free-ref"] == ["refs/notes/*"]
 
 
@@ -170,7 +179,7 @@ def test_a_call_that_sets_none_of_the_keys_never_fails_on_a_hand_edited_pattern(
                                                                                 names):
     flag.enable(repo)
     git(repo, "config", "--add", "moxi-repo.piece.publishing/push.standing-branch", "ci*")
-    flag.enable(repo, sets=["word-required=true"])
+    flag.enable(repo, sets=["free-ref=refs/notes/*"])
     with pytest.raises(flag.Failure):
         flag.enable(repo, sets=["main=main"])
 
@@ -204,7 +213,11 @@ def test_the_command_prints_and_exits(repo, names, capsys):
 def test_the_help_says_set_replaces(capsys):
     with pytest.raises(SystemExit):
         cli.main(["enable", "--help"])
-    out = " ".join(capsys.readouterr().out.split())
+    import re
+
+    # argparse may wrap a line after a hyphen inside a name.
+    out = re.sub(r"(\w)- (\w)", r"\1-\2", " ".join(capsys.readouterr().out.split()))
     assert "replacing its seed" in out
     assert "A key on pass-trailer is never dropped" in out
     assert "free-ref and standing-branch (the push piece)" in out
+    assert "word-required= removes that retired setting" in out

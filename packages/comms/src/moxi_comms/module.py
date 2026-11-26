@@ -112,4 +112,12 @@ COMPONENTS = {
     "mail": {"script": "mail.js", "title": "Comms", "contract": 1, "place": "block",
              "home": True, "home_as": "row", "order": 200,
              "doc": "Mail waiting for names no session runs, on one line"},
+    "project-facts": {"script": "project-facts.js", "title": "Comms",
+                      "doc": "Which of the opened project's agents no session holds, for the "
+                             "Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }

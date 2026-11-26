@@ -255,5 +255,6 @@ def test_the_piece_refuses_without_the_flag(repo, names):
     git(repo, "config", "--unset", "moxi-publishing.public")
     done = commit(repo, "Subject\n")
     assert done.returncode != 0
-    assert "isn't marked public" in done.stderr
+    assert "marked neither clean nor public" in done.stderr
+    assert "moxi publishing clean-history enable" in done.stderr
     assert "moxi publishing enable" in done.stderr

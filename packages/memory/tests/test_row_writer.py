@@ -63,18 +63,22 @@ def test_ingest_writes_each_rows_writer_from_sessions():
     assert tool == [("tool", "model")]
 
 
-def test_mail_from_other_sessions_and_injected_messages_store_no_row():
+def test_mail_from_other_sessions_stores_rows_named_by_who_delivered_it():
     t = T.ClaudeTranscript(api.root("claude"), session_id="0190b000-0000-7000-8000-00000000c1a1")
     t.user("typed by the person", origin="human")
     t.user("mail from a peer", origin="peer")
     t.user("mail from the coordinator", origin="coordinator")
     t.user("a channel message", origin="channel")
     t.user("a plugin sent this", origin="plugin")
+    t.user("a line the harness composed", isMeta=True)
     t.write()
     run()
     got = writers()
-    assert set(got) == {"typed by the person"}
-    assert {w for _, w in got.values()} == {"person"}
+    assert got == {"typed by the person": ("user", "person"),
+                   "mail from a peer": ("user", "peer"),
+                   "mail from the coordinator": ("user", "coordinator"),
+                   "a channel message": ("user", "channel"),
+                   "a plugin sent this": ("user", "hook")}
 
 
 def test_a_row_read_again_takes_its_writer():

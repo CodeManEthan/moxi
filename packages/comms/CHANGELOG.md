@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A `project-facts` component for the Projects page: the opened project's lead and
+  agents read `not running now` where no session holds the name, while comms' roster
+  can say so.
+- With launcher, an opened agent's `Session` line names the model and effort its launch
+  was started with (`planner · claude · opus · high`). Without launcher, or while its read
+  fails, neither shows.
 - The launched sessions on the page read launcher's `holds` wait as launcher's Home row
   does: a session whose open holds alone keep it waiting reads `waiting on 1 open hold`,
   or `kept warm while 1 hold is open`, and gets `Keep warm` where a press would cover it.
@@ -24,6 +30,11 @@
   comms.db gains the table `scoped` and moves to schema step 5 at its next write; a
   comms older than this one can't open it afterwards, so a downgrade needs the store's
   backup.
+- `api.delivered_messages(text)`, in interface 3, reads a text a session was handed (a
+  delivered digest, with whatever the harness put around it) back into the messages
+  comms framed in it: each one's id, and where it runs in the text, frame line to closing
+  line (`DeliveredMessage`). It reads the text alone; a body's lines, all indented, name
+  no message.
 - comms' config gains `[policy] directors`, by default the plain name `fleet-lead`:
   names that direct every comms session on the box that doesn't opt out, after its
   launch's own directors. Each directs only while its name holds a standing row

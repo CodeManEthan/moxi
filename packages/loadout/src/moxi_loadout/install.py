@@ -13,7 +13,9 @@
 4. plan through the core placer and apply the steps in scope: each `add`, `update` and
    `keep`; each `remove` whose record names a section in scope (a `remove` with no record
    only in an unscoped run in which every section resolved); a refusal `--replace` names,
-   or a link of loadout's own under the folder the last install read; a module skill
+   or a link of loadout's own under the folder the last install read, but never an
+   occupant git tracks, which `--replace` refuses, since untracking it is a commit in
+   that repo; a module skill
    nobody has placed, as its module, then taken over seeded, and so is one whose
    occupant `--replace` names (moved aside as the module), so loadout never holds a
    module's skill the module didn't hand over;
@@ -63,6 +65,7 @@ from pathlib import Path
 from moxi.exit import ERROR, REFUSED, TEMPFAIL
 
 from moxi_loadout import adoption, displaced, entries, homes, ignores, ledger, planner, repo_link
+from moxi_loadout import strays as strays_mod
 from moxi_loadout.manifest import USER, ManifestError, parse_id
 from moxi_loadout.planner import FINE, Row, Scope
 
@@ -71,6 +74,10 @@ INSTALL_WAIT = 60.0
 #: How long install waits for a `moxi install` or `moxi uninstall` that holds the core
 #: lock (it may be installing packages), in seconds.
 CORE_WAIT = 600.0
+#: The line status lists the strays under.
+STRAYS_HEADING = "not loadout's:"
+#: What status's line about a failed automatic reinstall says to run.
+REINSTALL_FIX = "moxi doctor loadout"
 #: How the note naming targets the would-commit check had no time for starts.
 SKIPPED = "the would-commit check skipped"
 
@@ -81,7 +88,11 @@ class Outcome:
     `install`), the `lines` said on the way, `notes`, the exit `code`, and what it `kept`
     under the core's `displaced/` folder (`moxi_loadout.displaced`; none for `status`).
     `status` also gives the generated agent and global files nothing uses (`orphans`, see
-    `orphans`)."""
+    `orphans`), and the git hook's record of a failed reinstall while it stands
+    (`reinstall_failed`, `{at, text}`; None for `install`), whose line its text puts
+    first, and the entries of the harness folders it places into that no placement holds
+    (`strays`, `moxi_loadout.strays`; none for `install`), which its text lists after the
+    rows under `not loadout's`, as information: they change no exit code."""
 
     rows: list[Row] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
@@ -92,17 +103,27 @@ class Outcome:
     global_lines: list[tuple[str, str]] = field(default_factory=list)
     #: Each copy the run kept, `{target, copy, how, id, back}` (`displaced.Keeper`).
     kept: list[dict] = field(default_factory=list)
+    reinstall_failed: dict | None = None
+    strays: list = field(default_factory=list)
 
     def as_json(self) -> dict:
         counts: dict[str, int] = {}
         for r in self.rows:
             counts[r.state] = counts.get(r.state, 0) + 1
         return {"rows": [r.as_json() for r in self.rows], "lines": self.lines,
-                "notes": self.notes, "counts": counts, "exit": self.code, "kept": self.kept}
+                "notes": self.notes, "counts": counts, "exit": self.code, "kept": self.kept,
+                "reinstall_failed": self.reinstall_failed,
+                "strays": [s.as_json() for s in self.strays]}
 
     def text(self) -> list[str]:
-        out = list(self.lines)
+        out = [] if self.reinstall_failed is None else [
+            f"The last automatic reinstall failed ({self.reinstall_failed['at']}): "
+            f"run {REINSTALL_FIX}"]
+        out += self.lines
         out += [r.line() for r in self.rows if r.state != "ok"]
+        if self.strays:
+            out.append(STRAYS_HEADING)
+            out += [f"  {s.path}" for s in self.strays]
         out += [f"note: {n}" for n in self.notes]
         counts: dict[str, int] = {}
         for r in self.rows:
@@ -147,7 +168,8 @@ def status_plan(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.re
     """`status` with the plan and the entries run its outcome came from; the arguments
     are `status`'s."""
     plan, run = _plan(loadout_dir, resolver, git_seconds)
-    notes = _check_placed(plan, ignores.Git() if git is None else git)
+    git = ignores.Git() if git is None else git
+    notes = _check_placed(plan, git)
     for level, line in opencode_reads_claude(plan, run, after=False):
         run.global_lines.append((level, line))
         run.lines.append(line)
@@ -161,10 +183,42 @@ def status_plan(scope: Scope = Scope(), *, loadout_dir=None, resolver=planner.re
     differ = homes.note()
     if differ is not None:
         notes.append(differ)
-    return Status(plan, run, Outcome(rows, list(plan.lines) + run.lines,
-                                     list(dict.fromkeys(plan.notes + run.notes + notes)),
-                                     code, orphans(plan, plan.ledger), run.global_lines),
-                  [src for _, src in sourced])
+    outcome = Outcome(rows, list(plan.lines) + run.lines,
+                      list(dict.fromkeys(plan.notes + run.notes + notes)),
+                      code, orphans(plan, plan.ledger), run.global_lines,
+                      reinstall_failed=reinstall_failed(),
+                      strays=[s for s in strays_mod.find(plan, git)
+                              if _stray_shown(scope, s)])
+    return Status(plan, run, outcome, [src for _, src in sourced])
+
+
+def _stray_shown(scope: Scope, stray) -> bool:
+    """Whether status in `scope` lists `stray`: every one for a whole status, those of
+    the named sections for a scoped one, none for one item's."""
+    if scope.item is not None:
+        return False
+    named = scope.sections()
+    return named is None or stray.section in named
+
+
+def reinstall_failed() -> dict | None:
+    """The git hook's doctor record of a failed or timed-out reinstall, `{at, text}`, or
+    None while there is none (or the records can't be read)."""
+    import json
+
+    from moxi import doctor, paths
+
+    from moxi_loadout.gitpiece import RECORD_KEY, RECORD_MODULE
+
+    path = paths.Layout(RECORD_MODULE).state_dir() / doctor.RECORDS_FILE
+    try:
+        held = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    found = held.get(RECORD_KEY) if isinstance(held, dict) else None
+    if not isinstance(found, dict):
+        return None
+    return {"at": str(found.get("at") or "an unknown time"), "text": str(found.get("text", ""))}
 
 
 def opencode_reads_claude(plan: planner.Plan, run: entries.Run, *,
@@ -334,11 +388,15 @@ _GLOBAL_FORMS = {"global-line": "line", "global-block": "block",
 # -- install --------------------------------------------------------------------------------
 
 def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: bool = False,
+            accept_diff: bool = False, ask: Callable[[str], bool] | None = None,
             loadout_dir=None, resolver=planner.resolve_key,
             say: Callable[[str], object] | None = None) -> Outcome:
     """Adopt, plan the whole manifest, apply the steps in scope. See the module's docs.
     Every line the run says lands in the outcome's `lines`; `say`, when given, is also
-    told the line that it waits for the core lock, as it waits."""
+    told the line that it waits for the core lock, as it waits. A skill or agent occupant
+    `--replace` names that differs from what would be placed is moved aside only with
+    `accept_diff`, or when `ask` (a terminal's yes-or-no question) answers yes; else it
+    is refused, naming `--accept-diff` (`moxi.place`, "Replacing")."""
     if dry_run:
         out = status(scope, loadout_dir=loadout_dir, resolver=resolver)
         out.code = planner.exit_code(r.code for r in out.rows
@@ -358,7 +416,8 @@ def install(scope: Scope = Scope(), *, replace: Iterable[str] = (), dry_run: boo
     try:
         with files.lock(stores.install_lock(), timeout_s=INSTALL_WAIT):
             with _core_lock(files, paths, tell):
-                out = _install(scope, list(replace), loadout_dir, resolver, lines)
+                out = _install(scope, list(replace), loadout_dir, resolver, lines,
+                               accept_diff=accept_diff, ask=ask)
     except files.LockTimeout as exc:
         lines.append(f"{exc}; another install is running, so try again later")
         return Outcome(lines=lines, code=TEMPFAIL)
@@ -401,7 +460,8 @@ def _core_lock(files, paths, say: Callable[[str], object]):
     return held()
 
 
-def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: list[str]) -> Outcome:
+def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: list[str], *,
+             accept_diff: bool = False, ask=None) -> Outcome:
     from moxi import place
 
     from moxi_loadout import manifest as manifest_mod
@@ -465,8 +525,10 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
         if want.state is not None or step is None:
             rows.append(planner.row(want))
             continue
-        in_the_way = step.action == "refuse" and step.cause in ("occupant", "tracked")
-        if want.module and step.action == "add":
+        in_the_way = step.action == "refuse" and step.cause == "occupant"
+        if step.action == "refuse" and step.cause == "tracked" and _claimed(claims, want):
+            rows.append(planner.row(want, reason=_tracked_refusal(step.target)))
+        elif want.module and step.action == "add":
             seeded.append(want)
         elif want.module and in_the_way and _claimed(claims, want):
             # A module skill is placed as its module and handed over, never as loadout.
@@ -484,13 +546,16 @@ def _install(scope: Scope, replace: list[str], loadout_dir, resolver, lines: lis
     removes = [s for s in plan.removals if _remove_in_scope(plan, s, scope)]
     moves = _placer_moves(plan, forced, seeded, removes, keeper, say)
     done = {str(p.path): p for p in place.apply(plain + removes, say=moves)}
-    done.update({str(p.path): p for p in place.apply(forced, replace=True, say=moves)})
+    done.update({str(p.path): p for p in place.apply(forced, replace=True,
+                                                     accept_diff=accept_diff, ask=ask,
+                                                     say=moves)})
     now = {str(p.path) for p in place.status(planner.OWNER)}
 
     seeded_done: dict[str, object] = {}
     for want in seeded:
         result = adoption.place_seeded(want.module, want.item,
-                                       replace=id(want) in replaced, say=moves)
+                                       replace=id(want) in replaced,
+                                       accept_diff=accept_diff, ask=ask, say=moves)
         if result.placed is not None:
             seeded_done[str(result.placed.path)] = result.placed
             say(f"placed skill {want.name} for {want.harness} ({result.placed.path})")
@@ -649,6 +714,18 @@ def _claimed(claims: dict[str, bool], want) -> bool:
 def named_by(text: str, want) -> bool:
     """Whether `--replace text` names `want`, by its target or its id. Reads only."""
     return _claimed({text: False}, want)
+
+
+def _tracked_refusal(target, *, git: ignores.Git | None = None) -> str:
+    """The line refusing a `--replace` of a path git tracks: placing over it would leave a
+    deletion in that repo, so the untracking is the repo's own commit to make."""
+    path = os.fspath(target)
+    try:
+        repo = (git or ignores.Git()).toplevel(os.path.dirname(path))
+    except ignores.GitError:
+        repo = None
+    return (f"{path} is tracked by git in {repo or 'its repo'}; untracking it is a commit "
+            "in that repo")
 
 
 def _moved(step, mine: set[str], old_source) -> bool:

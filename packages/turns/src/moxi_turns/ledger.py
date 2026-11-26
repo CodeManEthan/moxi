@@ -10,6 +10,11 @@ line or a guess from outside the session.
 session run a turn". `version` moves on every change, a new session id included, so a
 delivery that checked one reading and lands at another knows the ledger moved under it.
 
+`ended_at` is the wall-clock time (Unix seconds) the ledger recorded the end of the current
+session's last main-loop turn. It is None before the first end at this session id, and a new
+session id clears it. A turn closed without its end (a missed end, closed at the next
+turn's start) leaves it as it was: that end has no time the ledger saw.
+
 The ledger holds no lock of its own: the endpoint's lock guards it.
 """
 
@@ -28,6 +33,7 @@ class Reading:
     turn_number: int
     turn_open: bool
     turn_id: str | None
+    ended_at: float | None = None
 
 
 @dataclass
@@ -68,10 +74,11 @@ class TurnLedger:
         self.earlier: list[str] = []
         self.turn_number = 0
         self.open: Turn | None = None
+        self.ended_at: float | None = None
 
     def read(self) -> Reading:
         return Reading(self.version, self.session_id, self.turn_number, self.open is not None,
-                       self.open.turn_id if self.open else None)
+                       self.open.turn_id if self.open else None, self.ended_at)
 
     def new_session(self, session_id: str | None) -> bool:
         """The session's id is now `session_id`. True when it changed."""
@@ -90,6 +97,7 @@ class TurnLedger:
             self.earlier.append(self.session_id)
         self.session_id = session_id
         self.turn_number = 0
+        self.ended_at = None
         self.version += 1
         return True
 
@@ -133,6 +141,7 @@ class TurnLedger:
             return None
         turn.outcome = outcome
         self.open = None
+        self.ended_at = time.time()
         self.version += 1
         return turn
 

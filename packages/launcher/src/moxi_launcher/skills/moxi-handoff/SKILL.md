@@ -9,6 +9,12 @@ A handoff is a short file for the next session of the same seat. It says where t
 is and points to everything else by path. When the next session starts, the launcher
 shows it a line naming the handoff, and the session reads it before other work.
 
+## Reading one
+
+When your start shows "Handoff waiting: <path>", read that file before other work, then
+run the command the line names, `moxi launcher handoff take <path>`. Until you take it,
+every start of your seat shows the same handoff again.
+
 ## What goes in it
 
 - Where the work is, in two or three lines.
@@ -46,8 +52,8 @@ Name the file `<YYYY-MM-DD>-<key>.md`, with today's date. The key is, in this or
 - else your launch's project key.
 
 If today's name is taken, add `-2`, then `-3`, and so on, before `.md`. The launcher
-shows your next session the newest handoff of your key it hasn't been shown yet, so a new
-handoff never overwrites an old one.
+shows your next session the newest handoff of your key not yet taken or given to a launch,
+so a new handoff never overwrites an old one.
 
 `moxi launcher handoffs --key <key>` lists the handoffs of a key and which are waiting.
 

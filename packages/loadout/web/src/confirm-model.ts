@@ -20,8 +20,8 @@ export interface ConfirmView {
   question: string;
   /** What happens to what is there now: `Moves …` or `Keeps …`; null with no case. */
   what: string | null;
-  /** The lines shown only when their fact is set: tracked, the rules file, the others,
-   * each skipped path. */
+  /** The lines shown only when their fact is set: the rules file, the others, each
+   * skipped path. */
   notes: string[];
   /** The target in `~` form. */
   target: string | null;
@@ -151,9 +151,6 @@ export function confirmView(rows: readonly ViewRow[], preview: ReplacePreview | 
   else if (form === "generated") what = `Keeps the edited file as it is now in ${until}`;
   else what = `Keeps a copy of ${target ?? "the file"} as it is now in ${until}`;
   const notes: string[] = [];
-  if (preview.tracked) {
-    notes.push("git tracks it, so git will show it deleted, and the row reads would be committed until you commit that.");
-  }
   if (form === "rules") notes.push("The whole file is written again, with every rule in it.");
   if (preview.others > 0) {
     const others = preview.others === 1 ? "1 other change waiting" : `${preview.others} other changes waiting`;

@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from moxi_sessions import api as sessions
-from moxi_usage import api, cli, mark, marks, thresholds
+from moxi_usage import api, cli, mark, marks, stop, thresholds
 
 from conftest import write_config
 
@@ -719,3 +719,114 @@ def test_the_sweep_deletes_old_fired_files_and_old_ceiling_markers():
     swept = marks.sweep(now=NOW, marks_days=7, ceiling_days=7)
     assert (swept.marks, swept.ceiling, swept.kept, swept.problems) == (1, 1, 1, ())
     assert not old.exists() and not (ceiling / "s1").exists() and live.exists()
+
+
+# --- the stop ---------------------------------------------------------------------------
+
+#: A launch's stop stamps: the mark and its handoff folder.
+STOP = {"MOXI_USAGE_STOP_AT": "2.5x", "MOXI_USAGE_STOP_HANDOFFS": "/work/handoffs"}
+
+
+def stop_at(mark_name="2.5x"):
+    """The stop mark's threshold for MODEL in the main population."""
+    found = thresholds.threshold(MODEL, mark_name)
+    assert found.available, found.reason
+    return found.tokens
+
+
+def test_the_stop_is_the_launchs_multiple_stamp_and_off_without_one():
+    assert mark.stop_selected(STOP) == "2.5x"
+    assert mark.stop_selected({"MOXI_USAGE_STOP_AT": "2x"}) == "2x"
+    for value in ("", "off", "soon", "0.5x", "2.125x"):
+        assert mark.stop_selected({"MOXI_USAGE_STOP_AT": value}) is None
+    assert mark.stop_selected({}) is None
+    s = Session()
+    s.context(stop_at() + 10_000)
+    assert mark.on_tool(s.event(env={"MOXI_USAGE_STOP_AT": "soon"})) is None
+    assert stop.latched("claude", SESSION) is None
+
+
+def test_the_stop_fires_once_with_the_stop_text_and_writes_the_latch():
+    s = Session()
+    limit = stop_at()
+    assert limit > 247_653                        # past the 2x mark
+    s.context(limit - 1)
+    assert mark.on_tool(s.event(env=STOP)) is None
+    assert stop.latch_file("claude", SESSION).exists() is False
+    s.context(limit)
+    line = mark.on_tool(s.event(env=STOP))
+    assert line == stop.stop_text(STOP)
+    assert line.startswith("This session is past its stop mark (2.5x). Only wrap-up works "
+                           "now: commit your work with git, write your handoff in "
+                           "/work/handoffs, send what you owe on comms, then run moxi "
+                           "launcher relaunch --self --handoff FILE.")
+    path = stop.latch_file("claude", SESSION)
+    doc = json.loads(path.read_text())
+    assert (doc["mark"], doc["tokens"], doc["threshold"], doc["model"]) == (
+        "2.5x", limit, limit, MODEL)
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    s.context(limit + 5_000)
+    assert mark.on_tool(s.event(env=STOP)) is None
+
+
+def test_a_fired_stop_stays_latched_across_a_compaction_and_a_resume():
+    s = Session()
+    limit = stop_at()
+    s.context(limit + 1_000)
+    assert mark.on_tool(s.event(env=STOP)) == stop.stop_text(STOP)
+    s.t.compaction(pre_tokens=limit + 1_000)
+    s.context(10_000)                             # a reading below: the stop does not re-arm
+    assert mark.on_tool(s.event(env=STOP)) is None
+    s.context(limit + 2_000)
+    assert mark.on_tool(s.event(env=STOP)) is None
+    assert stop.latched("claude", SESSION) is not None
+    mark.gone(SimpleNamespace(event="gone", harness="claude", session_id=SESSION, env={}))
+    assert stop.latch_file("claude", SESSION).exists()   # gone leaves the latch
+    mark.reset()                                  # the resumed session's new endpoint
+    s.context(limit + 3_000)
+    assert mark.on_tool(s.event(env=STOP)) is None
+    assert stop.latched("claude", SESSION)["tokens"] == limit + 1_000
+
+
+def test_the_notice_and_the_stop_on_one_call_are_two_lines():
+    s = Session()
+    env = {**STOP, "MOXI_USAGE_WARN_AT": "1x"}
+    s.context(stop_at())
+    assert mark.on_tool(s.event(env=env)) == "\n".join(
+        [notice(stop_at()), stop.stop_text(STOP)])
+
+
+def test_an_agent_has_no_stop():
+    s = Session()
+    s.context(10_000)
+    s.agent_context(AGENT, stop_at() + 1_000)
+    assert mark.on_tool(s.event(agent_id=AGENT, env=STOP)) is None
+    assert stop.latched("claude", SESSION) is None
+
+
+def test_the_floor_counts_the_stop_until_it_latches():
+    s = Session()
+    s.context(10_000)
+    assert mark.floor(s.event(env=STOP)) == stop_at()
+    both = {**STOP, "MOXI_USAGE_WARN_AT": "1x"}
+    assert mark.floor(s.event(env=both)) == ONE_X
+    s.context(stop_at())
+    mark.on_tool(s.event(env=STOP))
+    assert mark.floor(s.event(env=STOP)) == mark.NEVER
+    mark.reset()                                  # read from the latch on disk
+    assert mark.floor(s.event(env=STOP)) == mark.NEVER
+
+
+def test_a_latch_that_cannot_be_written_fires_nothing_and_is_logged_once(monkeypatch,
+                                                                         caplog):
+    def broken(*args, **kwargs):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(stop, "latch", broken)
+    s = Session()
+    s.context(stop_at())
+    with caplog.at_level(logging.WARNING, logger="moxi.usage"):
+        assert mark.on_tool(s.event(env=STOP)) is None
+        assert mark.on_tool(s.event(env=STOP)) is None
+    assert [r.message for r in caplog.records] == [
+        "the stop latch could not be written; the stop has not fired"]

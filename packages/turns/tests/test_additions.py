@@ -86,7 +86,10 @@ def test_claude_gets_both_plugin_dirs_and_the_endpoint_and_writes_nothing(group,
     runner = (claude_root / "moxi-turns").resolve()
     gate = (claude_root / "moxi-turns-gate").resolve()
     assert got.argv == ("--plugin-dir", str(runner), "--plugin-dir", str(gate))
-    assert got.env == {"MOXI_TURNS_ENDPOINT": str(paths.script("moxi-turns-endpoint"))}
+    from moxi_turns.guards import seen
+
+    assert got.env == {"MOXI_TURNS_ENDPOINT": str(paths.script("moxi-turns-endpoint")),
+                       "MOXI_TURNS_GUARDS_SEEN": str(seen.record_path())}
     assert Path(got.env["MOXI_TURNS_ENDPOINT"]).is_absolute()
     assert got.options == {} and got.notes == ()
     assert _tree(claude_root) == before
@@ -164,7 +167,7 @@ def test_the_hosts_get_no_argv_and_no_options(group, harness, claude_root):
 def test_commands_render_the_grant_in_a_fixed_order(group, harness):
     env = dict(adds(harness, commands=("compact", "exit", "compact")).env)
     if harness == "claude":
-        assert env.pop("MOXI_TURNS_ENDPOINT")
+        assert env.pop("MOXI_TURNS_ENDPOINT") and env.pop("MOXI_TURNS_GUARDS_SEEN")
     assert env =={"MOXI_TURNS_COMMANDS": "exit,compact"}
     assert "MOXI_TURNS_COMMANDS" not in adds(harness, commands=()).env
 

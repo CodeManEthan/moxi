@@ -4,6 +4,10 @@ Each is a plain function, which loopback's base runs off the event loop on its t
 so every store call, contribution and `git init` here runs off the loop. None calls
 `moxi.aio.offload` itself: a worker thread has no loop to offload from.
 
+`/api/questions` lists the questions an add of a project at a typed path would put
+(contribution interface 3), so the Add panel shows them as fields; the add sends the
+answers as `answers` and answers what it didn't put as `asked`.
+
 **Reads** call the read API's functions (`list_projects`, `get`, `kinds`) and the remove
 status read, and never write. The list adds whether each root is a directory now, asked
 through `pagestat`, which never lets a read wait on a hung mount past its bound, the home
@@ -242,6 +246,43 @@ def at_path(call: Any) -> dict[str, Any]:
             "key": key, "taken": taken}
 
 
+def questions(call: Any) -> dict[str, Any]:
+    """`GET /api/questions?path=P[&kind=K][&create=true]`: the questions an add of a
+    project at P of kind K (default: the verb's) would put, with `create` the mint that
+    kind's create makes. A read: the contributions' `questions` do local reads only. A
+    path this server can't take answers none."""
+    typed = expand_tilde(call.query["path"], _home())
+    if typed is None or "\0" in typed or not os.path.isabs(typed):
+        return {"questions": []}
+    found = contributions.load()
+    kind = call.query.get("kind") or DEFAULT_KIND
+    mint = None
+    if call.query.get("create"):
+        try:
+            mint = found.kind(kind, "add").kind.mint
+        except ProjectsError:
+            mint = None
+    fields = {"key": "", "root": os.path.normpath(typed), "kind": kind, "lead": None,
+              "notes_root": None, "mint": mint}
+    put, _warnings = found.questions(fields)
+    return {"questions": [q.as_dict() for q in put]}
+
+
+def _answers(sent: Any) -> dict[tuple[str, str], str] | None:
+    """The body's `answers`, each `module.key=value`, keyed by `(module, key)`; refused
+    when one isn't of that shape."""
+    if sent is None:
+        return None
+    out: dict[tuple[str, str], str] = {}
+    for item in sent:
+        name, eq, value = item.partition("=")
+        module, dot, key = name.rpartition(".")
+        if not eq or not dot or not module or not contributions.QUESTION_KEY.fullmatch(key):
+            raise lb.Refused(f"the answer {item!r} is not module.key=value")
+        out[(module, key)] = value
+    return out
+
+
 def kinds(call: Any) -> dict[str, Any]:
     """`GET /api/kinds`: the kinds and what can't be used, as `moxi projects kinds`."""
     found = api.kinds()
@@ -333,24 +374,27 @@ def _expand_homes(body: dict) -> dict:
 
 def add(call: Any) -> dict[str, Any]:
     """`POST /api/add`: `moxi projects add`, with `create` its `--create`, under the
-    page's `git init` bound. `warnings` holds what the add went ahead without: a
-    contribution skipped since it won't load, and the fix."""
+    page's `git init` bound, and `answers` the answers to its questions. `warnings` holds
+    what the add went ahead without: a contribution skipped since it won't load, or an
+    answer that failed, each with the fix. `asked` names each question no answer was sent
+    for, with the command that sets it later; nothing is turned on for it."""
     found = contributions.load()
     _compare(found)
     body = _expand_homes(call.body)
+    answers = _answers(body.get("answers"))
     try:
         added = acts.add(body["key"], root=body.get("root"),
                          kind=body.get("kind", DEFAULT_KIND), lead=body.get("lead"),
                          notes_root=body.get("notes_root"),
                          create=bool(body.get("create", False)), contributions=found,
-                         git_timeout=GIT_TIMEOUT)
+                         git_timeout=GIT_TIMEOUT, answers=answers)
     except NoGit as exc:
         raise lb.Refused(f"{exc.reason}; fix: {exc.fix}; or, for good, "
                          f"{_no_git_fix(body)}") from None
     except ProjectsError as exc:
         raise _answer(exc) from None
     return {"project": _project(added.project), "notes": list(added.notes),
-            "warnings": list(added.warnings)}
+            "warnings": list(added.warnings), "asked": list(added.asked)}
 
 
 def set_fields(call: Any) -> dict[str, Any]:
@@ -462,5 +506,5 @@ def remove(call: Any) -> dict[str, Any]:
 
 
 __all__ = ["GIT_TIMEOUT", "JOB_CHARS", "KEY_REUSED", "expand_tilde", "projects", "project", "at_path",
-           "kinds", "where", "remove_check", "remove_status", "add", "set_fields",
+           "kinds", "questions", "where", "remove_check", "remove_status", "add", "set_fields",
            "agents_add", "agents_remove", "remove"]

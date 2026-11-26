@@ -15,8 +15,8 @@ where a test once undid its own redirect and wrote into the real state tree:
 * at the end of the run, a real usage directory whose files changed fails the run, which
   catches a subprocess a test started with the redirect gone. It leaves out the stores
   usage declares in its state directory (`STORES` in `moxi_usage.module`: the readings,
-  the index, the marks, the ceiling records, the restart point) and SQLite's files beside
-  them. usage's running parts on this machine write those while a run goes on (a reading
+  the index, the marks, the ceiling records, the stop latches, the restart point) and
+  SQLite's files beside them. usage's running parts on this machine write those while a run goes on (a reading
   every interval, a mark or a ceiling record as a session crosses one), and a change to
   them says nothing about the suite. The audit hook still fails a test that writes one.
 """

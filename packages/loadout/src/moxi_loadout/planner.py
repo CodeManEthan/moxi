@@ -179,6 +179,11 @@ class Plan:
     copies: set[str] | None = None
     #: The harness table's names, in its order: the harnesses every item is planned for.
     harnesses: list[str] = field(default_factory=list)
+    #: Each project section's root, by the section's name, for those that resolved.
+    roots: dict[str, str] = field(default_factory=dict)
+    #: The `project_folders` setting as `settings` reads it: per harness, `{skills,
+    #: agents}`, each relative to a project's root.
+    project_dirs: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def resolved_all(self) -> bool:
@@ -228,7 +233,7 @@ def build(manifest: Manifest, machine, data: dict, *,
 
     rows, skipped = place.harnesses()
     plan = Plan(manifest, Path(machine.source), data, lines=list(skipped),
-                harnesses=list(rows))
+                harnesses=list(rows), project_dirs=dict(machine.project_dirs))
     plan.lines += [r.line for r in manifest.refused]
     every = list(rows)
     user_skills = set(manifest.user.names("skill"))
@@ -246,6 +251,8 @@ def build(manifest: Manifest, machine, data: dict, *,
             root = res.root
         elif section.where == "path":
             root = section.root
+        if root is not None:
+            plan.roots[section.name] = os.fspath(root)
         for kind in PLACED_KINDS:
             for name in section.names(kind):
                 harnesses = manifest.harnesses(kind, name)
@@ -700,8 +707,8 @@ def state_of(want: Want) -> tuple[str, str, int]:
 def places(want: Want, *, forced: bool = False) -> bool:
     """Whether applying `want`'s step places (or keeps) a placement of loadout's at its
     target: an `add`, an `update`, a `keep` (but never a target held in place), and with
-    `forced` a refusal that `--replace` places over. The would-commit check covers
-    these."""
+    `forced` a refusal that `--replace` places over: an occupant git doesn't track. The
+    would-commit check covers these."""
     from moxi.place import HELD_IN_PLACE
 
     step = want.step
@@ -711,20 +718,20 @@ def places(want: Want, *, forced: bool = False) -> bool:
         return True
     if step.action == "keep":
         return step.reason != HELD_IN_PLACE
-    return forced and step.action == "refuse" and step.cause in ("occupant", "tracked")
+    return forced and step.action == "refuse" and step.cause == "occupant"
 
 
 def replaceable(want: Want) -> bool:
     """Whether `install --replace` places over what stands at `want`'s target as the plan
-    reads it: an occupant in the way, one git tracks among them, or a generated file edited
-    by hand. A target git would commit for want of an ignore rule is no such case."""
+    reads it: an occupant in the way that git doesn't track, or a generated file edited by
+    hand. An occupant git tracks is never one (untracking it is a commit in its repo), and
+    nor is a target git would commit for want of an ignore rule."""
     step = want.step
     if step is None or want.state is not None or want.adoptable or want.commit is not None:
         return False
     if want.generated is not None and want.generated[2] == "modified":
         return True
-    return want.kind != GLOBAL_KIND and step.action == "refuse" \
-        and step.cause in ("occupant", "tracked")
+    return want.kind != GLOBAL_KIND and step.action == "refuse" and step.cause == "occupant"
 
 
 def target_of(want: Want) -> str | None:

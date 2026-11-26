@@ -62,7 +62,8 @@ def test_the_shell_hands_on_the_watchers_reading_and_the_date(shell):
 
 def test_the_page_keeps_the_contract(shell, ui_page, ui_component_check):
     write(shell, record(A), record(B, age=4000))
-    check = ui_component_check(ui_page, "cache", "page")
+    # The page reads launcher's and usage's facts, with both installed.
+    check = ui_component_check(ui_page, "cache", "page", allow=("launcher", "usage"))
     assert check.element == "moxi-cache-page"
     assert any(page_kit.CLOCKS in url for url in check.requests), check.requests
 

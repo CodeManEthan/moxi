@@ -1,12 +1,13 @@
-"""What a subagent past its worker ceiling may still do: hand off, commit, return.
+"""What a session past its limit may still do: hand off, commit, return.
 
 `allowed(tool, tool_input, cwd, *, handoff_roots, work_roots, commands, home)` answers
 `(True, "")` for a call that wraps the work up and `(False, reason)` for anything else,
-the reason short and naming the rule that refused it. It is pure: standard library only,
-no subprocess, no file read or write; its only contact with the filesystem is
-`os.path.realpath` on the paths it judges. The ceiling (`moxi_usage.ceiling`) asks it for
+the reason short and naming the rule that refused it. It reaches turns at use, for its
+shell reader, and runs no subprocess and reads or writes no file; its only contact with
+the filesystem is `os.path.realpath` on the paths it judges. The ceiling (`moxi_usage.ceiling`) asks it for
 every call of an agent whose hard marker has latched, after its own return-tool check,
-so the return tools are not handled here.
+so the return tools are not handled here; the stop (`moxi_usage.stop`) asks it for every
+call of a main session whose stop has latched.
 
 Allowed:
 
@@ -19,9 +20,11 @@ Allowed:
   `GIT_FORMS`), as `git [-C <dir>] <form>` or `cd <dir> && git <form>`;
 * `Bash` running a command whose words are, whole, one of `commands`, the word lists
   the user adds (`ceiling.allow_commands`), bare or after `cd <dir> &&`. A listed word
-  written `<...>`, such as `<key>`, stands for one name word there (`NAME_WORD`); every
-  other word must match as written, and a command with a word more or a word fewer is
-  refused.
+  `<handoff>` stands for a path that passes the hand-off file rule below (a `.md` file
+  under one of `handoff_roots`, a relative one read from the directory the command runs
+  in); any other listed word written `<...>`, such as `<key>`, stands for one name word
+  there (`NAME_WORD`); every other word must match as written, and a command with a word
+  more or a word fewer is refused.
 
 Claude's `Bash` and Codex's shell tool, which Codex's hooks also name `Bash`, both carry
 the shell text in `command`. The directory a command runs in is `<dir>` when named, else
@@ -55,18 +58,19 @@ that lexical form). If any reading falls outside, the call is refused. `cd` and 
 pathspecs read `..` lexically, while `git -C` and the file tools follow links, so a path
 must pass both readings.
 
-**The lexer.** The shell text goes through a quote-aware lexer that refuses every control
-operator but the one `&&` after `cd <dir>`, every redirection, `$` and backticks outside
-single quotes, newlines outside quotes, and the expansion characters (glob, brace,
-subshell, and a tilde other than a leading `~/`). This limits work; it is not a security
-boundary: the hooks `git commit` runs still run.
+**The lexer.** The shell text is read by turns' shell reader (`read_shell`), and `lex`
+refuses every control operator but the one `&&` after `cd <dir>`, every redirection, `$`
+and backticks outside single quotes, newlines outside quotes, and the expansion
+characters (glob, brace, subshell, and a tilde other than a leading `~/`). Without turns
+every `Bash` call is refused. This limits work; it is not a security boundary: the hooks
+`git commit` runs still run.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 #: The suffix a hand-off file must have.
 HANDOFF_SUFFIX = ".md"
@@ -76,6 +80,8 @@ READ_LIMIT_MAX = 200
 #: The shape of the one word a `<...>` word of an allowed command stands for: a letter or
 #: digit, then up to 127 letters, digits, dots, underscores and hyphens.
 NAME_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+#: The word of an allowed command that stands for a hand-off file's path.
+HANDOFF_WORD = "<handoff>"
 
 #: git's wrap-up forms, as the words after `git` (and after `-C <dir>`). `add -- <path>...`
 #: and `commit -m <text> [-m <text>]...` take arguments and are matched apart.
@@ -149,7 +155,7 @@ def allowed(tool: object, tool_input: object, cwd: object, *,
             _patch(tool_input.get("command"), cwd, handoff_roots)
         elif tool == "Bash":
             _bash(tool_input.get("command"), cwd, work_roots, commands, home,
-                  start=_workdir(tool_input, cwd, work_roots))
+                  start=_workdir(tool_input, cwd, work_roots), handoff_roots=handoff_roots)
         else:
             raise Refused(f"{tool or 'this tool'} is not a wrap-up operation")
     except Refused as exc:
@@ -310,82 +316,78 @@ def _patch(text: object, cwd: object, roots: object) -> None:
 def lex(text: str, home: str) -> list:
     """Shell text as words and `AND` tokens, refusing everything else the allowlist does.
 
-    Single quotes are literal (newlines, `$` and backticks allowed inside). Double quotes
-    allow newlines and the usual backslash escapes, but no `$` or backtick. Outside quotes
-    only spaces and tabs part words and `&&` is the only operator. A word that starts with
-    an unquoted `~/` is expanded with `home`, as the shell does. Raises `Refused`.
+    turns' shell reader (`read_shell`) reads the text; every mark it gives refuses the
+    call, the first in the text giving the reason, but the one kind allowed: `&&`. So
+    single quotes are literal (newlines, `$` and backticks allowed inside), double quotes
+    allow newlines and the usual backslash escapes but no `$` or backtick, and outside
+    quotes only spaces and tabs part words. An unclosed quote refuses after every other
+    mark, as it stops reading only at the end. A word that starts with an unquoted `~/` is
+    expanded with `home`, as the shell does. Raises `Refused`, also when turns can't be
+    loaded.
     """
+    read = _turns().read_shell(text)
+    unclosed = None
+    for mark in read.marks:
+        pair = text[mark.position:mark.position + 2]
+        if mark.kind == "operator" and pair == "&&":
+            continue
+        if mark.kind == "unclosed":
+            unclosed = unclosed or mark
+            continue
+        raise Refused(_reason(mark.kind, text[mark.position], pair))
+    if unclosed is not None:
+        c = text[unclosed.position]
+        raise Refused(_UNCLOSED.get(c) or _UNQUOTED_REFUSED.get(c, "unterminated quote"))
     tokens: list = []
-    word: list[str] | None = None        # None between words, else its characters so far
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "'":
-            j = text.find("'", i + 1)
-            if j < 0:
-                raise Refused("unterminated single quote")
-            word = (word or []) + list(text[i + 1:j])
-            i = j + 1
-            continue
-        if c == '"':
-            buf: list[str] = []
-            i += 1
-            while True:
-                if i >= n:
-                    raise Refused("unterminated double quote")
-                d = text[i]
-                if d == '"':
-                    i += 1
-                    break
-                if d == "$":
-                    raise Refused("'$' outside single quotes")
-                if d == "`":
-                    raise Refused("backtick outside single quotes")
-                if d == "\\" and i + 1 < n and text[i + 1] in '"\\\n':
-                    if text[i + 1] != "\n":      # a backslash-newline joins lines: dropped
-                        buf.append(text[i + 1])
-                    i += 2
-                    continue
-                buf.append(d)
-                i += 1
-            word = (word or []) + buf
-            continue
-        if c in " \t":
-            if word is not None:
-                tokens.append("".join(word))
-                word = None
-            i += 1
-            continue
-        if c == "\n":
-            raise Refused("newline outside quotes")
-        if c == "&":
-            if text[i:i + 2] == "&>":
-                raise Refused("redirection")
-            if text[i:i + 2] != "&&":
-                raise Refused("control operator '&'")
-            if word is not None:
-                tokens.append("".join(word))
-                word = None
+    for k, command in enumerate(read.commands):
+        if k:
             tokens.append(AND)
-            i += 2
-            continue
-        if c in _UNQUOTED_REFUSED:
-            raise Refused(_UNQUOTED_REFUSED[c])
-        if ord(c) < 32 or c == "\x7f":
-            raise Refused("control character outside quotes")
-        if c == "#" and word is None:
-            raise Refused("comment '#'")
-        if c == "~":
-            if word is not None or text[i + 1:i + 2] != "/":
-                raise Refused("tilde other than a leading '~/'")
-            word = list(home)
-            i += 1
-            continue
-        word = (word or []) + [c]
-        i += 1
-    if word is not None:
-        tokens.append("".join(word))
+        for w in command.words:
+            if text.startswith("~/", w.position):
+                tokens.append(home + w.text[1:])
+            else:
+                tokens.append(w.text)
     return tokens
+
+
+#: The reason an unclosed quote gives, by its opening character.
+_UNCLOSED = {"'": "unterminated single quote", '"': "unterminated double quote"}
+#: The reason each kind of mark gives that the character at it doesn't decide.
+_MARK_REASONS = {
+    "redirect": "redirection",
+    "heredoc": "redirection",
+    "dollar": "'$' outside single quotes",
+    "ansi-c": "'$' outside single quotes",
+    "backtick": "backtick outside single quotes",
+    "backslash": "backslash outside quotes",
+    "tilde": "tilde other than a leading '~/'",
+    "comment": "comment '#'",
+    "control": "control character outside quotes",
+}
+
+
+def _reason(kind: str, c: str, pair: str) -> str:
+    """The reason a mark of `kind` gives, `c` the character at it and `pair` the two
+    characters from it."""
+    if kind == "operator":
+        if c == "\n":
+            return "newline outside quotes"
+        if c == "&":
+            return "control operator '&'"
+        return _UNQUOTED_REFUSED.get(c, f"control operator {pair!r}")
+    if kind in ("glob", "brace", "arithmetic"):
+        return _UNQUOTED_REFUSED.get(c, f"{kind} {c!r}")
+    return _MARK_REASONS.get(kind, kind)
+
+
+def _turns():
+    """turns' API, reached at use: usage installs turns only as an extra."""
+    from moxi import modules
+
+    found = modules.load("turns")
+    if not found.ok or found.api is None:
+        raise Refused(f"the shell reader is off: turns is {found.state}")
+    return found.api
 
 
 def _resolve_dir(d: str, cwd: str, work_roots: object, *, logical: bool,
@@ -456,13 +458,17 @@ def _commands(commands: object) -> list[tuple[str, ...]]:
     return out
 
 
-def _is_command(words: Sequence[str], listed: Sequence[str]) -> bool:
-    """`words` are the allowed command `listed`, word for word, a `<...>` word matching
-    any one name word."""
+def _is_command(words: Sequence[str], listed: Sequence[str], *,
+                is_handoff: Callable[[str], bool] = lambda word: False) -> bool:
+    """`words` are the allowed command `listed`, word for word: `<handoff>` matching a
+    word `is_handoff` accepts, any other `<...>` word any one name word."""
     if len(words) != len(listed):
         return False
     for word, want in zip(words, listed):
-        if len(want) > 2 and want.startswith("<") and want.endswith(">"):
+        if want == HANDOFF_WORD:
+            if not is_handoff(word):
+                return False
+        elif len(want) > 2 and want.startswith("<") and want.endswith(">"):
             if not NAME_WORD.fullmatch(word):
                 return False
         elif word != want:
@@ -471,9 +477,10 @@ def _is_command(words: Sequence[str], listed: Sequence[str]) -> bool:
 
 
 def _bash(command: object, cwd: object, work_roots: object, commands: object,
-          home: str | None, *, start: str | None = None) -> None:
+          home: str | None, *, start: str | None = None, handoff_roots: object = ()) -> None:
     """`start` is the directory the shell starts in when it is not `cwd` (a real path
-    that already passed the directory rule); relative directories join it."""
+    that already passed the directory rule); relative directories join it. A listed
+    command's `<handoff>` word is held to `handoff_roots`."""
     if not isinstance(command, str) or not command.strip():
         raise Refused("no command")
     cwd = _cwd(cwd)
@@ -498,8 +505,17 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
         in_cd = False
     if not rest:
         raise Refused("nothing after '&&'")
+    runs_in = repo if repo is not None else base
+
+    def is_handoff(word: str) -> bool:
+        try:
+            _handoff_file(word, runs_in, handoff_roots)
+        except Refused:
+            return False
+        return True
+
     for listed in _commands(commands):
-        if _is_command(rest, listed):
+        if _is_command(rest, listed, is_handoff=is_handoff):
             return
     if rest[0] != "git":
         raise Refused(f"{rest[0]} is not a wrap-up command")
@@ -519,4 +535,4 @@ def _bash(command: object, cwd: object, work_roots: object, commands: object,
 
 
 __all__ = ["allowed", "lex", "patch_files", "Refused", "AND", "GIT_FORMS",
-           "HANDOFF_SUFFIX", "NAME_WORD", "READ_LIMIT_MAX"]
+           "HANDOFF_SUFFIX", "HANDOFF_WORD", "NAME_WORD", "READ_LIMIT_MAX"]

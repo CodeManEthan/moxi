@@ -33,6 +33,12 @@ MISSING = "missing"
 UNREADABLE = "unreadable"
 #: The name a session with no launch kind is counted under.
 NO_KIND = "none"
+#: What `moxi memory status` and `moxi doctor memory` say of a generation made before
+#: memory kept delivered messages.
+DELIVERED_BEHIND = ("the index was made before memory kept delivered messages (a "
+                    "plugin's such as comms mail, a channel's, a peer's, a coordinator's "
+                    "or a background task's), so it holds none for the sessions it had "
+                    "read; run `moxi memory reindex` once to add them")
 
 
 @dataclass
@@ -57,6 +63,10 @@ class Status:
     - `waiting`: the request waiting for the writer lock (`{"kind", "asked_at"}`, kind
       `walk`, `all`, `rebuild` or `relabel`), or None.
     - `tokenizer`: the generation's tokenizer.
+    - `keeps_delivered`: whether the generation's rows were made under the rule that
+      keeps delivered messages (`index.keeps_delivered`); false for one made before it,
+      which holds none for the sessions it read until `moxi memory reindex`; None with
+      no index read.
     - `sessions`: the session table's rows (`total`), by launch kind (`none` for no
       kind), and by whether they have an identity (`with_identity`,
       `without_identity`). `sessions_unreadable`: why memory's state store, which holds
@@ -87,6 +97,7 @@ class Status:
     rebuild_pid: int | None = None
     waiting: dict[str, object] | None = None
     tokenizer: str | None = None
+    keeps_delivered: bool | None = None
     sessions: dict[str, object] = field(default_factory=dict)
     sessions_unreadable: str | None = None
     dropped: int | None = None
@@ -276,6 +287,7 @@ def status(env: Mapping[str, str] | None = None, *, with_backlog: bool = True) -
             out.first_read = meta.get("first_read") == "1"
             out.filling = filling(conn)
             out.tokenizer = meta.get("tokenizer")
+            out.keeps_delivered = meta.get(index.DELIVERED_KEY) == "1"
             out.dropped = _number(meta.get("dropped"), int)
             out.kept = _number(meta.get("kept"), int)
             from . import roots

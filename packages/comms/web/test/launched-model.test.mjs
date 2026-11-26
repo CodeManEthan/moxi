@@ -23,6 +23,7 @@ const bound = (qualified, fields = {}) =>
 const entry = (request, fields = {}) => ({
   request_id: request, harness: "claude", session_id: null, name: `${request}-session`, identity: null,
   where: { target: "slot", slot: "4", project_key: "atlas-api", folder: "atlas-api" }, started_at: iso("12:00"),
+  model: null, effort: null,
   cache: { state: "warm", until: iso("19:22"), estimated: false }, waits: null, covered: false, coverable: null,
   activity: null, ...fields,
 });
@@ -98,10 +99,27 @@ test("launcher's words: where, the three cases, the fact with est., the lead, th
 test("the Session line's facts: the launch's name and harness, and its transcript's route", () => {
   const one = (fields, rows = [bound("a", { session_id: "s/1" })]) =>
     joinRunning(running([entry("r1", { identity: "a", name: "builder one", ...fields })]), rows, when).get("a").session;
-  assert.deepEqual(one({ session_id: "s/1" }), { name: "builder one", harness: "claude", route: "claude/s%2F1" });
+  assert.deepEqual(one({ session_id: "s/1" }),
+                   { name: "builder one", harness: "claude", model: null, effort: null, route: "claude/s%2F1" });
   // The roster's session id stands in for a launch that sent none.
   assert.equal(one({}).route, "claude/s%2F1");
   assert.equal(one({}, [bound("a", { session_id: null })]).route, null);
+});
+
+test("the model and effort the launch was started with: present, null, or anything else as none", () => {
+  const one = (fields) =>
+    joinRunning(parseRunning(running([entry("r1", { identity: "a", ...fields })])), [bound("a")], when).get("a").session;
+  assert.deepEqual([one({ model: "opus", effort: "high" }).model, one({ model: "opus", effort: "high" }).effort],
+                   ["opus", "high"]);
+  assert.deepEqual([one({}).model, one({}).effort], [null, null]);
+  assert.deepEqual([one({ model: "", effort: "" }).model, one({ model: "", effort: "" }).effort], [null, null]);
+  assert.deepEqual([one({ model: 4, effort: {} }).model, one({ model: 4, effort: {} }).effort], [null, null]);
+  // An entry from before the route carried them reads as none.
+  const { model, effort, ...older } = entry("r1", { identity: "a" });
+  assert.deepEqual(parseRunning(running([older])).sessions[0].model, null);
+  // An entry that joins no row gives the page nothing of it.
+  const unmatched = joinRunning(running([entry("r1", { identity: "b", model: "opus", effort: "high" })]), [bound("a")], when);
+  assert.equal(unmatched.size, 0);
 });
 
 test("Keep warm's words, path and wait are launcher's own", async () => {

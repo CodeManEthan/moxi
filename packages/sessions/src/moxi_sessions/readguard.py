@@ -11,10 +11,19 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
   directory when it names none; `Glob` by its `pattern` joined to its `path` (or the
   working directory), up to the pattern's first wildcard.
 - A shell command (Claude Code's `Bash`, and Codex's shell tool, which Codex's hooks also
-  name `Bash`): each simple command is judged on its own, and one is refused when one of
-  its words is such a path. A word is read as a path when it starts with `/`, `~`, `$HOME`
+  name `Bash`): each simple command, as turns' shell reader (`read_shell`) reads it, is
+  judged on its own, and so are the commands of each substitution in it, a `$(...)` in
+  double quotes included; one is refused when one of its words, or the file one of its
+  redirects names, is such a path. A word is read as a path when it starts with `/`, `~`, `$HOME`
   or `${HOME}`, or holds a `/` (then it is joined to the working directory); a word
-  `--name=value` or `NAME=value` is read by its value too.
+  `--name=value` or `NAME=value` is read by its value too, and each word bash splits a
+  word into where a `${...}` default or alternate outside double quotes is used (turns'
+  `fields`: `cat ${x:- <path> }` names `<path>`) is judged as a word. Each script a command hands a
+  shell, as turns' `shell_scripts` finds it (a `-c`, `-Command` or `/c` argument, or a
+  heredoc, here-string or literal text piped into a shell), is read the same way in that
+  shell's dialect, down to `DEPTH` scripts deep, and the words it was made from are not
+  judged as words; past `DEPTH` they are. Codex's list of words is written back into
+  shell text (`shlex.join`) and read as `sh`.
 
 The roots are each harness's `source.root()`: the configured root when a config key names
 one, and the harness's own rule over the launch's environment. Each archive folder
@@ -32,7 +41,9 @@ command after it on the same line is judged on its own, so `moxi sessions root; 
 process, which is no tool call, so the guard never sees them.
 
 **A nudge, not a boundary.** A relative path after `cd`, a variable, a path built at run
-time, or a script the command runs gets past it.
+time, a heredoc's body fed to anything but a shell, or a script file gets past it. Of a word that holds a
+substitution, the text before its first one is judged, and so is the text after each one,
+up to the next, when that starts with `/`, `~`, `$HOME` or `${HOME}`.
 
 **Fail open.** Every error is logged once per kind and the call is allowed; the guard's
 `on_error` is `allow` as well, so one fault never refuses every read everywhere. sessions'
@@ -47,6 +58,7 @@ from __future__ import annotations
 import _thread
 import os
 import posixpath
+import shlex
 import sysconfig
 from collections.abc import Iterable, Iterator, Mapping
 
@@ -62,9 +74,7 @@ LOGGER = "moxi.sessions"
 #: name, and its shipped default (settings.toml holds the same list).
 ESCAPES_KEY = "guard.transcript_read_escapes"
 ESCAPES = frozenset({"sessions"})
-#: Shell names whose `-c` script is read as commands of its own.
-SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash"})
-#: How deep a `-c` script inside a `-c` script is read.
+#: How many scripts deep a script handed to a shell inside another is read.
 DEPTH = 3
 
 DENY = (
@@ -77,6 +87,8 @@ DENY = (
 
 _GLOB = "*?["
 _HOME_PREFIXES = ("${HOME}", "$HOME", "~")
+#: How the text after one of a word's substitutions starts when it is judged as a path.
+_TAIL_STARTS = ("/", *_HOME_PREFIXES)
 _said: set[str] = set()
 _lock = _thread.allocate_lock()
 _config_cache: list = [None, None]
@@ -296,9 +308,11 @@ def _absolute(p: object) -> str | None:
 def _path(value: object, base: str | None, home: str | None) -> str | None:
     """`value` as an absolute path: `~`, `$HOME` and `${HOME}` taken from `home`, a
     relative one joined to `base`, cut at its first wildcard to the directory before it.
-    None when it can't be placed."""
+    A word's substitution, which turns' shell reader gives as a NUL, cuts it there: the
+    text before it is the path's start. None when it can't be placed."""
     if not isinstance(value, str) or not value:
         return None
+    value = value.partition("\0")[0]
     for prefix in _HOME_PREFIXES:
         if value == prefix or value.startswith(prefix + "/"):
             if home is None:
@@ -322,127 +336,67 @@ def _pathlike(word: str) -> bool:
 
 
 def _values(word: str) -> Iterator[str]:
-    """The word, and the value of a `--name=value` or `NAME=value` word."""
-    yield word
+    """The word, and the value of a `--name=value` or `NAME=value` word; for each that
+    holds a substitution (a NUL), also the text after each one, up to the next, when that
+    starts like an absolute path (`$(x)/<path>`, `$(x)$HOME/<path>`,
+    `$(x)/<path>$(y)`)."""
+    found = [word]
     name, eq, value = word.partition("=")
     if eq and value and "/" not in name:
-        yield value
+        found.append(value)
+    for each in found:
+        yield each
+        for piece in each.split("\0")[1:]:
+            if piece.startswith(_TAIL_STARTS):
+                yield piece
 
 
 # --- the shell --------------------------------------------------------------------------
 
-def commands(command: object, depth: int = DEPTH) -> list[list[str]]:
-    """The simple commands of a shell call's `command`, each as its words with quotes
-    taken off. A list of words is one command. A shell's `-c` script adds its own
-    commands, down to `depth`."""
-    if isinstance(command, (list, tuple)) and all(isinstance(w, str) for w in command):
-        found = [list(command)] if command else []
-    elif isinstance(command, str):
-        found = split(command)
-    else:
+def commands(text: object, dialect: str = "sh", depth: int = DEPTH) -> list[list[str]]:
+    """The simple commands of a shell call's `text`, read in `dialect` by turns' shell
+    reader, each as its words with quotes taken off, then the word each of its
+    redirects names (so `wc -l < f` names `f`), then the words bash splits those into
+    where a `${...}` default is used (each word's `fields`).
+
+    The commands of each substitution in a command, a word's, a redirect's or an unquoted
+    heredoc's body's, follow it, read at the same `depth`: a substitution runs in the same
+    shell. So do the commands of each script the command hands a shell (turns'
+    `shell_scripts`), read in that shell's dialect at `depth - 1` while `depth` is above
+    0; the words such a script was made from are then left out of the command's own. At
+    `depth` 0 a script is not read, and its words stay. A substitution stands in its word
+    as a NUL. A list of words is written back into `sh` text with `shlex.join` and read
+    the same way. Text the reader can't read (nested too deep) gives no commands."""
+    if isinstance(text, (list, tuple)) and all(isinstance(w, str) for w in text):
+        if not text:
+            return []
+        text, dialect = shlex.join(text), "sh"
+    elif not isinstance(text, str):
         return []
-    out = []
-    for words in found:
-        at = _script(words)
-        if at is None or depth <= 0:
-            out.append(words)
-            continue
-        out.append(words[:at] + words[at + 1:])
-        out.extend(commands(words[at], depth - 1))
-    return out
-
-
-def _script(words: list[str]) -> int | None:
-    """Where the `-c` script of a command that runs a shell is among its words, or
-    None."""
-    skip = len(words) - len(_past_assignments(words))
-    if skip >= len(words) or posixpath.basename(words[skip]) not in SHELLS:
-        return None
-    for i in range(skip + 1, len(words)):
-        word = words[i]
-        if not word.startswith("-") or word.startswith("--"):
-            return None
-        if "c" in word[1:] and i + 1 < len(words):
-            return i + 1
-    return None
-
-
-def split(text: str) -> list[list[str]]:
-    """`text` split into simple commands of words, quotes taken off.
-
-    A simple command ends at `;`, `&`, `|`, `(`, `)`, a newline, a backtick and `$(`
-    outside quotes, so a substitution's commands are commands of their own. A word ends at
-    a space, a tab, `<` or `>` (a redirection's file is a word of its command). Single
-    quotes keep everything; double quotes keep everything but a backslash's escape; a
-    backslash outside quotes keeps the next character, and before a newline joins the
-    lines. A `#` that starts a word comments out the rest of its line."""
+    turns = _turns()
+    shell = turns.read_shell(text, dialect=dialect)
+    scripts = turns.shell_scripts(shell, dialect=dialect) if depth > 0 else ()
     out: list[list[str]] = []
-    words: list[str] = []
-    word: list[str] = []
-    started = False
-    i, n = 0, len(text)
-
-    def end_word():
-        nonlocal started
-        if started:
-            words.append("".join(word))
-        word.clear()
-        started = False
-
-    def end_command():
-        end_word()
+    for index, command in enumerate(shell.commands):
+        own = [script for script in scripts if script.command_index == index]
+        taken = {i for script in own for i in script.word_indexes}
+        words = [w.text for i, w in enumerate(command.words) if i not in taken]
+        targets = [r.target for r in command.redirects if r.target is not None]
+        words += [target.text for target in targets]
+        words += [f for i, w in enumerate(command.words) if i not in taken
+                  for f in w.fields]
+        words += [f for target in targets for f in target.fields]
         if words:
-            out.append(list(words))
-        words.clear()
-
-    while i < n:
-        c = text[i]
-        if c == "'":
-            j = text.find("'", i + 1)
-            j = n if j < 0 else j
-            word.append(text[i + 1:j])
-            started = True
-            i = j + 1
-            continue
-        if c == '"':
-            i += 1
-            while i < n and text[i] != '"':
-                if text[i] == "\\" and i + 1 < n and text[i + 1] in '"\\$`\n':
-                    if text[i + 1] != "\n":
-                        word.append(text[i + 1])
-                    i += 2
-                    continue
-                word.append(text[i])
-                i += 1
-            started = True
-            i += 1
-            continue
-        if c == "\\":
-            if i + 1 < n and text[i + 1] != "\n":
-                word.append(text[i + 1])
-                started = True
-            i += 2
-            continue
-        if c == "#" and not started:
-            j = text.find("\n", i)
-            i = n if j < 0 else j
-            continue
-        if c == "$" and text[i + 1:i + 2] == "(":
-            end_command()
-            i += 2
-            continue
-        if c in ";&|()\n`":
-            end_command()
-            i += 1
-            continue
-        if c in " \t\r<>":
-            end_word()
-            i += 1
-            continue
-        word.append(c)
-        started = True
-        i += 1
-    end_command()
+            out.append(words)
+        subs = [sub for w in command.words for sub in w.subs]
+        for r in command.redirects:
+            subs += r.subs
+            if r.target is not None:
+                subs += r.target.subs
+        for sub in subs:
+            out.extend(commands(sub, dialect, depth))
+        for script in own:
+            out.extend(commands(script.text, script.dialect, depth - 1))
     return out
 
 
@@ -473,7 +427,7 @@ def escaped(words: list[str], home: str | None = None,
         return True
     if first.startswith("~/") and home is not None:
         first = home + first[1:]
-    if not first.startswith("/"):
+    if not first.startswith("/") or "\0" in first:
         return False
     own = own_moxi()
     if own is None:
@@ -520,5 +474,5 @@ def _fail(kind: str, message: str) -> None:
 
 
 __all__ = ["NAME", "GUARD_ID", "SWITCH", "CALLS", "ESCAPES_KEY", "ESCAPES", "DENY", "judge",
-           "decide", "transcript_roots", "escapes", "commands", "split", "escaped",
+           "decide", "transcript_roots", "escapes", "commands", "escaped",
            "own_moxi", "reset"]

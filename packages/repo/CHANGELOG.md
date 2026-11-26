@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (unreleased)
 
+- A `project-facts` component for the Projects page: `a git hook broke at <time>` on
+  the row of a project whose repo has a broken hook, and the opened project's `Git
+  hooks` row, linking to the page at `project/<key>`. A refused commit is not counted
+  as broken.
 - `Add a repo` reads the typed folder's plan through moxi-ui's `readLater`, so the page
   root's `data-reading` mark counts that read from the keystroke until the plan is drawn,
   and a test's press waits for it. A user sees no change. The `ui` extra asks for moxi-ui

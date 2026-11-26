@@ -3,9 +3,11 @@ the full install and on the small one: the contract check, the 360 px width chec
 the panel's questions: which sessions are running, by folder and start time; which is
 idle and which working, each since when; the planner's busy subagent on its row, with both
 its agents in the opened row; a session in trouble and one whose live part did not read,
-both problems that keep their state, with the groups in their order; and the reach line,
-which asks for the install and then, in the same page, says the sessions show. Then a
-launch from launcher naming its row and where it runs.
+both problems that keep their state, with the groups in their order, and one that did not
+answer in time, with that reason; a draft not sent, an empty box and a box not read; the
+name typed in Claude Code first, and a session found idle since its last turn's end; and
+the reach line, which asks for the install and then, in the same page, says the sessions
+show. Then a launch from launcher naming its row and where it runs.
 
 The shells, the stand-in `claude` and the helpers are `panel_kit`'s.
 """
@@ -18,8 +20,8 @@ import pytest
 from playwright.sync_api import expect
 
 from moxi_turns.results import Agent
-from panel_kit import (MARKS, T, copied, full, group, harness, key_of, keys, launch, line, on,
-                       open_panel, own_panel, row, rows, small, started)
+from panel_kit import (MARKS, T, copied, full, group, harness, key_of, keys, launch,
+                       line, on, open_panel, own_panel, row, rows, small, started)
 
 pytestmark = MARKS
 
@@ -212,17 +214,116 @@ def test_a_trouble_row_and_an_unread_one_are_problems_that_keep_their_state(
     expect(trouble).to_have_attribute("fact", re.compile(rf"^working since {T}$"))
     unread_row = row(root, key_of(unread))
     expect(unread_row).to_have_attribute("lead", "Moxi can't read its live state")
-    expect(unread_row).to_have_attribute("rest", "its agent list could not be read whole")
+    expect(unread_row).to_have_attribute("rest", "the session gave no answer Moxi could use")
     expect(unread_row).to_have_attribute("fact", "idle")
-    expect(unread_row).to_have_attribute("note", "may hold a draft")
+    # The box was not read either: no draft is told, so line three is empty.
+    expect(unread_row).not_to_have_attribute("note", re.compile("."))
 
     unread_row.locator('[data-action="open"]').click()
     opened = unread_row.locator('[data-part="opened"]')
     expect(line(opened, "now")).to_have_text("idle")
     expect(opened.locator('[data-line="not-known"]')).to_have_text(
         "not known · the list could not be read whole, so some may still run")
-    expect(line(opened, "prompt-box")).to_have_text("may hold a draft")
+    expect(line(opened, "prompt-box")).to_have_text(
+        "not known · it could not be read, so it may hold a draft")
     expect(line(opened, "details")).to_have_text(re.compile(rf" · can't read since {TS}$"))
+
+
+def test_a_session_that_does_not_answer_in_time_says_so(panel, make_endpoint, ui_contexts):
+    # The live part answers a second late, past its bound.
+    late, _ = make_endpoint(harness("/srv/work/late", name="claude", live_delay_s=1.0,
+                                    live_wait_s=0.2), session_id=SID)
+    panel.listed({key_of(late)})
+    _, root = open_panel(panel, ui_contexts, launches=None if panel.is_small else [])
+    late_row = row(root, key_of(late))
+    expect(late_row).to_have_attribute("lead", "Moxi can't read its live state")
+    expect(late_row).to_have_attribute("rest", "the session did not answer in time")
+    expect(group(root, "problem").locator('[data-line="label"]')).to_have_text("1 problem")
+
+
+# --- the prompt box: a draft, an empty box, a box not read ------------------------------------
+
+def test_a_draft_not_sent_is_news_and_a_box_not_read_is_not(panel, make_endpoint, ui_contexts):
+    drafted, _ = make_endpoint(harness("/srv/work/drafted", name="claude", draft=True),
+                               session_id=SID)
+    # The box read throws while the agent list reads: the box is not known.
+    unread, _ = make_endpoint(harness("/srv/work/unread-box", name="claude", box_fails=True),
+                              session_id=SID2)
+    empty, _ = make_endpoint(harness("/srv/work/empty-box", name="claude"), session_id=SID3)
+    data = panel.listed({key_of(drafted), key_of(unread), key_of(empty)})
+    drafts = {entry["key"]: entry["facts"]["draft"] for entry in data["sessions"]}
+    assert drafts == {key_of(drafted): True, key_of(unread): None, key_of(empty): False}
+    _, root = open_panel(panel, ui_contexts, launches=None if panel.is_small else [])
+    expect(group(root, "idle").locator('[data-line="label"]')).to_have_text("3 idle")
+    expect(row(root, key_of(drafted))).to_have_attribute("lead", "draft not sent")
+    # Neither a box not read nor an empty one is news: both rows are one line.
+    for ep in (unread, empty):
+        expect(row(root, key_of(ep))).not_to_have_attribute("lead", re.compile("."))
+    boxes = {drafted: "draft not sent",
+             unread: "not known · it could not be read, so it may hold a draft",
+             empty: "empty"}
+    for ep, said in boxes.items():
+        row(root, key_of(ep)).locator('[data-action="open"]').click()
+        expect(line(row(root, key_of(ep)).locator('[data-part="opened"]'), "prompt-box")).to_have_text(said)
+
+
+# --- the name typed in the harness, and the end of a turn the page did not see ---------------
+
+@pytest.fixture
+def records(panel):
+    """`records(pid, session_id, name, source=...)`: Claude Code's record of process `pid`
+    in the shell's Claude Code folder (`Panel.name_session`), removed when the test ends,
+    since the module's shells outlive it."""
+    written: list[int] = []
+
+    def write(pid: int, session_id: str, name: str, *, source: str | None = "user") -> None:
+        panel.name_session(pid, session_id, name, source=source)
+        written.append(pid)
+
+    yield write
+    for pid in written:
+        (panel.claude_dir / "sessions" / f"{pid}.json").unlink(missing_ok=True)
+
+
+def test_the_name_typed_in_claude_code_names_its_row(panel, records, make_endpoint, ui_contexts):
+    named, named_fake = make_endpoint(harness("/srv/work/kestrel-web", name="claude"),
+                                      session_id=SID)
+    # The same process's record names another session id: not this one's name.
+    other, _ = make_endpoint(harness("/srv/work/parser", name="claude"), session_id=SID2)
+    records(named_fake.pid, SID, "billing-export")
+    panel.listed({key_of(named), key_of(other)})
+    # The name is read in the same pass as the facts, just after them; the page redraws
+    # when it comes.
+    launches = None if panel.is_small else [launch(SID, "kestrel-builder")]
+    _, root = open_panel(panel, ui_contexts, launches=launches)
+    # The typed name comes first, before a launch's; the launch still says where it runs.
+    expect(row(root, key_of(named))).to_have_attribute("name", "billing-export")
+    if not panel.is_small:
+        expect(row(root, key_of(named))).to_have_attribute("where", "slot 2 · kestrel-web")
+    expect(row(root, key_of(other))).to_have_attribute("name", started("parser"))
+
+    # A name Claude Code made from the folder is not one typed: at the next read, which the
+    # turn's start brings, the row goes back to its launch's name, or its folder's.
+    records(named_fake.pid, SID, "kestrel-web", source="derived")
+    named_fake.start_turn()
+    expect(row(root, key_of(named))).to_have_attribute(
+        "name", started("kestrel-web") if panel.is_small else "kestrel-builder")
+
+
+def test_a_session_found_idle_is_idle_since_its_last_turn_ended(panel, make_endpoint, ui_contexts):
+    found, fake = make_endpoint(harness("/srv/work/found-idle"), session_id=SID)
+    # The turn ends before the page server lists the session, so it never sees the end.
+    fake.start_turn()
+    fake.end_turn()
+    kept = found.ledger.ended_at
+    assert kept is not None
+    data = panel.listed({key_of(found)})
+    listed = next(entry for entry in data["sessions"] if entry["key"] == key_of(found))
+    # The endpoint's kept end, not a time the page server stamped.
+    assert listed["facts"]["ended_at"] == kept
+    assert listed["ended_at"] == kept
+    _, root = open_panel(panel, ui_contexts, launches=None if panel.is_small else [])
+    expect(row(root, key_of(found))).to_have_attribute("fact", re.compile(rf"^since {T}$"))
 
 
 # --- the reach line, before and after an install ----------------------------------------------

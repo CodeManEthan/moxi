@@ -2,6 +2,37 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.place.move_aside(path, harness=...)` moves a path no placement holds under the
+  core's `displaced/<stamp>/<harness>/`, the way a replace moves an occupant aside (one
+  rename, or a checked copy across volumes), and returns where it went.
+  `moxi.place.placed_targets()` gives every target any owner's placement holds.
+- `moxi config set MODULE KEY` and `unset` refuse with exit 3, writing nothing, when the
+  key is the switch of one of the module's timers, the change would turn it on, and an
+  agent's session started the run (`moxi.terminal.agent()`). Turning one off is never
+  refused. `moxi.units` gains `switched_timers(module, key)`, `timer_turned_on(module,
+  key, op, value)` and the refusal's words, `TIMER_ON_REFUSED`.
+- The skill placer (`moxi.place.apply`) compares an occupant with what it would place
+  before a replace moves it aside: a file by its bytes, a folder by its files' names and
+  bytes, a link by where it points. Equal, it replaces with no question. Different, it
+  replaces only with `accept_diff=True` or when `ask`, a new yes-or-no callback for a run
+  at a terminal, answers yes to a question naming what differs; otherwise it refuses
+  that occupant, naming `--accept-diff`. `moxi install` gains `--accept-diff` and asks at
+  a terminal. A caller that passed `replace=True` and wants today's replace of any
+  occupant passes `accept_diff=True` too; it needs `moxi>=0.1.11`.
+- A replace moves the occupant with one rename. Across volumes or filesystems it copies
+  it whole, checks the copy by hash, then removes the original; any other failure (a
+  file Windows holds locked) fails the move and places nothing. When placing after the
+  move fails, the placer removes what it wrote and moves the occupant back, and a move
+  back that fails names where the occupant is kept. A copy across volumes whose removal
+  of the original fails partway raises `moxi.place.PartlyMoved` (an `OSError` with
+  `path` and `copy`), whose words say what is left at the path may be only part of it
+  and where the whole copy is; the placer's line says so too.
+- New `moxi.terminal.agent(view=None, run=None)`: the agent test. It names the harness
+  (`claude`, `codex` or `opencode`) whose session started the run, or None, by the
+  terminal walk's agent signs: a harness's program above the run, Claude Code's or Codex's
+  Linux sandbox, or Claude Code's tool mark. Unlike the walk it climbs past a Moxi
+  program, a unit and the start mark, so a session a Moxi launcher started is still an
+  agent's. Where the walk can't go on, it names none. A module needs `moxi>=0.1.11`.
 - `moxi config` reaches a table a module keeps in a file of its own. A module names it in
   its announcement's new `CONFIG_TABLES` (`{name: "package.module:NAME"}`; `moxi modules
   --json` lists it as `config_tables`), and the hook it names lists the table's rows and

@@ -10,6 +10,8 @@ the user added.
 
 import os
 
+import pytest
+
 from moxi_usage.allowlist import allowed, patch_files
 
 COMMANDS = (("make", "handoff"), ("moxi", "repo", "rules"),
@@ -267,6 +269,16 @@ def table(p):
         ("cat a source file", "cat %s/hooks/x.py" % r, 'cat is not a wrap-up command'),
         ("bash -c", "bash -c 'git status --short'", 'bash is not a wrap-up command'),
         ("empty command", "   ", 'no command'),
+        # One row per kind of text the shell reader doesn't read: each is refused here
+        # before anything would need it read.
+        ("a value run as a command", "k=kill; $k 211", "control operator ';'"),
+        ("escapes a program processes", "printf 'kill 211\\n' | sh", "control operator '|'"),
+        ("a string run as code", "eval 'kill 211'", 'eval is not a wrap-up command'),
+        ("cmd's control words", "cmd /c start /b taskkill /PID 211", 'cmd is not a wrap-up command'),
+        ("an option no table names", "env -S 'kill 211'", 'env is not a wrap-up command'),
+        ("a program no table names", "ssh host kill 211", 'ssh is not a wrap-up command'),
+        ("text from outside the command", "cat pids.txt | sh", "control operator '|'"),
+        ("$(( read as arithmetic", "echo $((true); (kill 211))", "'$' outside single quotes"),
     ]:
         ok, reason = bash(cmd)
         check("bash refused: %s (reason: %s)" % (label, why), (ok, why in reason), (False, True), reason)
@@ -538,3 +550,69 @@ def test_a_patch_path_loses_only_unicode_white_space_at_its_ends():
             "*** Add File: notes/2025\\u\n+x\n"
             "*** End Patch\u3000\n")
     assert patch_files(text) == ["notes/a.conf", "notes/2025\\u"]
+
+
+#: A command whose last word is a hand-off file's path.
+RELAUNCH = ("moxi", "launcher", "relaunch", "--self", "--handoff", "<handoff>")
+
+
+def relaunch(p, command, *, cwd=None, roots=None):
+    return allowed("Bash", {"command": command}, cwd or p["CWD"],
+                   handoff_roots=[p["NOTES"]] if roots is None else roots,
+                   work_roots=[p["WORK"]], commands=(RELAUNCH,), home=p["HOME"])
+
+
+@pytest.mark.parametrize("path", [
+    "{REPORT}", "~/notes/designs/r/build/build-report.md",
+    "../../notes/designs/r/build/build-report.md",          # relative to the cwd
+    "{NOTES}/dlink/build-report.md",                         # a link that stays inside
+])
+def test_the_handoff_word_takes_a_markdown_file_under_a_handoff_root(tmp_path, path):
+    p = build_tree(tmp_path)
+    command = "moxi launcher relaunch --self --handoff " + path.format(**p)
+    assert relaunch(p, command) == (True, "")
+
+
+@pytest.mark.parametrize("path", [
+    "{ELSE}/outside.md",                     # outside every hand-off root
+    "{NOTES}/x.py",                          # not Markdown
+    "{NOTES}/link.md",                       # a .md link that leads outside the root
+    "{NOTES}/src.md",                        # a .md name that leads to source
+    "{NOTES}/uplink/a.md",                   # a directory link out of the root
+    "{NOTES}/../elsewhere/outside.md",       # `..` out of the root
+    "build-report.md",                       # relative, so read from the cwd: outside
+    "<handoff>",                             # the word itself is no path
+])
+def test_the_handoff_word_refuses_any_other_path(tmp_path, path):
+    p = build_tree(tmp_path)
+    command = "moxi launcher relaunch --self --handoff " + path.format(**p)
+    ok, reason = relaunch(p, command)
+    assert not ok and reason
+
+
+def test_a_relative_handoff_word_is_read_from_where_cd_moves(tmp_path):
+    p = build_tree(tmp_path)
+    notes_dir = os.path.dirname(p["REPORT"])
+    inside = relaunch(p, f"cd {p['REPO']} && moxi launcher relaunch --self --handoff "
+                         f"{os.path.relpath(p['REPORT'], p['REPO'])}")
+    assert inside == (True, "")
+    # From the cwd the same relative path leads elsewhere.
+    ok, _reason = relaunch(p, "moxi launcher relaunch --self --handoff "
+                              f"{os.path.relpath(p['REPORT'], p['REPO'])}")
+    assert not ok
+    assert relaunch(p, "moxi launcher relaunch --self --handoff build-report.md",
+                    cwd=notes_dir) == (True, "")
+
+
+def test_the_handoff_word_needs_a_root_and_stands_for_one_word(tmp_path):
+    p = build_tree(tmp_path)
+    assert not relaunch(p, f"moxi launcher relaunch --self --handoff {p['REPORT']}",
+                        roots=[])[0]
+    assert not relaunch(p, "moxi launcher relaunch --self --handoff")[0]
+    assert not relaunch(p, f"moxi launcher relaunch --self --handoff {p['REPORT']} "
+                           f"{p['REPORT']}")[0]
+    assert not relaunch(p, f"moxi launcher relaunch --handoff {p['REPORT']}")[0]
+    # Any other `<...>` word still stands for one name word, and takes no path.
+    other = allowed("Bash", {"command": f"make trailers {p['REPORT']}"}, p["CWD"],
+                    handoff_roots=[p["NOTES"]], commands=COMMANDS, home=p["HOME"])
+    assert not other[0]

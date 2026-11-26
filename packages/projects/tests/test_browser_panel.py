@@ -3,7 +3,8 @@ Add panel opened by `Add a project`, at the window's right edge with the column 
 aside; a folder typed with `~` and in full, what is there said under the field (a git
 repository, nothing yet with the box that makes it, a project's root, a folder inside
 one), an answer for a value the field no longer holds dropped, the name filled from the
-folder and typed over, `More`'s kind, lead and notes folder, and the add through to the
+folder and typed over, `More`'s kind, lead and notes folder, the questions another module
+puts shown as fields and their answers sent with the add, and the add through to the
 stored project. The Edit panel opened by the foot's `Edit`: an agent taken off and the
 lead moved onto it, sent in the order that keeps the lead rule; a save refused part way,
 which says what was saved and sends only the rest next time; and its close back to the
@@ -286,6 +287,38 @@ def test_more_holds_the_notes_root_where_notes_is_installed(fixture_shell, fixtu
         found = saved(fixture_shell, "wren-notes")
         assert found is not None and found["root"] == str(where), found
         assert found["notes_root"] == str(kit.home(fixture_shell) / "notes" / "code" / "wren-notes"), found
+    finally:
+        kit.seed(fixture_shell)
+        shutil.rmtree(where, ignore_errors=True)
+
+
+def test_the_questions_show_as_fields_set_to_their_suggestions_and_the_add_sends_them(
+        fixture_shell, fixture_page):
+    where = kit.home(fixture_shell) / "code" / "wren-asks"
+    where.mkdir(parents=True, exist_ok=True)
+    kit.asks(fixture_shell)
+    try:
+        aside = add_panel(fixture_page)
+        posts = posts_to(fixture_page, "api/add")
+        aside.get_by_label("Folder", exact=True).fill("~/code/wren-asks")
+        tidy = aside.get_by_label("Keep this folder tidy?", exact=True)
+        expect(tidy).to_have_value("yes")
+        shelf = aside.get_by_label("Which shelf?", exact=True)
+        expect(shelf).to_have_value("")
+        tidy.select_option("no")
+        expect(shelf).to_have_count(0)
+        tidy.select_option("yes")
+        aside.get_by_label("Which shelf?", exact=True).fill("top")
+        aside.get_by_role("button", name="Add project").click()
+        said = aside.locator('[data-line="said"]')
+        expect(said).to_have_attribute("data-outcome", "done")
+        expect(said).to_contain_text("fixture: kept where = top")
+        assert sent(posts) == [("add", {"key": "wren-asks", "root": "~/code/wren-asks",
+                                        "kind": "project",
+                                        "answers": ["fixture.tidy=yes", "fixture.where=top"]})]
+        assert kit.answers(fixture_shell) == [["wren-asks", "tidy", "yes"],
+                                              ["wren-asks", "where", "top"]]
+        expect(aside.get_by_label("Keep this folder tidy?", exact=True)).to_have_count(0)
     finally:
         kit.seed(fixture_shell)
         shutil.rmtree(where, ignore_errors=True)

@@ -128,6 +128,26 @@ def test_a_killed_rebuild_is_a_warn_on_the_index_row_until_a_rebuild_finishes():
     assert row.state == "ok" and "did not finish" not in row.detail
 
 
+def test_the_index_row_names_the_reindex_for_a_generation_made_before_delivered_rows():
+    from moxi_memory import index
+
+    ingest_one()
+    row = by_name()["index"]
+    assert row.state == "ok" and "delivered messages" not in row.detail
+    with index.writer() as w:
+        conn = w.connect()
+        try:
+            with conn:
+                conn.execute("DELETE FROM meta WHERE key = ?", (index.DELIVERED_KEY,))
+        finally:
+            conn.close()
+    row = by_name()["index"]
+    assert "made before memory kept delivered messages" in row.detail
+    assert "moxi memory reindex" in row.detail
+    ingest.run("rebuild", launcher=links.Link(links.NONE), then=lambda args: None)
+    assert "delivered messages" not in by_name()["index"].detail
+
+
 def test_the_index_row_shows_the_redact_version_and_warns_while_it_is_below_secrets():
     from moxi_memory import index
 

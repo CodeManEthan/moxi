@@ -187,11 +187,11 @@ def no_repo(site):
     return site
 
 
-def git(cwd, *args) -> str:
+def git(cwd, *args, check: bool = True) -> str:
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("GIT_") or k in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")}
     return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True,
-                          check=True, env=env).stdout.strip()
+                          check=check, env=env).stdout.strip()
 
 
 def commit(root, path: str, text: str = "x\n", message: str = "change") -> str:
@@ -452,6 +452,99 @@ def test_a_merge_that_changes_the_loadout_dir_runs_the_install(tree, installs):
 
 @pytest.mark.slow
 @pytest.mark.touches(*GLOBS)
+def test_a_commit_on_another_branch_prints_the_line_and_installs_nothing(tree, installs):
+    main = gitpiece.main_branch(repo_link.api()[0], str(tree))
+    git(tree, "checkout", "-q", "-b", "side")
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    outcome = gitpiece.run(Ctx("post-commit", tree))
+    assert outcome.kind == "notice"
+    assert outcome.lines == (f"loadout: not reinstalled: side is not {main}; "
+                             f"it reinstalls when the change reaches {main}",)
+    assert installs.calls == [] and records() == {}
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_a_detached_head_is_skipped_with_the_line(tree, installs):
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    git(tree, "checkout", "-q", "--detach")
+    commit(tree, "loadout/loadout.toml", "[user]\n# more\n")
+    outcome = gitpiece.run(Ctx("post-commit", tree))
+    assert outcome.kind == "notice"
+    assert outcome.lines[0].startswith("loadout: not reinstalled: a detached HEAD is not ")
+    assert installs.calls == []
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_origin_head_names_the_main_branch(tree, installs):
+    """A repo whose `origin/HEAD` names `trunk` reinstalls on `trunk`, and not on the
+    branch git's default would name."""
+    first = git(tree, "branch", "--show-current")
+    git(tree, "checkout", "-q", "-b", "trunk")
+    git(tree, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+    git(tree, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    assert gitpiece.run(Ctx("post-commit", tree)).kind == "ok"
+    assert len(installs.calls) == 1
+    git(tree, "checkout", "-q", first)
+    commit(tree, "loadout/loadout.toml", "[user]\n# on the old one\n")
+    outcome = gitpiece.run(Ctx("post-commit", tree))
+    assert outcome.kind == "notice" and f"{first} is not trunk" in outcome.lines[0]
+    assert len(installs.calls) == 1
+
+
+def test_the_main_branch_falls_back_to_init_default_branch_then_main_or_master():
+    class Link:
+        def __init__(self, answers, branches=()):
+            self.answers = answers
+            self.branches = {f"refs/heads/{name}" for name in branches}
+
+        def git(self, root, *args, timeout_s=30.0):
+            if args[:3] == ("rev-parse", "-q", "--verify"):
+                there = args[-1] in self.branches
+                return subprocess.CompletedProcess(args, 0 if there else 1,
+                                                   "abc\n" if there else "", "")
+            code, out = self.answers.get(args[-1], (1, ""))
+            return subprocess.CompletedProcess(args, code, out, "")
+
+    trunk = {"init.defaultBranch": (0, "trunk\n")}
+    assert gitpiece.main_branch(Link({"refs/remotes/origin/HEAD": (0, "origin/dev\n"),
+                                      **trunk}), "r") == "dev"
+    assert gitpiece.main_branch(Link(trunk, ["trunk", "main"]), "r") == "trunk"
+    # A default branch the repo doesn't have names nothing.
+    assert gitpiece.main_branch(Link(trunk, ["master"]), "r") == "master"
+    assert gitpiece.main_branch(Link({}, ["master", "main"]), "r") == "main"
+    assert gitpiece.main_branch(Link({}, ["master"]), "r") == "master"
+    assert gitpiece.main_branch(Link({}), "r") == "main"
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_a_repo_on_master_with_no_default_branch_set_reinstalls(repo, loadout_dir,
+                                                                 tmp_path, installs,
+                                                                 monkeypatch):
+    """`git init` with no `init.defaultBranch` makes `master`; a commit there reinstalls.
+    The fence's git config names `main`, so this test's own names none."""
+    bare = tmp_path / "bare-gitconfig"
+    bare.write_text("[user]\n\tname = sample-user\n\temail = user@example.invalid\n",
+                    encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(bare))
+    root = tmp_path / "dotfiles"
+    root.mkdir()
+    git(root, "init", "-q")
+    git(root, "symbolic-ref", "HEAD", "refs/heads/master")
+    commit(root, "README", "readme\n", "start")
+    kit.configure(root / "loadout")
+    assert git(root, "config", "--get-all", "init.defaultBranch", check=False) == ""
+    assert git(root, "branch", "--show-current") == "master"
+    commit(root, "loadout/loadout.toml", "[user]\n")
+    assert gitpiece.run(Ctx("post-commit", root)).kind == "ok"
+    assert len(installs.calls) == 1
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
 def test_a_merge_with_no_orig_head_is_skipped(tree, installs):
     commit(tree, "loadout/loadout.toml", "[user]\n")
     orig = tree / ".git" / "ORIG_HEAD"
@@ -506,6 +599,26 @@ def test_a_failed_install_prints_the_command_and_leaves_a_record_a_clean_install
     assert "exited 3" in record["text"]
     assert install.install().code == 0
     assert "reinstall" not in records()
+
+
+@pytest.mark.slow
+@pytest.mark.touches(*GLOBS)
+def test_status_says_first_when_the_last_reinstall_failed_until_a_clean_install(
+        tree, installs):
+    commit(tree, "loadout/loadout.toml", "[user]\n")
+    assert install.status().reinstall_failed is None
+    installs.answer = subprocess.CompletedProcess([], 3, b"", b"")
+    gitpiece.run(Ctx("post-commit", tree))
+    at = records()["reinstall"]["at"]
+    shown = install.status()
+    assert shown.text()[0] == (f"The last automatic reinstall failed ({at}): "
+                               "run moxi doctor loadout")
+    failed = shown.as_json()["reinstall_failed"]
+    assert failed["at"] == at and "exited 3" in failed["text"]
+    assert install.install().code == 0
+    shown = install.status()
+    assert shown.as_json()["reinstall_failed"] is None
+    assert not any(line.startswith("The last automatic reinstall") for line in shown.text())
 
 
 @pytest.mark.slow

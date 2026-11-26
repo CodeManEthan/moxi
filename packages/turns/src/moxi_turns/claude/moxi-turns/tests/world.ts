@@ -21,7 +21,7 @@ export function commandRow($: any, text: string) {
   })
 }
 
-export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; env?: Record<string, string>; envFails?: boolean; gate?: boolean; spinMs?: number } = {}) {
+export function world(on: On, options: { surfaces?: string[]; endpointJson?: string | null; files?: Record<string, string>; env?: Record<string, string>; envFails?: boolean; gate?: boolean; spinMs?: number } = {}) {
   const clock = mock.clock(on, { now: 1_000 })
   // The session's environment: only what the test names, never the one the tests run in.
   // With `envFails`, every `$.env.get` throws instead.
@@ -39,6 +39,8 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     agents: [] as Record<string, unknown>[],
     /** `$.agent.list()` throws: the list cannot be read. */
     agentsFail: false,
+    /** When set, prompt.read fails: the box can't be read. */
+    promptFail: false,
     box: '',
     gate: options.gate ?? true,
     spawned: [] as string[][],
@@ -133,6 +135,9 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
   on('fs.read', async ($, e) => {
     w.reads.push(e.path)
     if (e.path.endsWith('/endpoint.json') && endpointJson !== null) return { value: endpointJson }
+    // Any other file the test names, by its whole path.
+    const named = options.files?.[e.path]
+    if (named !== undefined) return { value: named }
     throw new Error(`ENOENT: ${e.path}`)
   })
   on('command.list', async () => ({ value: (w.gate ? [{ name: 'moxi-turns-gate' }] : []) as never }))
@@ -140,7 +145,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     if (w.agentsFail) throw new Error('no list')
     return { value: w.agents as never }
   })
-  on('prompt.read', async () => ({ value: { text: w.box, cursor: w.box.length } }))
+  on('prompt.read', async () => {
+    if (w.promptFail) throw new Error('no box')
+    return { value: { text: w.box, cursor: w.box.length } }
+  })
   on('state.set', async ($, e, next) => {
     w.stateWrites.push({ key: (e as { key: string }).key, value: (e as { value: unknown }).value })
     return next(e)

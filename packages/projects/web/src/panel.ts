@@ -8,11 +8,16 @@
 // nothing is there yet, with the box that makes it (hidden for a kind whose mint is
 // `refuse`), and how the path stands to a project that holds it. Only the answer for what
 // the field holds now is drawn. `Name` fills from the folder's last part until the user
-// types in it, and says when a project already has the name. `More` folds `Kind`, `Lead` and,
+// types in it, and says when a project already has the name. Once the folder has been
+// read, and again when the kind or the create box changes, it reads `/api/questions` and
+// shows each question other modules put to the add as a field under `Name`, a menu of its
+// choices or a text field, set to its suggestion; a question a module's setting answers
+// is not shown, and one put only after another's answer shows while that answer is held.
+// `More` folds `Kind`, `Lead` and,
 // while notes is installed, `Notes folder`, with their values on its line. `Add project`
-// sends `/api/add` with the paths as typed, `~` included; until the folder has been read,
-// a name it would fill is not sent. What the answer came to shows under the button: the
-// project added, its notes and warnings, and the form empty again; a refusal's text, with
+// sends `/api/add` with the paths as typed, `~` included, and the answers the question
+// fields hold; until the folder has been read, a name it would fill is not sent. What the answer came to shows under the button: the
+// project added, its notes, warnings and any question not put, and the form empty again; a refusal's text, with
 // the values kept; or, with no answer, that it may have been added. While `/api/where`
 // says a change would be refused, its `note` shows dim above the button; it is read when
 // the panel opens.
@@ -36,11 +41,13 @@ import { live } from "lit/directives/live.js";
 import { api, readLater } from "/m/ui/client.js";
 
 import { CHANGED, parseAdded, parseOne, parseWhere, parseWritten } from "./feed.ts";
-import type { Kinds, Listing, Project } from "./feed.ts";
+import { parseQuestions } from "./feed.ts";
+import type { Kinds, Listing, Project, Question } from "./feed.ts";
 import {
-  addedSaid, addPanel, addPanelBody, agentAdded, alsoHere, answerNow, CHANGED_SINCE, createOffered, editPanel,
-  editReread, editTouched, filled, FOLDER_WAIT_MS, folderRoute, folderSays, MAY_BE_SAVED, moreLine, NAME_FILLED,
-  NAME_STAYS, NAME_TAKEN, named, nameTaken, parseAtPath, partlySaved, saveSteps, takenOff,
+  addedSaid, addPanel, addPanelBody, agentAdded, alsoHere, answerNow, answerOf, answersSent, CHANGED_SINCE,
+  createOffered, editPanel, editReread, editTouched, filled, FOLDER_WAIT_MS, folderRoute, folderSays, MAY_BE_SAVED,
+  moreLine, NAME_FILLED, NAME_STAYS, NAME_TAKEN, named, nameTaken, parseAtPath, partlySaved, questionId,
+  questionsRoute, saveSteps, shownQuestions, takenOff,
 } from "./panel-model.ts";
 import type { AddPanel, Asked, EditPanel, PanelSaid } from "./panel-model.ts";
 import { BASE } from "./styles.ts";
@@ -136,6 +143,12 @@ export class ProjectsPanel extends LitElement {
   #waiting: string | null = null;
   /** Cancels the folder's read waiting to be sent. */
   #cancelFolder = (): void => {};
+  /** The questions an add would put, with the route they were read for. */
+  #questions: { route: string; list: Question[] } | null = null;
+  /** What the user picked or typed for each question, by `module.key`. */
+  #answers: Record<string, string> = {};
+  /** Cancels the questions' read waiting to be sent. */
+  #cancelQuestions = (): void => {};
   #note: string | null = null;
   #sending = false;
   #said: PanelSaid | null = null;
@@ -156,6 +169,7 @@ export class ProjectsPanel extends LitElement {
     super.disconnectedCallback();
     this.#connected += 1;
     this.#cancelFolder();
+    this.#cancelQuestions();
   }
 
   protected firstUpdated(): void {
@@ -226,8 +240,53 @@ export class ProjectsPanel extends LitElement {
     if (read !== null) {
       this.#asked = { typed, answer: read };
       this.#form = filled(this.#form, read);
+      this.#readQuestions();
     }
     this.requestUpdate();
+  }
+
+  /** The route of the questions an add of the form as it stands would put, or null. */
+  #questionsRoute(): string | null {
+    const form = this.#form;
+    const canCreate = createOffered(answerNow(this.#asked, form.folder), this.kinds, form.kind) !== null;
+    return questionsRoute(form, { canCreate });
+  }
+
+  /** The questions read for the form as it stands; none while they are being read. */
+  #questionsNow(): Question[] {
+    const read = this.#questions;
+    return read !== null && read.route === this.#questionsRoute() ? read.list : [];
+  }
+
+  /** Reads the questions for the form as it stands, unless they are read already. The
+   * page root counts the read as out, so a press waits for the fields it draws. */
+  #readQuestions(): void {
+    this.#cancelQuestions();
+    const route = this.#questionsRoute();
+    if (route === null || this.#questions?.route === route) return;
+    this.#cancelQuestions = readLater(() => this.#askQuestions(route), 0);
+  }
+
+  async #askQuestions(route: string): Promise<void> {
+    const mine = this.#connected;
+    let answer;
+    try {
+      answer = await api("projects", route);
+    } catch {
+      answer = { status: 0, data: null };
+    }
+    if (mine !== this.#connected || this.#questionsRoute() !== route) return;
+    const list = answer.status === 200 ? parseQuestions(answer.data) : null;
+    if (list !== null) this.#questions = { route, list };
+    this.requestUpdate();
+  }
+
+  #answered(id: string) {
+    return (event: Event): void => {
+      this.#answers = { ...this.#answers, [id]: (event.target as HTMLInputElement | HTMLSelectElement).value };
+      this.#said = null;
+      this.requestUpdate();
+    };
   }
 
   #close(): void {
@@ -244,6 +303,7 @@ export class ProjectsPanel extends LitElement {
     return (event: Event): void => {
       this.#form = { ...this.#form, [name]: (event.target as HTMLInputElement | HTMLSelectElement).value };
       this.#said = null;
+      if (name === "kind") this.#readQuestions();
       this.requestUpdate();
     };
   }
@@ -264,6 +324,7 @@ export class ProjectsPanel extends LitElement {
 
   #tick = (event: Event): void => {
     this.#form = { ...this.#form, create: (event.target as HTMLInputElement).checked };
+    this.#readQuestions();
     this.requestUpdate();
   };
 
@@ -272,7 +333,8 @@ export class ProjectsPanel extends LitElement {
     if (this.#sending || !this.#ready()) return;
     const form = this.#form;
     const canCreate = createOffered(answerNow(this.#asked, form.folder), this.kinds, form.kind) !== null;
-    const body = addPanelBody(form, { notesInstalled: this.listing?.notes_installed ?? false, canCreate });
+    const body = addPanelBody(form, { notesInstalled: this.listing?.notes_installed ?? false, canCreate,
+                                      answers: answersSent(this.#questionsNow(), this.#answers) });
     this.#sending = true;
     this.#said = null;
     this.requestUpdate();
@@ -283,6 +345,8 @@ export class ProjectsPanel extends LitElement {
       if (acted.outcome === "done") {
         this.#form = { ...addPanel(), kind: this.#form.kind };
         this.#asked = null;
+        this.#questions = null;
+        this.#answers = {};
         this.#more = false;
       }
       if (acted.outcome !== "refused") document.dispatchEvent(new Event(CHANGED));
@@ -327,6 +391,7 @@ export class ProjectsPanel extends LitElement {
         <label class="f" for="p-name">Name</label><input id="p-name" type="text" name="name" autocomplete="off"
           spellcheck="false" ?disabled=${busy} .value=${live(form.name)} @input=${this.#nameTyped}>
         ${nameLine !== "" ? html`<p class="hint" data-line="name">${nameLine}</p>` : nothing}
+        ${shownQuestions(this.#questionsNow(), this.#answers).map((q) => this.#questionField(q, busy))}
         <button type="button" class="fold" data-action="more" aria-expanded=${this.#more ? "true" : "false"}
           @click=${() => { this.#more = !this.#more; this.requestUpdate(); }}><span><span class="ar">${
           this.#more ? "▾" : "▸"}</span>More</span><span class="d" data-line="more">${moreLine(form, { notesInstalled })}</span></button>
@@ -340,6 +405,23 @@ export class ProjectsPanel extends LitElement {
           ${said.lines.map((line) => html`<p>${line}</p>`)}</div>` : nothing}
       </form>
     </aside>`;
+  }
+
+  /** A question's field: a menu of its choices (with an empty first entry while none is
+   * held), or a text field. */
+  #questionField(q: Question, busy: boolean) {
+    const id = questionId(q);
+    const value = answerOf(q, this.#answers);
+    const fieldId = `p-q-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+    if (q.choices.length > 0) {
+      return html`<label class="f" for=${fieldId}>${q.text}</label><span class="sel"><select id=${fieldId} name=${id}
+          data-question=${id} ?disabled=${busy} .value=${live(value)} @change=${this.#answered(id)}>${
+          value === "" ? html`<option value="" selected></option>` : nothing}${q.choices.map((choice) => html`<option
+          value=${choice} ?selected=${choice === value}>${choice}</option>`)}</select>${ARROW}</span>`;
+    }
+    return html`<label class="f" for=${fieldId}>${q.text}</label><input id=${fieldId} type="text" name=${id}
+      data-question=${id} autocomplete="off" spellcheck="false" ?disabled=${busy} .value=${live(value)}
+      @input=${this.#answered(id)}>`;
   }
 
   #moreFields(form: AddPanel, kinds: Kinds | null, notesInstalled: boolean, busy: boolean) {

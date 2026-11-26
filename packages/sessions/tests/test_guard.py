@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import shlex
 from pathlib import Path
 
 import pytest
@@ -149,6 +150,45 @@ def test_claude_bash_words_naming_a_root_path_are_refused(home):
         assert not refused("Bash", {"command": command}, home), command
 
 
+def test_a_substitution_in_double_quotes_is_read_as_commands(home):
+    t = transcript(home)
+    for command in (f'echo "$(cat {t})"', f'x="$(cat {t})"'):
+        assert refused("Bash", {"command": command}, home), command
+
+
+def test_text_after_a_substitution_that_starts_a_path_is_judged(home):
+    t = transcript(home)
+    for command in (f"cat $(x){t}", "ls `x`~/.claude/projects", "ls $(x)$HOME/.claude/projects",
+                    f"python3 tool.py --file=$(x){t}"):
+        assert refused("Bash", {"command": command}, home), command
+    assert not refused("Bash", {"command": "cat $(x)/work/project/notes.md"}, home)
+
+
+def test_text_between_two_substitutions_that_starts_a_path_is_judged(home):
+    t = transcript(home)
+    for command in (f"cat $(true){t}$(true)", f"cat x$(true){t}$(true)y",
+                    f"cat $(a)$(b){t}", f"y=$(a){t}$(b)"):
+        assert refused("Bash", {"command": command}, home), command
+    for command in ("cat $(x)/work/project/notes.md$(y)", "cat $(x)notes$(y)/work"):
+        assert not refused("Bash", {"command": command}, home), command
+
+
+def test_each_word_bash_splits_a_default_into_is_judged(home):
+    t = transcript(home)
+    for command in (f"cat ${{x:- {t} }}", f"cat ${{x:- {t} }}cmd", f"cat ${{x:-{t}}}",
+                    f"cat ${{y:+ a {t} }}", f"cat < ${{x:- {t} }}",
+                    f"cat ${{x:- a ${{y:- {t} }} }}", f"cat ${{x:- ${{y:-{t}}}}}"):
+        assert refused("Bash", {"command": command}, home), command
+    for command in (f'cat "${{x:- {t} }}"', f"X=${{x:- {t} }} true"):
+        assert not refused("Bash", {"command": command}, home), command
+
+
+def test_a_quote_inside_a_value_s_double_quotes_ends_no_command(home):
+    t = transcript(home)
+    for command in (f"echo ${{x:-\"it's\"}}; cat {t}", f'echo ${{HOME:-"}}"}}; cat {t}'):
+        assert refused("Bash", {"command": command}, home), command
+
+
 def test_codex_shell_calls_under_its_root_are_refused(home):
     rollout = str(home / ".codex/sessions/2026/11/07/rollout.jsonl")
     assert refused("Bash", {"command": f"cat {rollout}"}, home, harness="codex")
@@ -163,6 +203,39 @@ def test_a_shell_c_script_is_judged_as_commands_of_its_own(home):
     t = transcript(home)
     assert refused("Bash", {"command": f"bash -lc 'cat {t}'"}, home)
     assert not refused("Bash", {"command": f"bash -lc 'moxi sessions find {t}'"}, home)
+
+
+def test_a_path_cut_at_a_substitution_is_judged_by_the_text_before_it(home):
+    assert refused("Bash", {"command": "cat ~/.claude/projects/$(ls)/x.jsonl"}, home)
+
+
+def test_every_script_handed_to_a_shell_is_judged_in_its_own_dialect(home):
+    t = transcript(home)
+    for command in (f"bash <<< 'cat {t}'", f"echo 'cat {t}' | sh",
+                    f"bash <<'EOF'\ncat {t}\nEOF", f"cat <<'EOF' | bash\ncat {t}\nEOF",
+                    f"pwsh -Command 'Get-Content {t}'", f"powershell.exe -c 'gc {t}'",
+                    f'cmd /c "type {t}"', f"x=$(bash -c 'cat {t}')",
+                    f"mksh -c 'cat {t}'", f"ash -c 'cat {t}'",
+                    f"bash -co pipefail 'cat {t}'", f"bash --login -c 'cat {t}'"):
+        assert refused("Bash", {"command": command}, home), command
+    assert refused("Bash", {"command": ["pwsh", "-Command", f"Get-Content {t}"]}, home,
+                   harness="codex")
+    for command in (f"echo 'moxi sessions find {t}' | bash",
+                    f"pwsh -c 'moxi sessions find {t}'",
+                    f"cat <<'EOF'\ncat {t}\nEOF"):
+        assert not refused("Bash", {"command": command}, home), command
+
+
+def test_a_script_past_the_depth_is_judged_by_its_words(home):
+    t = transcript(home)
+    deep = f"cat {t}"
+    for _ in range(readguard.DEPTH):
+        deep = f"bash -c {shlex.quote(deep)}"
+    assert refused("Bash", {"command": deep}, home)
+    past = t
+    for _ in range(readguard.DEPTH + 1):
+        past = f"bash -c {shlex.quote(past)}"
+    assert refused("Bash", {"command": past}, home)
 
 
 def test_a_tool_it_does_not_cover_runs(home):

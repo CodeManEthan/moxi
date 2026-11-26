@@ -50,22 +50,24 @@ def head(repo, rev="HEAD"):
 
 # -- the word -------------------------------------------------------------------------------
 
-def test_the_word_when_required(repo, names, remote):
-    public_repo(repo, PIECE, sets=("main=main", "word-required=true"))
+def test_the_push_piece_asks_for_no_word_and_logs_one_given(repo, names, remote):
+    public_repo(repo, PIECE, sets=("main=main",))
     commit(repo, "Add")
-    refused(push(repo, "origin", "main"), "MOXI_PUBLISHING_PUSH_WORD")
-    refused(push(repo, "origin", "main", env={"MOXI_PUBLISHING_PUSH_WORD": "two words"}),
-            "push.word_pattern")
-    passed(push(repo, "origin", "main", env={"MOXI_PUBLISHING_PUSH_WORD": "comms:1"}))
-    assert log_lines()[-1]["word"] == "comms:1"
+    passed(push(repo, "origin", "main"))
+    assert log_lines()[-1]["word"] is None
+    commit(repo, "Again")
+    passed(push(repo, "origin", "main", env={"MOXI_PUBLISHING_PUSH_WORD": "two words"}))
+    assert log_lines()[-1]["word"] == "two words"
 
 
-def test_the_word_pattern_is_the_users(repo, names, remote):
-    write_config("publishing", "[push]\nword_pattern = '^ok-[0-9]+$'\n")
-    public_repo(repo, PIECE, sets=("main=main", "word-required=true"))
+def test_a_leftover_word_required_refuses_every_push(repo, names, remote):
+    public_repo(repo, PIECE, sets=("main=main",))
+    git(repo, "config", "moxi-repo.piece.publishing/push.word-required", "true")
     commit(repo, "Add")
-    refused(push(repo, "origin", "main", env={"MOXI_PUBLISHING_PUSH_WORD": "comms:1"}))
-    passed(push(repo, "origin", "main", env={"MOXI_PUBLISHING_PUSH_WORD": "ok-12"}))
+    refused(push(repo, "origin", "main", env={"MOXI_PUBLISHING_PUSH_WORD": "comms:1"}),
+            "still holds word-required = true")
+    git(repo, "config", "moxi-repo.piece.publishing/push.word-required", "false")
+    passed(push(repo, "origin", "main"))
 
 
 # -- branches -------------------------------------------------------------------------------

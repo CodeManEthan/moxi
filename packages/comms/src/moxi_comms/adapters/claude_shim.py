@@ -88,7 +88,7 @@ import time
 
 from moxi import exit as moxi_exit
 
-from .. import (attribution, cache, claimfile, constants,
+from .. import (attribution, cache, claimfile, constants, delivered,
                 directors as directors_mod, envelope, machine_line, owed,
                 stall, wire)
 from ..claimhold import ClaimHolder
@@ -330,7 +330,7 @@ def end_line(payload: dict) -> str:
     same reason the card footer is a sentence: a reader meeting it mid-turn can look it up
     (`moxi comms help end`), and a decoration cannot be looked up.
     """
-    return f"[comms] end · msg {payload['message_id']}"
+    return delivered.END_LINE.format(message_id=payload['message_id'])
 
 
 def render_message(payload: dict, directors=(), *,

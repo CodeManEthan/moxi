@@ -246,11 +246,17 @@ export function warningLine(warning: string): string {
   return `Warning: ${warning}`;
 }
 
+/** The line for a question an add didn't put. */
+export function notAskedLine(line: string): string {
+  return `Not asked: ${line}`;
+}
+
 /** The add form's lines for `acted`, an add of `form` with create ticked or not. */
 export function addSaid(acted: Acted<Added>, created: boolean): AddSaid {
   if (acted.outcome === "done") {
-    const { project, notes, warnings } = acted.value;
-    const said: AddSaid = { tone: "ok", lines: [`Added ${project.key} at ${project.root}.`, ...notes] };
+    const { project, notes, warnings, asked } = acted.value;
+    const said: AddSaid = { tone: "ok", lines: [`Added ${project.key} at ${project.root}.`, ...notes,
+                                                ...asked.map(notAskedLine)] };
     return warnings.length ? { ...said, warnings: warnings.map(warningLine) } : said;
   }
   if (acted.outcome === "refused") return { tone: "error", lines: [acted.text] };

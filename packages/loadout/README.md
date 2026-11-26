@@ -61,11 +61,17 @@ and `moxi loadout status` says what has drifted.
    when the manifest sets none and someone is at the keyboard.
 9. With repo installed (`moxi install loadout --with repo`) and the folder in a git work
    tree, install registers two git hook pieces there, so a commit or a merge that
-   changes the folder runs `moxi loadout install` in that work tree, on whatever branch.
+   changes the folder runs `moxi loadout install` in that work tree, while it is on the
+   repo's main branch (the one `origin/HEAD` names, else git's `init.defaultBranch`
+   where the repo has that branch, else whichever of `main` and `master` it has, `main`
+   first). On another branch it prints one line and installs nothing; the change
+   is placed when it reaches the main branch.
    The install runs with git's own variables taken out of its environment; one that
    fails prints the command to run and leaves a doctor record, which the next clean
-   install clears. `moxi config set loadout reinstall_on_commit false` turns it off, and
-   the next install removes the pieces. Without repo, run `moxi loadout install` after a
+   install clears. While the record stands, `moxi loadout status` prints first `The last
+   automatic reinstall failed (<when>): run moxi doctor loadout`, and its `--json` gives
+   the record as `reinstall_failed` (`{at, text}`, else null). `moxi config set loadout
+   reinstall_on_commit false` turns it off, and the next install removes the pieces. Without repo, run `moxi loadout install` after a
    commit.
 10. `moxi uninstall loadout` takes out everything it placed or wrote: harness entries, the
     global part, placements, its ignore files and the OpenCode row. Module skills from
@@ -82,6 +88,16 @@ and `moxi loadout status` says what has drifted.
     out with the item. A plain `add` is for every harness. The line `add` prints names the
     harnesses the item is on for. A harness the core's table has no row for is refused,
     and so is one an item's own `harnesses` leaves out.
+12. `status` lists, after its rows and under `not loadout's:`, each entry of a harness's
+    skills or agents folder (the user's, and each project section's) that no placement
+    holds: not loadout's, not a module's, not tracked by git, and not a dotted name of
+    the harness's or the tools' own. It is information; the exit code doesn't change, and
+    `--json` gives them as `strays` (`path`, `harness`, `kind`). `moxi loadout take PATH
+    [--user | --project P]` copies one into the folder as a source (`skills/<name>/`, or
+    `agents/<name>.md`), lists it in its own section unless you name one, and installs
+    it, keeping the original under `displaced/` first. `moxi loadout move-aside PATH`
+    moves one under `displaced/` and prints the command that puts it back; a move across
+    volumes that copies it whole but removes it only partly says so, naming the copy.
 
 ## Install
 
@@ -126,7 +142,15 @@ copy stays until you delete it.
   refused and left as it is.
 - **A placement.** What stands where loadout places something, an edited copy, or a file
   saved over loadout's link is moved aside by the core's placer, which says so on its own
-  line (`moved <it> to <copy>`).
+  line (`moved <it> to <copy>`). A `--replace` first compares what is there with what
+  loadout would place (a file's bytes, a folder's file names and bytes, where a link
+  points). Equal, it goes ahead. Different, `moxi loadout install` asks at a terminal,
+  naming what differs, and refuses without one; `--accept-diff` goes ahead without
+  asking, and the page's Replace, which shows what it moves aside first, passes it. If
+  placing fails after the move, the placer puts what was there back. A path git tracks
+  is never replaced: the row reads `would-commit`, and a `--replace` naming it is
+  refused (`<path> is tracked by git in <repo>; untracking it is a commit in that
+  repo`), since placing over it would leave a deletion in that repo's `git status`.
 - **An entry in a harness's file** (Claude Code's `settings.json` and `.claude.json`,
   Codex's `hooks.json` and `config.toml`, OpenCode's `opencode.json`, a managed global
   file), when you edited it or loadout didn't write it (one you had before loadout

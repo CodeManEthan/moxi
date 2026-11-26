@@ -19,6 +19,9 @@ The walk (`moxi.terminal._walk`):
 - `walk(view=None, run=None)` goes up a run's process tree and returns `Evidence` (Moxi or
   an agent started it), `Undecided` (it can't tell), or None (nothing of Moxi's or an
   agent's).
+- `agent(view=None, run=None)` is the agent test: the harness (`claude`, `codex` or
+  `opencode`) whose session the run was started in, by the walk's agent signs, or None.
+  Modules ask it to keep an act for the person at the keyboard.
 - `marked(env=None)` is a copy of an environment carrying the start mark, `STARTED_BY_ENV`
   (`MOXI_STARTED_BY`), for a program that builds a child's environment from scratch.
 
@@ -46,7 +49,7 @@ from ._record import (FAILED, FORMAT, FOUND, NO_KEYBOARD, NO_PLACE, SAME, UNDECI
 #: The `Outcome` of this process's record step (the `moxi` command's); None when none ran.
 last: Outcome | None = None
 
-_WALK = ("walk", "Evidence", "Undecided", "Found", "Run")
+_WALK = ("walk", "agent", "Evidence", "Undecided", "Found", "Run")
 _COMMANDS = ("RECORD_COMMAND", "DOCTOR_COMMAND")
 
 
@@ -62,7 +65,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["STARTED_BY_ENV", "marked", "walk", "Evidence", "Undecided", "Found", "Run",
+__all__ = ["STARTED_BY_ENV", "marked", "walk", "agent", "Evidence", "Undecided", "Found", "Run",
            "FORMAT", "in_set", "anchor_set", "of", "read", "write", "version", "keyboard",
            "Record", "NoRecord", "Unreadable", "NewerFormat", "Read", "Outcome", "step", "row",
            "last", "SAME", "WRITTEN", "NO_KEYBOARD", "FOUND", "UNDECIDED", "NO_PLACE",

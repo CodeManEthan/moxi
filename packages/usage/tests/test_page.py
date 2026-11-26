@@ -328,9 +328,9 @@ def test_every_path_carries_the_path_mark_and_every_title_the_redact_mark():
                                                "used.rows[].name"}
 
 
-def test_the_page_serves_its_four_components_and_the_build_stamp():
-    assert loopback().export(page.PAGE)["assets"] == ["build-stamp.txt", "cost.js",
-                                                      "limits.js", "page.js", "row.js"]
+def test_the_page_serves_its_five_components_and_the_build_stamp():
+    assert loopback().export(page.PAGE)["assets"] == ["build-stamp.txt", "cost.js", "limits.js",
+                                                      "page.js", "project-facts.js", "row.js"]
 
 
 def test_the_announcement_offers_the_page_its_blocks_its_row_and_the_ui_extra():
@@ -342,23 +342,31 @@ def test_the_announcement_offers_the_page_its_blocks_its_row_and_the_ui_extra():
     assert {name: (c["place"], c.get("home", False), c["script"])
             for name, c in module.COMPONENTS.items()} == {
         "page": ("page", False, "page.js"), "limits": ("block", True, "limits.js"),
-        "cost": ("block", True, "cost.js"), "row": ("block", True, "row.js")}
+        "cost": ("block", True, "cost.js"), "row": ("block", True, "row.js"),
+        "project-facts": ("inline", False, "project-facts.js")}
     row = module.COMPONENTS["row"]
     assert (row["title"], row["home_as"], row["order"]) == ("Usage", "row", 300)
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["contract"] == 1 and set(facts["attributes"]) == {"projects", "open"}
+    assert all(spec["type"] == "string" for spec in facts["attributes"].values())
     found = modules.load("usage", interface=1)
     assert found.ok and found.page == module.PAGE
-    assert set(found.components) == {"page", "limits", "cost", "row"}
+    assert set(found.components) == {"page", "limits", "cost", "row", "project-facts"}
 
 
-def test_usage_offers_interfaces_1_and_2_and_no_other():
+def test_usage_offers_interfaces_1_to_3_and_no_other():
     from moxi_usage import api, module
 
-    assert module.INTERFACES == {1, 2}
-    for interface in (1, 2):
+    assert module.INTERFACES == {1, 2, 3}
+    for interface in (1, 2, 3):
         found = modules.load("usage", interface=interface)
         assert found.ok, found.reason
         assert found.api is api
-    assert not modules.load("usage", interface=3).ok
+    assert not modules.load("usage", interface=4).ok
+    # what interface 3 adds is there to call: the stop's stamps and the multiple form
+    assert (api.STOP_AT_ENV, api.STOP_HANDOFFS_ENV) == ("MOXI_USAGE_STOP_AT",
+                                                        "MOXI_USAGE_STOP_HANDOFFS")
+    assert api.cost_multiple("2.5x") == 2.5
     # what interface 2 adds is there to call: the folder filter and projects by folder
     assert reports.report("projects", by="folder", work_dir="/w/app", fresh=False).rows == []
     assert "opened" in limits.Row.__dataclass_fields__

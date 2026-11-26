@@ -200,7 +200,8 @@ def test_the_page_declares_its_reads_and_acts():
     assert not any(r["confirmed"] for r in routes.values())
     assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["roster"]
-    assert exported["assets"] == ["build-stamp.txt", "mail.js", "page.js", "roster.js"]
+    assert exported["assets"] == ["build-stamp.txt", "mail.js", "page.js", "project-facts.js",
+                                  "roster.js"]
     assert exported["budget"] == {"rss": "120M", "fds": 64}
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
 
@@ -825,7 +826,7 @@ def test_the_announcement_names_the_page_and_its_components():
     assert module.PAGE == "moxi_comms.page:PAGE"
     assert module.OPTIONAL["ui"] == ("The comms panel, its roster of agents and its row "
                                      "on Home, in the browser UI shell.")
-    assert set(module.COMPONENTS) == {"page", "roster", "mail"}
+    assert set(module.COMPONENTS) == {"page", "roster", "mail", "project-facts"}
     assert module.COMPONENTS["roster"] == {
         "script": "roster.js", "title": "Agents", "contract": 1, "place": "block",
         "home": True, "doc": "Names held by live sessions, and standing names"}
@@ -833,7 +834,10 @@ def test_the_announcement_names_the_page_and_its_components():
     modules.reset()
     found = modules.load("comms", interface=2)
     assert found.ok and found.page == module.PAGE
-    assert set(found.components) == {"page", "roster", "mail"}
+    assert set(found.components) == {"page", "roster", "mail", "project-facts"}
+    facts = module.COMPONENTS["project-facts"]
+    assert facts["place"] == "inline" and set(facts["attributes"]) == {"projects", "open"}
+    assert all(spec["type"] == "string" for spec in facts["attributes"].values())
 
 
 def test_the_mail_row_is_a_link_row_on_home_at_order_200():
