@@ -100,11 +100,11 @@ def descriptions(expiry: str = "24h") -> dict[str, str]:
             "An identity is a name only one session can hold at a time."),
         "history": (
             "Read recent messages to and from an identity, newest last, with who really "
-            "sent each. A message that expired or was withdrawn is shown as such. To read "
-            "further back, skip that many of the newest messages."),
+            "sent each. Expired and withdrawn messages say so. To read further back, skip "
+            "that many of the newest messages."),
         "remove": (
-            "Withdraw a message you sent from every recipient who hasn't had it yet. One "
-            "already delivered can't be withdrawn; the result says who had it."),
+            "Withdraw a message you sent from every recipient who hasn't had it yet; the "
+            "result says who had it."),
     }
 
 
@@ -174,7 +174,8 @@ _SENT = _object({
     "outcome": {"type": "string", "enum": [sending.OUTCOME_SENT, sending.OUTCOME_UNKNOWN]},
     "message_id": _NULL_STR,
     "recipients": {"type": "array", "items": _object({
-        "name": _STR, "delivery": {"type": "string", "enum": list(sending.DELIVERIES)}})},
+        "name": _STR, "delivery": {"type": "string", "enum": list(sending.DELIVERIES)},
+        "reason": _NULL_STR})},
     "expires_at": {"type": ["integer", "null"]},
     "interrupt": {"type": "boolean"},
     "notes": _STRS,
@@ -224,7 +225,7 @@ def _send_result(daemon, result: sending.SendResult, *, interrupt: bool) -> Call
     return _result(text, {
         "outcome": result.outcome,
         "message_id": result.message_id,
-        "recipients": [{"name": r.qualified, "delivery": r.delivery}
+        "recipients": [{"name": r.qualified, "delivery": r.delivery, "reason": r.reason}
                        for r in result.recipients],
         "expires_at": expires_at,
         "interrupt": marked,

@@ -138,7 +138,8 @@ _MESSAGE = _object({"id": _STR, "from": _AUTHOR, "at": _NULL_STR,
                     "reply_to": _NULL_STR, "text": _STR,
                     "already_shown": {"type": "boolean"}})
 _RECIPIENTS = {"type": "array", "items": _object({
-    "name": _STR, "delivery": {"type": "string", "enum": list(sending.DELIVERIES)}})}
+    "name": _STR, "delivery": {"type": "string", "enum": list(sending.DELIVERIES)},
+    "reason": _NULL_STR})}
 
 #: Each tool's output schema: the structured value of a result that isn't an error.
 OUTPUTS: dict[str, dict] = {
@@ -295,8 +296,8 @@ class Tools:
     @staticmethod
     def _sent_fields(result) -> dict:
         return {"outcome": result.outcome, "message_id": result.message_id,
-                "recipients": [{"name": r.qualified, "delivery": r.delivery}
-                               for r in result.recipients],
+                "recipients": [{"name": r.qualified, "delivery": r.delivery,
+                                "reason": r.reason} for r in result.recipients],
                 "notes": list(result.notes)}
 
     @staticmethod

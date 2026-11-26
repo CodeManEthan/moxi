@@ -181,7 +181,8 @@ def test_a_send_to_a_session_with_no_endpoint_says_it_is_held_and_names_no_comma
     got, _ = call(tools, "send", {"to": "reviewer@proj-a", "text": "x", "posture": "none"})
     assert not got.is_error, got.text
     assert got.structured["recipients"] == [{"name": "reviewer@proj-a",
-                                             "delivery": "waiting"}]
+                                             "delivery": "waiting",
+                                             "reason": HELD_UNTIL_REACHABLE}]
     assert got.structured["notes"] == [HELD_UNTIL_REACHABLE]
     assert got.text.split("\n")[1:] == [HELD_UNTIL_REACHABLE]
     waited = wait_call(tools, {"to": "reviewer@proj-a", "text": "ok?", "wait_s": 5})

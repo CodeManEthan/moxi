@@ -74,6 +74,11 @@ launcher = "moxi_launcher.cachetimers"
 [project.entry-points."moxi.usage.crossings"]
 launcher = "moxi_launcher.recycle:on_crossing"
 
+# The relaunch line under comms' hold line, called by comms where a send is planned when
+# the sender directs a cold recipient's launch.
+[project.entry-points."moxi.comms.hold_lines"]
+launcher = "moxi_launcher.notices:hold_line"
+
 # The launcher's commands run as `moxi launcher <verb>` (only the core declares `moxi`),
 # the detached first-turn sender (`moxi launcher deliver`) among them. One console script
 # of its own: the detached runs (a relaunch, a repair, an expiry or keep-warm ask, and the

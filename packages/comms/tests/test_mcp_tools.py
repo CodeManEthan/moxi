@@ -178,7 +178,7 @@ def test_a_send_answers_its_fields_and_the_verbs_lines(rig, planner, reviewer, t
     assert not got.is_error, text_of(got)
     s = got.structured_content
     assert s["outcome"] == "sent" and s["message_id"].isdigit()
-    assert s["recipients"] == [{"name": "reviewer", "delivery": "live"}]
+    assert s["recipients"] == [{"name": "reviewer", "delivery": "live", "reason": None}]
     assert s["interrupt"] is True
     posted = rig.record.get_message(s["message_id"])
     assert "[interrupt]" in posted.content.splitlines()[0]
@@ -206,6 +206,50 @@ def test_a_send_to_a_cache_comms_cant_read_answers_unchecked(rig, planner, revie
     assert (r["name"], r["delivery"]) == ("reviewer", "unchecked")
     assert ("delivered now, unchecked: comms can't read reviewer's cache (cache has no "
             "clock for this harness)") in text_of(got)
+
+
+def reads_cold(monkeypatch):
+    """The daemon's read of a claude-shim binding: cold, an hour past its lifetime."""
+    from moxi_comms import cache
+    real = cache.clock_state
+
+    def reads(adapter, session_id, **kw):
+        if adapter == "claude-shim":
+            return cache.Clock(cache.COLD, age_s=2 * 3600.0, ttl_s=3600.0)
+        return real(adapter, session_id, **kw)
+
+    monkeypatch.setattr(cache, "clock_state", reads)
+
+
+class Answers:
+    """A `moxi.comms.hold_lines` entry whose callable answers `line`."""
+
+    name = "sample"
+
+    def __init__(self, line):
+        self.line = line
+
+    def load(self):
+        return lambda by, recipient, session, *, env: self.line
+
+
+def test_a_cold_recipient_carries_its_hold_line_as_its_reason(rig, planner, reviewer,
+                                                              tools, monkeypatch):
+    """The tool result gives each recipient the reason the verb prints for it, with the
+    line a `moxi.comms.hold_lines` entry adds; a warm one's reason is null."""
+    reads_cold(monkeypatch)
+    line = "To reach it now, relaunch it fresh from its handoff: moxi launcher relaunch reviewer."
+    real = sending.modules.extensions
+    monkeypatch.setattr(sending.modules, "extensions",
+                        lambda group: [Answers(line)] if group == sending.HOLD_LINES
+                        else real(group))
+    got = send(tools, ["reviewer"], "hello")
+    assert not got.is_error, text_of(got)
+    (r,) = got.structured_content["recipients"]
+    assert r["delivery"] == "held-cold"
+    held, more = r["reason"].split("\n")
+    assert held.startswith("held: reviewer's cache went cold 1h ago") and more == line
+    assert f"{held}\n{line}" in text_of(got)
 
 
 def test_a_send_with_no_expires_takes_the_configs_and_never_has_none(rig, planner,

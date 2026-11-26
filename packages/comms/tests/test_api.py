@@ -385,6 +385,28 @@ def test_a_held_send_says_held_flag_per_recipient(rig):
     assert r.reason == cli.HELD_NOTE.format(name="reviewer")
 
 
+def test_a_held_send_to_a_cold_recipient_says_it_is_cold_too(rig, monkeypatch):
+    """A flagged send's cold recipient reads `held-flag`, and its reason has the cold
+    line after the `--held` NOTE."""
+    from moxi_comms import cache
+    real = cache.clock_state
+    monkeypatch.setattr(cache, "clock_state", lambda adapter, session_id, **kw: (
+        cache.Clock(cache.COLD, age_s=2 * 3600.0, ttl_s=3600.0) if adapter == "claude-shim"
+        else real(adapter, session_id, **kw)))
+    rig.shim(name="planner")
+    rig.shim(name="reviewer")
+    with rig.session_holding(_sender(rig, "planner")) as path:
+        got = api.send(api.Sender.socket(path), ["reviewer"], "later", posture="none",
+                       held=True)
+    assert got.outcome == "sent", got
+    (r,) = got.recipients
+    assert r.delivery == "held-flag"
+    note, cold = r.reason.split("\n")
+    assert note == cli.HELD_NOTE.format(name="reviewer")
+    assert cold.startswith("held: reviewer's cache went cold 1h ago"), cold
+    assert cold in got.lines()
+
+
 def test_the_never_bound_refusal_and_new_name(rig):
     rig.shim(name="planner")
     with rig.session_holding(_sender(rig, "planner")) as path:

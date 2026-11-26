@@ -265,6 +265,22 @@ def only_comms_additions(monkeypatch) -> None:
     monkeypatch.setattr(modules, "extensions", extensions)
 
 
+@pytest.fixture(autouse=True)
+def no_hold_lines(monkeypatch) -> None:
+    """A send in this test asks no `moxi.comms.hold_lines` entry, unless the test gives
+    its own.
+
+    The workspace installs every module together, so a cold send would otherwise ask the
+    launcher's entry, which reads the launch log of whatever home the send's env names
+    (the real one, for a test that hands the verb an env of its own)."""
+    from moxi import modules
+
+    real = modules.extensions
+    monkeypatch.setattr(modules, "extensions",
+                        lambda group, *a, **k: [] if group == "moxi.comms.hold_lines"
+                        else real(group, *a, **k))
+
+
 #: Python a child process runs first, so turns' launch additions in it come from comms
 #: alone, as `only_comms_additions` gives a test.
 ADDITIONS_COMMS_ONLY_PATCH = (
