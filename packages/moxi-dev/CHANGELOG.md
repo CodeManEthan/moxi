@@ -12,7 +12,12 @@
   without a systemd user manager with the memory controller; where one is expected and
   can't be made, the check exits 2. A caller's SIGINT, SIGTERM or SIGHUP prints the
   scope's memory state, stops the scope and ends the check by the same signal.
-- `moxi-dev cap [--] CMD [ARG...]` runs one command in the same kind of scope.
+  Once the scope's unit is gone, however the check in it ended, the outer sweeps what
+  test runs left (`moxi_dev.temp.sweep`).
+- `moxi-dev cap [--] CMD [ARG...]` runs one command in the same kind of scope. The
+  command's tests keep their temp on disk, as a check's do, and the cap says so on one
+  line when it changed a memory choice; after the command, and once its unit is gone
+  where it made one, the cap sweeps what test runs left, on every system.
 - `python -m moxi_dev` runs the `moxi-dev` command.
 - `moxi-dev check` bounds each package's test run at 900 s of wall clock, or the
   seconds `MOXI_TEST_SUITE_BOUND_S` gives. A run past it is ended with every process

@@ -18004,6 +18004,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return any(Path(line.removep
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stale"	keep	stale	stale
 moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="cap [--] CMD [ARG...]: run one command in a memory scope of its "	keep	help	help
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	"show", "--property=ActiveState,Result,MemoryPeak,MemoryMax", self.unit)	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = self.system.systemctl("show", "--property=ActiveState", "--value",	keep	show	show
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, group = self.system.systemctl("show", "--property=ControlGroup", "--value",	keep	show	show
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, group = system.systemctl("show", "--property=ControlGroup", "--value")	keep	show	show
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = system.systemctl("show", "--property=Version", "--value")	keep	show	show

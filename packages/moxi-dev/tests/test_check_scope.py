@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from moxi_dev import cap, check, scope
+from moxi_dev import cap, check, scope, temp
 from moxi_dev.scope import MIB, Host, Outcome
 from test_check import LINE, Runs, commit_file, repo  # noqa: F401 -- the repo fixture
 
@@ -144,6 +144,50 @@ def test_a_callers_signal_ends_the_outer_by_it(in_repo, outer, monkeypatch, caps
     assert died == [15] and capsys.readouterr().out == ""
 
 
+SWEPT = "removed 2 test temp dirs (3.0 GiB) left by runs that ended without cleaning up"
+
+
+@pytest.fixture
+def sweeps(monkeypatch):
+    """The outers' sweeps, counted; each removes two dirs."""
+    made: list[int] = []
+
+    def sweep():
+        made.append(1)
+        return temp.Swept(count=2, size=3 * 1024 ** 3)
+
+    monkeypatch.setattr(check, "_sweep", sweep)
+    monkeypatch.setattr(cap, "_sweep", sweep)
+    return made
+
+
+ENDINGS = {"exit": Outcome(1, is_gone=True),
+           "memory": Outcome(1, "killed at its cap (max 7.9G, peak 7.9G)", is_gone=True),
+           "signal": Outcome(143, None, 15, is_gone=True)}
+
+
+@pytest.mark.parametrize("ending", list(ENDINGS))
+def test_the_outer_sweeps_once_its_unit_is_gone_however_the_check_ended(
+        in_repo, outer, sweeps, monkeypatch, capsys, ending):
+    monkeypatch.setattr(scope, "die_by", lambda signum: None)
+    outer.outcome = ENDINGS[ending]
+    check.main([])
+    assert sweeps == [1]
+    out = capsys.readouterr().out.splitlines()
+    if ending == "exit":
+        assert out == []            # the inner's summary stays the last line
+    elif ending == "memory":
+        assert out[-2] == f"moxi-dev check: {SWEPT}" and LINE.match(out[-1])
+    else:
+        assert out == [f"moxi-dev check: {SWEPT}"]
+
+
+def test_the_outer_sweeps_nothing_while_its_unit_is_not_gone(in_repo, outer, sweeps):
+    outer.outcome = Outcome(0, is_gone=False)
+    check.main([])
+    assert sweeps == []
+
+
 def test_a_mismatched_marker_is_dropped_and_the_check_makes_its_own_scope(
         in_repo, outer, monkeypatch):
     monkeypatch.setenv(scope.SCOPE_ENV, "moxi-dev-check-000000000000.scope")
@@ -222,3 +266,67 @@ def test_cap_refuses_a_bad_figure_and_no_command(monkeypatch, capsys):
     monkeypatch.setenv(scope.MEMORY_MAX_ENV, "1")
     assert cap.main(["true"]) == 2
     assert f"moxi-dev cap: {scope.MEMORY_MAX_ENV} must be" in capsys.readouterr().err
+
+
+def test_cap_sweeps_once_its_unit_is_gone_before_its_last_line(outer, sweeps, capsys):
+    outer.outcome = Outcome(0, "peak 0.8G, held 0.6G, line 6.1G, high 6.4G, max 7.9G, "
+                               "stalled 0.0s", is_gone=True)
+    assert cap.main(["true"]) == 0
+    assert sweeps == [1]
+    assert capsys.readouterr().out.splitlines()[-2:] == [
+        f"moxi-dev cap: {SWEPT}",
+        "moxi-dev cap: memory peak 0.8G, held 0.6G, line 6.1G, high 6.4G, max 7.9G, "
+        "stalled 0.0s"]
+
+
+def test_cap_sweeps_nothing_while_its_unit_is_not_gone(outer, sweeps):
+    outer.outcome = Outcome(0, "peak 0.8G", is_gone=False)
+    cap.main(["true"])
+    assert sweeps == []
+
+
+def test_cap_sweeps_on_a_callers_signal_before_it_ends_by_it(outer, sweeps, monkeypatch,
+                                                            capsys):
+    died = []
+    monkeypatch.setattr(scope, "die_by", died.append)
+    outer.outcome = Outcome(143, None, 15, is_gone=True)
+    assert cap.main(["true"]) == 143
+    assert sweeps == [1] and died == [15]
+    assert capsys.readouterr().out.splitlines() == [f"moxi-dev cap: {SWEPT}"]
+
+
+def test_cap_with_no_scope_sweeps_after_its_command(monkeypatch, sweeps, capsys):
+    monkeypatch.setattr(scope, "find_host", lambda system: "not Linux")
+    monkeypatch.setattr(scope, "Outer", no_outer)
+    assert cap.main([sys.executable, "-c", "raise SystemExit(5)"]) == 5
+    assert sweeps == [1]
+    assert capsys.readouterr().out.splitlines()[-2:] == [
+        f"moxi-dev cap: {SWEPT}", "moxi-dev cap: memory not capped (not Linux)"]
+
+
+@pytest.mark.parametrize("scoped", [True, False])
+def test_cap_gives_its_command_its_temp_on_disk(outer, monkeypatch, capsys, scoped):
+    monkeypatch.setattr(temp, "places", lambda: temp.Places(platform="linux"))
+    monkeypatch.setenv(temp.TEMP_ENV, temp.RAM)
+    seen = []
+    if not scoped:
+        monkeypatch.setattr(scope, "find_host", lambda system: "CI")
+        monkeypatch.setattr(cap.subprocess, "run",
+                            lambda command, env: seen.append(env) or Done())
+    assert cap.main(["true"]) == 0
+    env = outer.made[0].env if scoped else seen[0]
+    assert env[temp.TEMP_ENV] == temp.DISK
+    assert capsys.readouterr().out.splitlines()[0] == (
+        f"moxi-dev cap: gave the command {temp.TEMP_ENV}={temp.DISK}: ram asked; a check "
+        f"keeps its temp on disk")
+
+
+class Done:
+    returncode = 0
+
+
+def test_cap_refuses_a_bad_temp_setting(monkeypatch, capsys):
+    monkeypatch.setattr(scope, "Outer", no_outer)
+    monkeypatch.setenv(temp.TEMP_ENV, "tape")
+    assert cap.main(["true"]) == 2
+    assert capsys.readouterr().err.startswith(f"moxi-dev cap: {temp.TEMP_ENV}")

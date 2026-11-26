@@ -11,7 +11,10 @@ the scope and watches it, and the steps below run in the scope, as `python -m mo
 check` with the same arguments. A bad worker count or figure stops it there. Where no
 scope is made (`MOXI_TEST_MEMORY_MAX_MIB=none`, not Linux, CI, no systemd user manager
 with the memory controller) the steps run in place, and the summary's memory field says
-why. `--only`, `--static` and `--pick` run no tests and make no scope.
+why. Once the scope's unit is gone, however the check in it ended, the `moxi-dev` the
+caller started sweeps what test runs left (`moxi_dev.temp.sweep`): quietly when the
+check printed its own summary, else with its line before the outer's summary or its
+signal. `--only`, `--static` and `--pick` run no tests and make no scope.
 
 The check then reads the workspace and the changed paths; a bad workspace or base stops
 it there, before any step runs. Then, in order:
@@ -1300,6 +1303,10 @@ def _outer(root: Path, args: argparse.Namespace, argv: list[str],
                         found=found, host=host, system=system,
                         description=f"moxi-dev check in {root}", say=_say)
     outcome = outer.run(env)
+    # The inner's summary, when it printed one, stays the last line: that sweep is quiet.
+    swept = _sweep_after(outcome)
+    if swept and (outcome.signum is not None or outcome.memory is not None):
+        _say(f"moxi-dev check: {swept}")
     if outcome.signum is not None:
         scope.die_by(outcome.signum)
         return outcome.code
@@ -1311,6 +1318,15 @@ def _outer(root: Path, args: argparse.Namespace, argv: list[str],
             _, result.temp_why, result.is_temproot_given = temp_env(env)
         print(result.line(), flush=True)
     return outcome.code
+
+
+def _sweep_after(outcome: scope.Outcome) -> str | None:
+    """Sweep what test runs left (`moxi_dev.temp.sweep`) once the scope's unit is gone,
+    however the work in it ended; the sweep's line, None when it removed nothing or the
+    unit was not seen gone (the next run's own sweep then takes what is left)."""
+    if not outcome.is_gone:
+        return None
+    return _sweep().line()
 
 
 def _inner(root: Path, args: argparse.Namespace, unit: str) -> int:

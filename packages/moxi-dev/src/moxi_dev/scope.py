@@ -84,8 +84,11 @@ STALL_WARN_S = 10.0
 LEFTOVER_S = 5.0
 #: How long after a caller's SIGINT the outer waits before it queues the scope's stop.
 INT_GRACE_S = 20.0
-#: How long the outer waits for a killed unit to settle before it reads its Result.
+#: How long the outer waits for its unit to settle: a killed one before it reads its
+#: Result, and any one, gone, before it sweeps.
 SETTLE_S = 5.0
+#: The `ActiveState`s of a unit that still holds, or may still hold, a process.
+LIVE_STATES = ("active", "activating", "deactivating", "reloading", "refreshing")
 #: The stopped line's stall figure covers this many of the latest seconds.
 STALL_WINDOW_S = 60
 
@@ -669,6 +672,9 @@ class Outcome:
     #: printed its own summary (a check's inner that exited with a code).
     memory: str | None = None
     signum: int | None = None       # the caller's signal: the outer ends by it
+    #: Whether the unit was seen gone, every process in it ended, before the outer
+    #: returned: only then may the outer sweep what the work's test runs left.
+    is_gone: bool = False
 
 
 def die_by(signum: int) -> None:
@@ -712,7 +718,26 @@ class Outer:
         self.say(f"{self.prefix}: {text}")
 
     def run(self, env: Mapping[str, str]) -> Outcome:
-        """Start the scope, watch it until the work ends, and say how it ended."""
+        """Start the scope, watch it until the work ends, say how it ended, and wait a
+        moment for the unit to be gone (`Outcome.is_gone`)."""
+        outcome = self._run(env)
+        outcome.is_gone = self.wait_gone()
+        return outcome
+
+    def wait_gone(self) -> bool:
+        """Whether the unit is gone, every process in it ended, within `SETTLE_S`: its
+        `ActiveState` reads neither active nor on its way in or out."""
+        deadline = self.clock() + SETTLE_S
+        while True:
+            code, said = self.system.systemctl("show", "--property=ActiveState", "--value",
+                                               self.unit)
+            if code == 0 and said.strip() not in LIVE_STATES:
+                return True
+            if self.clock() >= deadline:
+                return False
+            self.pause(0.1)
+
+    def _run(self, env: Mapping[str, str]) -> Outcome:
         started_r, started_w = os.pipe()
         waiter = self.waiter()
         try:

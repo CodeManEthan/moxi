@@ -400,6 +400,51 @@ def test_leftovers_are_killed_but_the_kept_one(tmp_path):
     assert sorted(killed) == [11, 12]
 
 
+
+def states(rig, *said):
+    """Answer the outer's ActiveState reads with `said` in turn, the last one for good;
+    every other call as the rig would."""
+    real, left = rig.calls.__call__, list(said)
+    reads = []
+
+    def calls(argv):
+        if "--property=ActiveState" in argv:
+            reads.append(rig.clock[0])
+            return 0, (left.pop(0) if len(left) > 1 else left[0]) + "\n"
+        return real(argv)
+
+    rig.outer.system.output = calls
+    return reads
+
+
+@pytest.mark.parametrize("ending", ["code", "signal", "line"])
+def test_the_outer_waits_for_its_unit_to_be_gone_however_the_work_ended(tmp_path, ending):
+    rig = Rig(tmp_path, child=Child(code=0, alive=100 if ending != "code" else 1))
+    if ending == "signal":
+        rig.child.code = -signal.SIGTERM
+        rig.waiter.steps = [signal.SIGTERM]
+    elif ending == "line":
+        rig.child.code = -signal.SIGKILL
+        rig.waiter.steps = runaway(rig)
+    reads = states(rig, "active", "deactivating", "inactive")
+    outcome = rig.run()
+    assert outcome.is_gone and len(reads) == 3
+    assert (outcome.signum is not None) is (ending == "signal")
+
+
+def test_a_unit_not_gone_within_the_settle_time_is_not_gone(tmp_path):
+    rig = Rig(tmp_path, child=Child(code=0, alive=1))
+    reads = states(rig, "deactivating")
+    outcome = rig.run()
+    assert outcome.code == 0 and not outcome.is_gone
+    assert reads[-1] - reads[0] == pytest.approx(scope.SETTLE_S, abs=0.11)
+
+
+def test_a_failed_read_of_the_unit_is_not_gone(tmp_path):
+    rig = Rig(tmp_path, child=Child(code=0, alive=1),
+              answers={("--property=ActiveState",): (1, "")})
+    assert not rig.run().is_gone
+
 def test_leftovers_stop_at_their_deadline(tmp_path):
     (tmp_path / "cgroup.procs").write_text("11\n")
     now = [0.0]

@@ -583,8 +583,15 @@ started stays outside the scope and watches it once a second.
   the scope, and ends the check by the same signal. A process a test left running is
   ended before the summary.
 
+Once the scope's unit is gone, however the check ended, the `moxi-dev` you started
+sweeps what test runs left (`moxi_dev.temp.sweep`); a unit still there 5 s after the
+end leaves its temp to the next run's own sweep.
+
 `moxi-dev cap -- CMD ...` runs any command the same way and ends with
-`moxi-dev cap: memory ...`; a `moxi-dev check` inside it uses the cap's scope.
+`moxi-dev cap: memory ...`; a `moxi-dev check` inside it uses the cap's scope. Its
+command is a check too: its tests keep their temp on disk (`MOXI_TEST_TEMP=ram` reaches
+it as `disk`, with a line saying so), and once the command has ended the cap sweeps,
+with or without a scope.
 
 ## The bound on each package's run
 
