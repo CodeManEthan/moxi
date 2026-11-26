@@ -25,7 +25,7 @@ dependencies = ["moxi>=0.1.11,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 # The first turn, readiness, Codex ids, the start listeners and the wake guard.
-turns = ["moxi-turns>=0.2.8,<0.3"]
+turns = ["moxi-turns>=0.2.9,<0.3"]
 # Identities, scopes, directors, the with: posture and the console name.
 comms = ["moxi-comms>=0.3,<0.4"]
 # Project keys for a launch's place, a directory's key on its row, and a project's agents.

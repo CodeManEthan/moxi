@@ -100,11 +100,13 @@
   shells deep at most; what the reader doesn't read goes through. It resolves `kill`,
   `pkill`, `killall` (macOS's `-m` as a pattern), `pgrep`/`pidof` substitutions,
   `pgrep | xargs kill`, `taskkill` (`/PID`, `/IM`, and Git Bash's `//PID`, `//IM`) and
-  PowerShell's `Stop-Process`; a redirection is no target, and a `${...}` default bash
-  splits gives the words bash gives (`kill ${x:- 211 }`). On Windows a Codex shell call is
-  read as PowerShell, and Git Bash's `kill`, `pkill` and `killall`, which take the MSYS
-  runtime's pids, are let through unjudged. The `turns` extra asks for moxi-turns 0.2.8
-  or later.
+  PowerShell's `Stop-Process` (its `-Id:211` and `-Name:x` forms too, and on the right of
+  an assignment, `$null = Stop-Process ...`); a redirection is no target, and a `${...}`
+  default bash splits gives the words bash gives (`kill ${x:- 211 }`). On Windows a Codex
+  shell call is read as PowerShell, and Git Bash's `kill`, `pkill` and `killall`, which
+  take the MSYS runtime's pids, are let through unjudged. Without turns, or with a turns
+  that has no shell reader, it resolves no target and every call goes through. The
+  `turns` extra asks for moxi-turns 0.2.9 or later.
 - The `stop_at` row (needs usage, turns and slots; unset unless set) sets a hard stop past
   the relaunch line, a multiple `<k>x` such as `2.5x`. It is taken only on a launch that
   relaunches itself and is warned at a `warn_at` mark below it. A `stop_at` typed or set

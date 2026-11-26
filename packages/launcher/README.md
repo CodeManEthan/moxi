@@ -807,7 +807,9 @@ naming the session and how long its cache has been cold, and saying to relaunch 
 
 The guard reads the call through turns' shell reader, so a kill is found wherever the
 shell would run it: after `&&`, `;` or `|`, inside `if`, `while` or `{ }`, behind
-`sudo`, `env`, `nohup` or `timeout`, in a `$(...)` or backtick substitution, in an
+`sudo`, `env`, `nohup` or `timeout` and their options, short or long, on the right of a
+PowerShell assignment (`$null = Stop-Process -Id:211`), in a `$(...)` or backtick
+substitution, in an
 unquoted heredoc's body, and in a script handed to another shell (`bash -c '...'`,
 `pwsh -Command '...'`, `cmd /c ...`, a heredoc on `bash`, `echo '...' | sh`), three
 shells deep. A kill in a quoted heredoc or a single-quoted string is text, and ends

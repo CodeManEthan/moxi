@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib
 import shlex
+from types import SimpleNamespace
 
 import pytest
 from moxi import modules
@@ -216,6 +217,23 @@ def test_powershell_forms_resolve_too(command, pids):
     assert wake.targets(command, table(), powershell=True) == pids
 
 
+@pytest.mark.parametrize("command, pids", [
+    ("Stop-Process -Id:211", [211]),
+    ("Stop-Process -id:211,111 -Force", [211, 111]),
+    ("Stop-Process -Id:211, 111", [211, 111]),
+    ("Stop-Process -Id: 211", [211]),
+    ("spps -Name:python3", [211]),
+    ("Stop-Process -ProcessName:pyth*", [211]),
+    ("Stop-Process -Id 211 -Confirm:$false", [211]),
+    ("Stop-Process -Confirm:$false 211", [211]),
+    ("Stop-Process -Id 211 -WhatIf:$false", [211]),
+    ("Stop-Process -Id 211 -WhatIf:$true", []),
+    ("Stop-Process -Id:(Get-Content pid.txt)", []),
+])
+def test_a_parameter_s_colon_form_binds_as_powershell_binds_it(command, pids):
+    assert wake.targets(command, table(), powershell=True) == pids
+
+
 # -- every command the shell reader gives --------------------------------------------------
 
 def nested(text: str, times: int) -> str:
@@ -264,6 +282,11 @@ SH, PS = "Bash", "PowerShell"
     (SH, "env -i X=1 nohup kill 211"),
     (SH, "timeout 5 kill 211"),
     (SH, "sudo --preserve-env kill 211"),
+    (SH, "sudo --non-interactive kill 211"),
+    (SH, "sudo --set-home --user root kill 211"),
+    (SH, "env --unset=X kill 211"),
+    (SH, "env --unset X --ignore-environment kill 211"),
+    (SH, "timeout --signal=KILL 5 kill 211"),
     # Heredocs with an unquoted delimiter: the body's substitutions run.
     (SH, "cat <<EOF\n$(kill 211)\nEOF"),
     (SH, "cat <<EOF\n`kill 211`\nEOF"),
@@ -274,6 +297,11 @@ SH, PS = "Bash", "PowerShell"
     (PS, "if ($true) { Stop-Process -Id 211 }"),
     (PS, "try {Stop-Process -Id 211} catch {}"),
     (PS, "& Stop-Process -Id 211"),
+    # A PowerShell assignment's pipeline.
+    (PS, "$null = Stop-Process -Id 211"),
+    (PS, "$x = Stop-Process -Id 211 -PassThru"),
+    (PS, "[array]$x += Stop-Process -Id 211 -PassThru"),
+    (PS, "$x = $null = Stop-Process -Id:211"),
     # cmd.
     (SH, "cmd /c taskkill /PID 211"),
     (SH, 'cmd.exe //c "taskkill /PID 211"'),
@@ -347,6 +375,20 @@ def test_every_command_the_reader_gives_is_refused_on_a_cold_target(tool, comman
 def test_what_the_reader_does_not_read_ends_nothing(tool, command):
     assert wake.targets(command, table(), powershell=tool == PS, system=LINUX) == []
     reason, asked = judged(command, tool=tool)
+    assert reason is None and asked == []
+
+
+@pytest.mark.parametrize("loaded", [
+    SimpleNamespace(ok=False, api=None),
+    SimpleNamespace(ok=True, api=SimpleNamespace(ToolCall=ToolCall)),
+], ids=["turns-cannot-load", "turns-without-the-reader"])
+def test_without_turns_reader_nothing_is_resolved(monkeypatch, loaded):
+    real = modules.load
+    monkeypatch.setattr(modules, "load",
+                        lambda name, **kw: loaded if name == "turns" else real(name, **kw))
+    command = 'kill 211; bash -c "kill 211"'
+    assert wake.targets(command, table(), system=LINUX) == []
+    reason, asked = judged(command)
     assert reason is None and asked == []
 
 

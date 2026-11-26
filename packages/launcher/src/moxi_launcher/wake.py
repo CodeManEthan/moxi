@@ -98,9 +98,7 @@ COLD = "cold"
 #: How far up a target's parents are walked before it counts as under no session.
 WALK_LIMIT = 64
 
-_SHELL_TOOLS = frozenset({"Bash"})
 _POWERSHELL_TOOLS = frozenset({"PowerShell"})
-_OWN_SHELL = frozenset({"$!", "$$", "${!}", "${$}"})
 #: The platforms whose shells read differently (`sys.platform`'s names).
 WINDOWS, MACOS = "win32", "darwin"
 #: The kill commands a Windows shell call isn't judged by: Git Bash's take MSYS pids.
@@ -397,12 +395,18 @@ def _read(text: str, dialect: str, depth: int, procs: Procs, system: str,
                 _read(script.text, script.dialect, depth - 1, procs, system, found)
 
 
+#: What the guard reads commands with: turns' shell reader (moxi-turns 0.2.8 and later).
+_READER = ("read_shell", "shell_scripts", "command_word_index")
+
+
 def _turns() -> Any:
-    """turns' API, or None when turns can't be loaded."""
+    """turns' API, or None when turns can't be loaded or has no shell reader."""
     from moxi import modules
 
     found = modules.load("turns")
-    return found.api if found.ok else None
+    if not found.ok or not all(hasattr(found.api, name) for name in _READER):
+        return None
+    return found.api
 
 
 def _subs(command: Any) -> Iterator[str]:
@@ -749,13 +753,22 @@ def _ps_command(words: list[Any], procs: Procs) -> list[int]:
             continue
         text = word.text
         if text.startswith("-") and len(text) > 1 and not text[1:].isdigit():
-            param = text[1:].rstrip(":").lower()
+            # `-Id:211` binds its value as `-Id 211` does; `-Id:` takes the next word.
+            param, colon, value = text[1:].partition(":")
+            param = param.lower()
             if "whatif".startswith(param) and len(param) >= 2:
-                return []
+                if not colon or value.lower() == "$true":
+                    return []
+                wanted = None
+                continue
             wanted = ids if "id".startswith(param) else \
                 names if "name".startswith(param) or "processname".startswith(param) \
                 else None
-            continue
+            if not value:
+                continue
+            if wanted is None:
+                continue  # another parameter's value, as `-Confirm:$false`
+            text = value
         values = [v for v in text.split(",") if v]
         if wanted is None and not ids and not names:
             wanted = ids  # the first positional is -Id
