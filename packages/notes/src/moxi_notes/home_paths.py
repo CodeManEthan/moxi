@@ -635,6 +635,7 @@ def _write(found: Pass, one: FilePlan, real_root: str) -> None:
 
 
 def _write_link(found: Pass, one: FilePlan) -> None:
+    import moxi.files
     from moxi.paths import link_target
 
     full = os.path.join(found.root, one.path)
@@ -646,7 +647,7 @@ def _write_link(found: Pass, one: FilePlan) -> None:
                             f".{os.path.basename(full)}.{os.urandom(4).hex()}.tmp")
         os.symlink(one.new_target, temp)
         try:
-            os.rename(temp, full)
+            moxi.files.replace(temp, full)
         except OSError:
             os.unlink(temp)
             raise

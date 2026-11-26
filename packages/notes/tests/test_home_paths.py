@@ -173,6 +173,29 @@ def test_a_link_inside_the_root_is_made_relative_and_one_outside_is_listed(tmp_p
     assert link_target(path / "out.md") == str(home() / "outside.md")
 
 
+def test_a_link_is_rewritten_through_the_cores_replace(monkeypatch):
+    """A rename onto an existing link fails on Windows; the core's replace takes its
+    place there and waits out a moment's refusal."""
+    import moxi.files
+
+    path = notes({"target/a.md": "a\n"}, commit=False)
+    (path / "in.md").symlink_to(str(path / "target" / "a.md"))
+    git("add", "-A", cwd=path)
+    git("commit", "-q", "-m", "a link", cwd=path)
+    moves = []
+    real = moxi.files.replace
+
+    def spy(src, dst):
+        moves.append(os.path.relpath(dst, path))
+        real(src, dst)
+
+    monkeypatch.setattr(moxi.files, "replace", spy)
+    code, out, err = run("--apply")
+    assert code == 0, out + err
+    assert moves == ["in.md"]
+    assert link_target(path / "in.md") == os.path.join("target", "a.md")
+
+
 def test_a_binary_file_and_one_over_max_mib_are_listed_not_read():
     configure(max_mib=1)
     notes({"deck.pptx": b"PK\0\0" + hh().encode() + b"/x",
