@@ -67,7 +67,9 @@ and hands the runner Claude's table, in the first line and in a `guards` line be
 `ready`'s context answer. The runner matches each tool call against it in its own
 process and asks `/ask/guard` only for calls judge guards cover; the endpoint runs those
 judges (`moxi_turns.guards.run`). A guard on the list that did not load is named once in
-a `ready`'s start context.
+a `ready`'s start context. Each table handed over also writes the record of the last table
+(`moxi_turns.guards.seen`), which the runner reads to refuse what those guards could refuse
+before a table comes; a record that can't be written costs one log line, never the line.
 
 After-tool and usage: the hello carries each after-tool row's floor, and a `floors` line
 follows each change. The runner asks `/ask/after-tool` after a call ran, naming the rows
@@ -130,12 +132,14 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, BinaryIO
 
 from . import claude_leg as leg
 from . import claude_stale
 from . import listeners as turns_listeners
 from .guards import ToolCall
+from .guards import seen as guards_seen
 from .guards.run import GuardRunner, prompts_of
 from .harness import CommandRequest, Delivery, Harness, Live
 from .results import (Agent, Agents, BOX_STATES, COMMAND_REFUSALS, LOST_DENIED, LOST_GONE, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
@@ -193,11 +197,15 @@ class ClaudeHarness(Harness):
         return {"pre": True, "after": True}
 
     def __init__(self, out: BinaryIO, *, pid: int | None = None, cwd: str | None = None,
-                 on_end=None, guards: GuardRunner | None = None):
+                 on_end=None, guards: GuardRunner | None = None,
+                 seen_path: str | os.PathLike | None = None):
         self.pid = os.getppid() if pid is None else pid
         self.cwd = os.getcwd() if cwd is None else cwd
         #: The guard runner; made at `attach` with the endpoint's environment when None.
         self.guards = guards
+        #: Where each table handed over is recorded; set at `attach` from the endpoint's
+        #: environment when None.
+        self.seen_path = None if seen_path is None else Path(seen_path)
         #: The file Claude writes the session's records to, once the runner names it.
         self.record_path: str | None = None
         self.mod_version: str | None = None
@@ -234,6 +242,8 @@ class ClaudeHarness(Harness):
         super().attach(endpoint)
         if self.guards is None:
             self.guards = GuardRunner(self.name, env=endpoint.env)
+        if self.seen_path is None:
+            self.seen_path = guards_seen.record_path(endpoint.env)
 
     def serve(self, path: str) -> None:
         """Listen on `mod.sock` at `path`."""
@@ -248,9 +258,25 @@ class ClaudeHarness(Harness):
             "listen_wait_ms": int(ep.listen_wait_s * 1000),
             "prompt_wait_ms": int(round(ep.prompt_wait_s * 1000)),
             "endpoint_version": ep.version, "pid": os.getpid(),
-            "stop_after_clear": leg.STOP_AFTER_CLEAR, "guards": self.guards.reload(),
+            "stop_after_clear": leg.STOP_AFTER_CLEAR, "guards": self._table(),
             "after_tool_wait_ms": int(ep.after_tool_wait_s * 1000),
             "floors": ep.floors.values()})
+
+    def _table(self) -> list[dict[str, Any]]:
+        """Load the table again and record it (`guards.seen`). Returns it in the leg's
+        form. A table made while turns' config didn't read is not recorded: its emptiness
+        says nothing of what the list holds, and the record before it stands. Never raises
+        for the record."""
+        table = self.guards.reload()
+        if not self.guards.config_ok:
+            log.warning("the record of the guard table was not written: turns' config "
+                        "does not read")
+            return table
+        try:
+            guards_seen.write_record(table, path=self.seen_path)
+        except OSError as exc:
+            log.warning("the record of the guard table was not written: %s", exc)
+        return table
 
     def handle(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         if path == leg.PATH_REPORT:
@@ -603,7 +629,7 @@ class ClaudeHarness(Harness):
                 self.record_path = record_path
             self._learn(session_id)
             # The new table reaches the runner before the session's first call can.
-            self._lines.write({"op": leg.LINE_GUARDS, "table": self.guards.reload()})
+            self._lines.write({"op": leg.LINE_GUARDS, "table": self._table()})
             if source == "clear":
                 self._clear_ran(session_id)
             context = self.endpoint.ready(source, session_id)

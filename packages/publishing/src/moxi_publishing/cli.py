@@ -2,6 +2,10 @@
 
     moxi publishing enable PATH [--github OWNER/REPO] [--set KEY=VALUE]...
     moxi publishing disable PATH
+    moxi publishing clean-history enable|disable PATH
+    moxi publishing approval enable PATH --branch PATTERN [--branch PATTERN]...
+    moxi publishing approval disable PATH
+    moxi publishing project-add enable|disable PATH
     moxi publishing list [--json]
     moxi publishing scan [PATH] [--rev REV] [--from REV] [--ci]
     moxi publishing bump PACKAGE... [--part patch|minor|major] [--path PATH]
@@ -28,8 +32,8 @@ from moxi import exit as codes
 
 _SETS_HELP = (
     "set a piece's setting in this repo: drop-trailer and pass-trailer (the message "
-    "piece), main, protected, word-required, free-ref and standing-branch (the push "
-    "piece). Every --set for "
+    "piece), main, protected, free-ref and standing-branch (the push piece); "
+    "word-required= removes that retired setting. Every --set for "
     "one key together give that key's whole list, replacing its seed or what the repo "
     "had; KEY= alone removes the key; keys you don't name are kept. A key on pass-trailer "
     "is never dropped, even when drop-trailer holds it too.")
@@ -43,7 +47,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p = verbs.add_parser(
         "enable", help="mark a repo public and register the three guards",
         description="Mark the repo at PATH public (moxi-publishing.public in its git "
-                    "config) and register the message, content and push pieces. Where a "
+                    "config) and register the message, content and push pieces, turning "
+                    "clean history on as clean-history enable does. Where a "
                     "piece is first registered its settings start from publishing's "
                     "defaults.* config keys; a repo enabled again keeps the settings it "
                     "has.")
@@ -52,13 +57,76 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="the GitHub repo (default: read from origin when it is GitHub)")
     p.add_argument("--set", dest="sets", action="append", default=[], metavar="KEY=VALUE",
                    help=_SETS_HELP)
-    p = verbs.add_parser("disable", help="remove the three guards, then the public flag",
-                         description="Remove the three pieces from the repo at PATH, then "
-                                     "its public flag.")
+    p = verbs.add_parser(
+        "disable", help="remove the push guard, then the public flag",
+        description="Remove the push piece from the repo at PATH, then its public flag, "
+                    "then clean history where enable turned it on or the repo has no "
+                    "clean flag. A repo that kept a clean history before it was public "
+                    "keeps it.")
     p.add_argument("path", metavar="PATH")
-    p = verbs.add_parser("list", help="every repo marked public, with its pieces",
-                         description="Every repo repo has indexed that is marked public, "
-                                     "with each piece's state and settings.")
+    p = verbs.add_parser(
+        "clean-history", help="keep a repo's history publishable, public or not",
+        description="Keep the history of the repo at PATH publishable without marking it "
+                    "public: the message piece (which drops the trailers you name, "
+                    "Claude-Session among them) and the content piece, and repo's "
+                    "commit-rules piece refusing publishing's defaults.refused_trailers.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser(
+        "enable", help="turn clean history on",
+        description="Register the message and content pieces, add each key of "
+                    "defaults.refused_trailers to commit-rules' refused-trailer "
+                    "(registering commit-rules where it isn't), then write "
+                    "moxi-publishing.clean. Keys the repo already refuses are kept.")
+    s.add_argument("path", metavar="PATH")
+    s = steps.add_parser(
+        "disable", help="turn clean history off",
+        description="Remove the two pieces and the flag, and take back out only the "
+                    "refused-trailer keys enable added; commit-rules goes only when "
+                    "enable registered it and nothing else is set there. Refused in a "
+                    "public repo, which always keeps clean history.")
+    s.add_argument("path", metavar="PATH")
+    p = verbs.add_parser(
+        "approval", help="ask for the word before an agent pushes some branches",
+        description="The approval piece: a push run inside an agent's session that "
+                    "creates, moves or deletes a branch a pattern names, or any tag, "
+                    "needs MOXI_PUBLISHING_PUSH_WORD matching push.word_pattern. A push "
+                    "from your own terminal or a Moxi unit needs none. It reads no "
+                    "public or clean flag.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser(
+        "enable", help="guard the branches named",
+        description="Register the approval piece in the repo at PATH with these branch "
+                    "patterns, replacing those it had.")
+    s.add_argument("path", metavar="PATH")
+    s.add_argument("--branch", dest="branches", action="append", default=[],
+                   metavar="PATTERN", required=True,
+                   help="a branch name in which *, ? and [...] are wildcards; '*' alone "
+                        "is every branch. Give it once per pattern")
+    s = steps.add_parser("disable", help="remove push approval",
+                         description="Remove the approval piece from the repo at PATH.")
+    s.add_argument("path", metavar="PATH")
+    p = verbs.add_parser(
+        "project-add", help="let a project add turn a repo's choices on, or not",
+        description="Whether moxi projects add may turn clean history and push approval "
+                    "on in the repo at PATH, by its answers or the project_add.* "
+                    "presets. disable marks the repo left out (moxi-publishing.left-out "
+                    "in its git config); the add then leaves both off and says why. "
+                    "Neither step turns anything on or off itself.")
+    steps = p.add_subparsers(dest="step", metavar="STEP")
+    steps.required = True
+    s = steps.add_parser("disable", help="leave the repo out of project add",
+                         description="Mark the repo at PATH left out of project add.")
+    s.add_argument("path", metavar="PATH")
+    s = steps.add_parser("enable", help="let project add act in the repo again",
+                         description="Remove the left-out mark from the repo at PATH.")
+    s.add_argument("path", metavar="PATH")
+    p = verbs.add_parser(
+        "list", help="every repo with clean history, push approval or the public flag",
+        description="Every repo repo has indexed that keeps a clean history, has push "
+                    "approval, is marked public or is left out of project add: its "
+                    "choices, then each piece's state and settings.")
     p.add_argument("--json", action="store_true", help="print JSON")
     p = verbs.add_parser(
         "scan", help="scan a commit's whole tree for text a public repo can't hold",
@@ -230,10 +298,16 @@ def _scan(args, prog: str) -> int:
 
 def _print_listing(repos: list[dict]) -> None:
     if not repos:
-        print("no repo is marked public")
+        print("no repo keeps a clean history, has push approval, is marked public or is "
+              "left out of project add")
         return
     for repo in repos:
         print(repo["root"] + (f" (github {repo['github']})" if repo["github"] else ""))
+        approval = (" ".join(repo["approval"]) or "no branch, tags only"
+                    if repo["approval"] is not None else "off")
+        print(f"  public: {'yes' if repo['public'] else 'no'}; clean history: "
+              f"{'yes' if repo['clean'] else 'no'}; push approval: {approval}"
+              + ("; project add: left out" if repo["left_out"] else ""))
         for piece, state in repo["pieces"].items():
             if state is None:
                 print(f"  {piece}: missing")
@@ -257,6 +331,20 @@ def main(argv: Sequence[str] | None = None, prog: str = "moxi publishing") -> in
             lines = flag.enable(args.path, github=args.github, sets=args.sets)
         elif args.verb == "disable":
             lines = flag.disable(args.path)
+        elif args.verb == "clean-history":
+            from moxi_publishing import clean
+
+            lines = (clean.enable if args.step == "enable" else clean.disable)(args.path)
+        elif args.verb == "approval":
+            from moxi_publishing import approval
+
+            lines = (approval.enable(args.path, args.branches) if args.step == "enable"
+                     else approval.disable(args.path))
+        elif args.verb == "project-add":
+            from moxi_publishing import projects_link
+
+            lines = (projects_link.let_in(args.path) if args.step == "enable"
+                     else projects_link.leave_out(args.path))
         else:
             repos = flag.listing()
             if args.json:

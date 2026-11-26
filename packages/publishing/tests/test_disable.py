@@ -18,7 +18,9 @@ def test_disable_removes_the_pieces_then_the_flag(repo, names, capsys):
 
 
 def test_disable_on_a_repo_never_enabled_is_fine(repo):
-    assert flag.disable(repo)[-1].endswith("is no longer marked public")
+    lines = flag.disable(repo)
+    assert any(line.endswith("is no longer marked public") for line in lines)
+    assert lines[-1].endswith("no longer keeps a clean history")
 
 
 def test_disable_takes_out_a_piece_left_alone(repo, names):

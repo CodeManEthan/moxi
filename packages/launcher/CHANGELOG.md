@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- A handoff waits until its seat takes it. A seat's start no longer marks the handoff it
+  points to as picked, so the pointer comes back at every start until the handoff is
+  taken, given to a launch, or a newer one of the key is. The pointer now ends "then run:
+  moxi launcher handoff take <path>". A handoff an older launcher marked as shown stays
+  picked.
+- The handoff lines show after a `/clear` too (a compaction still shows nothing). A
+  launched session keeps its claim across the clear, so it is pointed to its own handoff.
+- New `moxi launcher handoff take [FILE] [--key KEY] [--json]` records a handoff as taken:
+  this session's waiting one with no FILE. It refuses, writing nothing, with no key, with
+  nothing waiting, and for a FILE that is missing, named for another key, or outside the
+  session's handoff folder unless `--key` names its key. A session the launcher didn't
+  start reads the handoff folder of the folder it started in, where turns knows it,
+  so a `cd` after the start doesn't refuse the pointer's own command. The pointer's
+  command quotes a path that needs it.
+- The launch log moves to schema version 5: the `picks` table is rebuilt so a pick may be
+  `taken`, keeping every row.
 - Each entry of `/api/running` and of the `running` topic carries `next_keep_alive_at`:
   when keep-warm's next nudge is due, `cache.until` less 900 s (`keepwarm.OPEN_S`), the
   moment keep-warm's window opens, as a UTC time in whole seconds with `Z`. It is set only

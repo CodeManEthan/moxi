@@ -143,7 +143,10 @@ KEPT = lb.Out("table", items={
 })
 
 #: What a run came to, as `--json` prints it: its rows, the lines said on the way, notes,
-#: the counts, the exit code, and what it kept (none for `status`).
+#: the counts, the exit code, what it kept (none for `status`), and, for `status`, the
+#: git hook's record of a failed reinstall, `{at, text}`, while it stands (else null),
+#: and the strays, each entry of a harness folder loadout places into that no placement
+#: holds, with its `path`, `harness` and `kind` (none for an install).
 OUTCOME = {
     "rows": lb.Out("list", items=ROW),
     "lines": _LINES,
@@ -151,6 +154,9 @@ OUTCOME = {
     "counts": COUNTS,
     "exit": lb.Out("int"),
     "kept": lb.Out("list", items=KEPT),
+    "reinstall_failed": lb.Out("table", items={"at": _TEXT, "text": _SAYS}, nullable=True),
+    "strays": lb.Out("list", items=lb.Out("table", items={"path": _PATH, "harness": _TEXT,
+                                                          "kind": _TEXT})),
 }
 
 #: One item a section lists: `harnesses` null for every harness; `source` a path, `module
@@ -300,19 +306,17 @@ SOURCE_DIR = {
 #: What a Replace of one row would do, for the confirm: `case` (`moves`: the placer moves
 #: what is there aside under `displaced/` and places loadout's; `keeps`: loadout keeps a
 #: copy of the file there, then writes it; null when the row isn't replaceable), the
-#: `target`, `kept_in` (the folder the copy goes to), `tracked` (git tracks what is
-#: there), `others` (how many other rows the run changes), the unified `diff` of what is
-#: there (-) against what loadout writes (+) and its `lines`, `label` (`file`, or
-#: `entry` for an MCP server its harness's CLI writes, whose diff is its entry), and
-#: `skipped`, each path the diff leaves out and `why` (`link`, `large`, `binary`,
-#: `many`). `target` and `kept_in` are null only with `problem` set, or `target` with
+#: `target`, `kept_in` (the folder the copy goes to), `others` (how many other rows the
+#: run changes), the unified `diff` of what is there (-) against what loadout writes (+)
+#: and its `lines`, `label` (`file`, or `entry` for an MCP server its harness's CLI
+#: writes, whose diff is its entry), and `skipped`, each path the diff leaves out and
+#: `why` (`link`, `large`, `binary`, `many`). `target` and `kept_in` are null only with `problem` set, or `target` with
 #: no case.
 REPLACE_PREVIEW = {
     "problem": _PROBLEM,
     "case": _MAYBE,
     "target": _MAYBE_PATH,
     "kept_in": _MAYBE_PATH,
-    "tracked": lb.Out("bool"),
     "others": lb.Out("int"),
     "label": _TEXT,
     "diff": _SAYS,

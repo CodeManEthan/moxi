@@ -1692,8 +1692,9 @@ def sk(w, monkeypatch):
     return w
 
 
-def place_settle(w, capsys, *, skills=None, replace=False):
-    code = _settle.settle("demo", replace=replace, install_skills=skills)
+def place_settle(w, capsys, *, skills=None, replace=False, accept_diff=False):
+    code = _settle.settle("demo", replace=replace, accept_diff=accept_diff,
+                          install_skills=skills)
     out, err = capsys.readouterr()
     return code, out + err
 
@@ -2042,6 +2043,9 @@ def test_an_occupant_is_refused_and_exits_1_and_replace_moves_it_aside(sk, capsy
     assert (mine / "SKILL.md").read_text() == "# mine\n"
     assert is_link(sk.codex("moxi-demo-send"))
     code, out = place_settle(sk, capsys, replace=True)
+    assert code == 1 and "pass --accept-diff to replace it" in out
+    assert (mine / "SKILL.md").read_text() == "# mine\n"
+    code, out = place_settle(sk, capsys, replace=True, accept_diff=True)
     assert code == 0, out
     assert is_link(mine) and f"demo: moved {mine} to " in out
     displaced = moxi.paths.core().data_dir() / "displaced"
@@ -2068,10 +2072,28 @@ def test_an_occupant_git_tracks_is_refused_and_replace_moves_it_aside(sk, capsys
     assert code == 1
     assert (f"demo: moxi-demo-send for claude not placed: {mine} is a folder the placer "
             f"did not mark, and git tracks it") in out
-    code, out = place_settle(sk, capsys, replace=True)
+    code, out = place_settle(sk, capsys, replace=True, accept_diff=True)
     assert code == 0, out
     assert is_link(mine) and f"demo: moved {mine} to " in out
     assert f"demo: placed skill moxi-demo-send for claude ({mine})" in out
+
+
+def test_at_a_terminal_a_different_occupant_is_asked_about_once(sk, capsys, monkeypatch):
+    sk.skills("moxi-demo-send")
+    mine = sk.claude("moxi-demo-send")
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("# mine\n")
+    asked = []
+    monkeypatch.setattr(_settle.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or "n")
+    code, out = place_settle(sk, capsys, skills=True, replace=True)
+    assert code == 1 and len(asked) == 1
+    assert asked[0].startswith(f"{mine} differs from what would be placed")
+    assert (mine / "SKILL.md").read_text() == "# mine\n"
+    monkeypatch.setattr("builtins.input", lambda q: asked.append(q) or "y")
+    code, out = place_settle(sk, capsys, skills=True, replace=True)
+    assert code == 0, out
+    assert len(asked) == 2 and is_link(mine)
 
 
 def test_a_skills_dir_not_on_disk_or_a_broken_ledger_fails_the_step(sk, capsys,

@@ -4,8 +4,12 @@ Read-only, and no row uses the network. For each repo repo has indexed:
 
 - `fail` when the repo carries the public flag and one of the three pieces is missing or
   disabled there, since part of what the flag promises then doesn't run;
-- `fail` when a publishing piece is registered in a repo without the flag: it refuses
-  every commit or push there;
+- `fail` when a publishing piece is registered in a repo without its flag (the message
+  and content pieces need the clean or public flag, the push piece the public one): it
+  refuses every commit or push there;
+- for a repo that keeps clean history and isn't public: `fail` when the message or
+  content piece is missing or disabled, and the interpreter and later-hook rows below for
+  those two pieces, whose fixes keep the repo private; else one `ok` row;
 - `fail` when a hook command repo wrote for a piece's event names another interpreter
   than `moxi-publishing.interpreter`, the one `enable` registered the pieces with;
 - `fail` when a commit-msg hook of the repo's own runs after the pieces while the message
@@ -17,20 +21,29 @@ Read-only, and no row uses the network. For each repo repo has indexed:
 - `warn` when `moxi-publishing.github` is unset, when `publishing.yml`, the public scan
   GitHub runs on every push, is missing, and when a workflow file `moxi publishing
   workflows write` writes is there but differs from its template;
+- `fail` when the push piece still holds the retired `word-required` as true (it then
+  refuses every push), and `warn` when it holds it with any other value, naming the
+  commands that move it to push approval and remove it;
 - for a repo whose push piece sets `standing-branch`: `fail` when a pattern is bad (the
-  piece then refuses every push) or `moxi-publishing.github` is unset (no push then goes
-  with no word), and `warn` when no push URL of the remote `origin` reduces, by the push
-  piece's rule (`push.github_repo`), to `moxi-publishing.github`, naming each URL. The
-  URLs are git's own (`git remote get-url --push --all origin`): `pushurl` where set, else
-  `url`, each after `insteadOf` and `pushInsteadOf` rewriting, as git hands them to the
-  pre-push hook. A repo with no `origin`, or an `origin` with no URL, warns too, since
-  `origin` then takes no standing push without the word;
+  piece then refuses every push) or `moxi-publishing.github` is unset (no push of `main`
+  then waits for CI on a standing branch), and `warn` when no push URL of the remote
+  `origin` reduces, by the push piece's rule (`push.github_repo`), to
+  `moxi-publishing.github`, naming each URL. The URLs are git's own (`git remote get-url
+  --push --all origin`): `pushurl` where set, else `url`, each after `insteadOf` and
+  `pushInsteadOf` rewriting, as git hands them to the pre-push hook. A repo with no
+  `origin`, or an `origin` with no URL, warns too, since a push of `main` to `origin`
+  then waits for no CI;
 - `ok`, one row, for a flagged repo with none of the above `fail`s, naming the standing
   patterns where there are some.
+- `ok`, one row more, for a repo left out of project add (`moxi-publishing.left-out`),
+  saying a project add turns neither clean history nor push approval on there.
 
 Then, once: `warn` when secrets' private names list is empty or can't be read, and when
 the push log can't be written, since the push piece then refuses every push.
 With no flagged repo and no stray piece, one `ok` row says so.
+
+A repo's flags are its own: the clean flag `moxi publishing clean-history enable` writes,
+or the public flag, which counts as clean too.
 """
 
 from __future__ import annotations
@@ -46,8 +59,9 @@ MODULE = "publishing"
 CHECKED_TRAILER = "Commit-Check"
 DROP_KEY = "drop-trailer"
 PASS_KEY = "pass-trailer"
-#: The events of the three pieces.
+#: The events of the three pieces, and of the two clean history registers.
 EVENTS = ("commit-msg", "pre-commit", "pre-push")
+CLEAN_EVENTS = ("commit-msg", "pre-commit")
 
 
 def rows() -> Iterator[Row]:
@@ -66,8 +80,10 @@ def rows() -> Iterator[Row]:
         if found:
             seen = True
             yield from found
+        yield from _left_out_rows(str(repo.root))
     if not seen:
-        yield Row(MODULE, "repos", "ok", "no repo is marked public")
+        yield Row(MODULE, "repos", "ok", "no repo keeps a clean history or is marked "
+                                         "public")
         return
     yield from _once_rows()
 
@@ -80,18 +96,25 @@ def _repo_rows(root: str) -> Iterator[Row]:
     name = f"repo {root}"
     try:
         public = flag.is_public(root)
-        have = flag.registered(root)
+        clean = flag.is_clean(root)
+        # The approval piece reads no flag, so it never makes a repo's row here.
+        have = {piece: state for piece, state in flag.registered(root).items()
+                if piece in flag.PIECES}
     except flag.Failure as exc:
         yield Row(MODULE, name, "fail", exc.text)
         return
-    if not public and not have:
+    if not clean and not have:
+        return
+    if not clean:
+        yield Row(MODULE, name, "fail",
+                  f"{', '.join(sorted(have))} registered, but the repo is marked neither "
+                  "clean nor public, so each refuses",
+                  f"moxi publishing clean-history enable {quote_arg(root)}, or moxi "
+                  f"publishing enable {quote_arg(root)} (or: moxi publishing disable "
+                  f"{quote_arg(root)})")
         return
     if not public:
-        yield Row(MODULE, name, "fail",
-                  f"{', '.join(sorted(have))} registered, but the repo isn't marked "
-                  "public, so each refuses",
-                  f"moxi publishing enable {quote_arg(root)} (or: moxi publishing "
-                  f"disable {quote_arg(root)})")
+        yield from _clean_rows(root, name, have)
         return
     missing = [piece for piece in flag.PIECES if piece not in have]
     off = [piece for piece in flag.PIECES if piece in have and not have[piece]["enabled"]]
@@ -103,7 +126,8 @@ def _repo_rows(root: str) -> Iterator[Row]:
                   f"moxi publishing enable {quote_arg(root)}" if missing else
                   f"moxi repo git-hooks enable {quote_arg(root)} {off[0]}")
         return
-    problems = list(_interpreter_rows(root, name)) + list(
+    problems = list(_leftover_rows(root, name, have)) + list(
+        _interpreter_rows(root, name)) + list(
         _later_hook_rows(root, name, have)) + list(_warn_rows(root, name)) + list(
         _standing_rows(root, name, have))
     yield from problems
@@ -111,6 +135,75 @@ def _repo_rows(root: str) -> Iterator[Row]:
         patterns = _standing_values(have)
         yield Row(MODULE, name, "ok", "marked public; the three pieces are enabled" + (
             f"; standing branches: {' '.join(patterns)}" if patterns else ""))
+
+
+def _left_out_rows(root: str) -> Iterator[Row]:
+    """The row of a repo left out of project add; none for any other, or one whose git
+    config can't be read (its own rows say so)."""
+    from moxi_publishing import flag
+
+    try:
+        left_out = flag.is_left_out(root)
+    except flag.Failure:
+        return
+    if left_out:
+        yield Row(MODULE, f"repo {root} project add", "ok",
+                  f"left out of project add ({flag.LEFT_OUT}): a project add turns neither "
+                  "clean history nor push approval on here")
+
+
+def _clean_rows(root: str, name: str, have: dict) -> Iterator[Row]:
+    """The rows of a repo that keeps clean history and isn't public."""
+    from moxi_repo.api import quote_arg
+
+    from moxi_publishing import clean, flag
+
+    if flag.PUSH in have:
+        yield Row(MODULE, name, "fail",
+                  f"{flag.PUSH} is registered, but the repo isn't marked public, so it "
+                  "refuses every push",
+                  f"moxi repo git-hooks remove {quote_arg(root)} {flag.PUSH} (or: moxi "
+                  f"publishing enable {quote_arg(root)})")
+    missing = [piece for piece in clean.PIECES if piece not in have]
+    off = [piece for piece in clean.PIECES if piece in have and not have[piece]["enabled"]]
+    if missing or off:
+        parts = ([f"missing: {', '.join(missing)}"] if missing else []) + (
+            [f"disabled: {', '.join(off)}"] if off else [])
+        yield Row(MODULE, name, "fail",
+                  f"keeps a clean history, but not every guard runs ({'; '.join(parts)})",
+                  f"moxi publishing clean-history enable {quote_arg(root)}" if missing else
+                  f"moxi repo git-hooks enable {quote_arg(root)} {off[0]}")
+        return
+    problems = list(_interpreter_rows(root, name, public=False)) + list(
+        _later_hook_rows(root, name, have, public=False))
+    yield from problems
+    if not any(row.state == "fail" for row in problems) and flag.PUSH not in have:
+        yield Row(MODULE, name, "ok",
+                  "keeps a clean history; the message and content pieces are enabled")
+
+
+def _leftover_rows(root: str, name: str, have: dict) -> Iterator[Row]:
+    """The row for a push piece that still holds the retired `word-required`."""
+    from moxi_repo.api import quote_arg
+
+    from moxi_publishing import flag, push
+
+    values = [v.strip() for v in have[flag.PUSH]["settings"].get(push.WORD_REQUIRED, [])
+              if v.strip()]
+    if not values:
+        return
+    fix = (f"moxi publishing approval enable {quote_arg(root)} --branch PATTERN, then "
+           f"moxi publishing enable {quote_arg(root)} --set {push.WORD_REQUIRED}=")
+    if push._true(values[-1]):
+        yield Row(MODULE, name, "fail",
+                  f"the push piece still holds {push.WORD_REQUIRED} = true, which is "
+                  "retired, so it refuses every push; the word is push approval's now",
+                  fix)
+        return
+    yield Row(MODULE, name, "warn",
+              f"the push piece still holds the retired {push.WORD_REQUIRED} "
+              f"({values[-1]}), which nothing reads",
+              f"moxi publishing enable {quote_arg(root)} --set {push.WORD_REQUIRED}=")
 
 
 def _standing_values(have: dict) -> list[str]:
@@ -141,23 +234,23 @@ def _standing_rows(root: str, name: str, have: dict) -> Iterator[Row]:
     if not github:
         yield Row(MODULE, name, "fail",
                   f"{push.STANDING_BRANCH} is {names}, but {flag.GITHUB} is unset, so no "
-                  "push of a standing branch goes with no word",
+                  "push of main waits for CI on a standing branch",
                   f"{fix} --github OWNER/REPO")
         return
     done = flag._git(root, "remote", "get-url", "--push", "--all", "origin")
     urls = [u for u in done.stdout.splitlines() if u] if done.returncode == 0 else []
     if not urls:
         yield Row(MODULE, name, "warn",
-                  f"the repo has no remote origin with a URL, so a push of {names} goes "
-                  "with no word nowhere",
+                  "the repo has no remote origin with a URL, so no push of main there "
+                  f"waits for CI on {names}",
                   f"git -C {quote_arg(root)} remote add origin git@github.com:{github}.git")
         return
     if not any(push.github_repo(url) == github for url in urls):
         shown = ", ".join(push._shown_url(url) for url in urls)
         yield Row(MODULE, name, "warn",
                   f"no push URL of origin ({shown}) reduces to {github} ({flag.GITHUB}) "
-                  "in one of the three forms git sends to GitHub, so a push of "
-                  f"{names} there asks for the word",
+                  "in one of the three forms git sends to GitHub, so a push of main "
+                  f"there waits for no CI on {names}",
                   f"git -C {quote_arg(root)} remote set-url --push origin "
                   f"git@github.com:{github}.git")
 
@@ -179,13 +272,14 @@ def hook_commands(status: dict) -> dict[str, str | None]:
     return {event: (events.get(event) or {}).get("command") for event in EVENTS}
 
 
-def _interpreter_rows(root: str, name: str) -> Iterator[Row]:
+def _interpreter_rows(root: str, name: str, *, public: bool = True) -> Iterator[Row]:
     from moxi_repo.api import quote_arg
 
     from moxi_publishing import flag
 
     recorded = flag.config_get(root, flag.INTERPRETER)
-    fix = f"moxi publishing enable {quote_arg(root)}"
+    fix = (f"moxi publishing enable {quote_arg(root)}" if public
+           else f"moxi publishing clean-history enable {quote_arg(root)}")
     if not recorded:
         yield Row(MODULE, name, "fail", f"{flag.INTERPRETER} is unset, so the interpreter "
                                         "the pieces run with can't be checked", fix)
@@ -193,8 +287,9 @@ def _interpreter_rows(root: str, name: str) -> Iterator[Row]:
     # repo writes the interpreter into every hook command as one single-quoted sh word
     # with forward slashes.
     word = "'" + recorded.replace("\\", "/").replace("'", "'\\''") + "'"
+    events = EVENTS if public else CLEAN_EVENTS
     wrong = [event for event, text in hook_commands(_status(root)).items()
-             if text is None or word not in text]
+             if event in events and (text is None or word not in text)]
     if wrong:
         yield Row(MODULE, name, "fail",
                   f"the {', '.join(wrong)} hook command{'s' if len(wrong) > 1 else ''} "
@@ -211,7 +306,8 @@ def drops_checked_trailer(values) -> bool:
     return not named or any(v.casefold() == CHECKED_TRAILER.casefold() for v in named)
 
 
-def _later_hook_rows(root: str, name: str, have: dict) -> Iterator[Row]:
+def _later_hook_rows(root: str, name: str, have: dict, *,
+                     public: bool = True) -> Iterator[Row]:
     from moxi_repo.api import quote_arg
 
     from moxi_publishing import flag
@@ -225,7 +321,8 @@ def _later_hook_rows(root: str, name: str, have: dict) -> Iterator[Row]:
                   + (f"names {CHECKED_TRAILER}" if values and any(v.strip() for v in values)
                      else f"holds no value, which reads as the seed naming {CHECKED_TRAILER}")
                   + ", so that hook never sees the line if it checks it",
-                  _later_hook_fix(root, values, settings.get(PASS_KEY, [])))
+                  _later_hook_fix(root, values, settings.get(PASS_KEY, []),
+                                  public=public))
 
 
 def _others(values) -> list[str]:
@@ -234,10 +331,12 @@ def _others(values) -> list[str]:
             and v.strip().casefold() != CHECKED_TRAILER.casefold()]
 
 
-def _later_hook_fix(root: str, drop, passed) -> str:
+def _later_hook_fix(root: str, drop, passed, *, public: bool = True) -> str:
     """An `enable` that leaves a drop list the row passes: the repo's other drop keys, or
     the seed's when it has none, since a list left empty reads as the seed again; and the
-    repo's pass keys with the checked trailer added, since `--set` replaces a whole list."""
+    repo's pass keys with the checked trailer added, since `--set` replaces a whole list.
+    For a repo that isn't public it is repo's `git-hooks add` of the message piece, which
+    sets the same keys without marking the repo public."""
     from moxi.config import ConfigError
     from moxi_repo.api import quote_arg
 
@@ -254,7 +353,8 @@ def _later_hook_fix(root: str, drop, passed) -> str:
         passing.append(CHECKED_TRAILER)
     sets = " ".join([f"--set {quote_arg(f'{DROP_KEY}={v}')}" for v in keep]
                     + [f"--set {quote_arg(f'{PASS_KEY}={v}')}" for v in passing])
-    fix = f"moxi publishing enable {quote_arg(root)} {sets}"
+    fix = (f"moxi publishing enable {quote_arg(root)} {sets}" if public else
+           f"moxi repo git-hooks add {quote_arg(root)} publishing/message {sets}")
     if keep:
         return fix
     return (f"name a key other than {CHECKED_TRAILER} on {DROP_KEY}, since a list with "

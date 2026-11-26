@@ -58,9 +58,13 @@ UNSCANNED_TEXT = ("The hits' lines couldn't be checked for secrets together, so 
 DESCRIPTION = (
     "Search past agent sessions on this machine (Claude Code, Codex, OpenCode) through "
     "memory's keyword index. Each hit gives the session, the subagent if any, harness, "
-    "time, project, kind and a snippet; the newest messages holding every word and the "
-    "newest holding any word are ranked together. Use read_session to open a hit's "
-    "session around its time. " + UNTRUSTED)
+    "time, project, kind, writer and a snippet; the newest messages holding every word "
+    "and the newest holding any word are ranked together. The writers it returns: "
+    "person (typed at the prompt), model (the model's turn or tool call), unknown (a "
+    "submitter the harness doesn't name), and, for a message something delivered into "
+    "the session, hook (a plugin's, such as comms mail), channel, peer, coordinator or "
+    "task (a background task's notice). Use read_session to open a hit's session around "
+    "its time. " + UNTRUSTED)
 
 INPUT = {
     "type": "object",
@@ -229,7 +233,7 @@ class Searcher:
         lines = [SOURCE_LINE]
         for n, hit in enumerate(hits, 1):
             lines.append(f"{n}. {local(hit.pop('_time'))} {hit['project'] or '-'} "
-                         f"{hit['kind']}: {hit['snippet']}")
+                         f"{_what(hit)}: {hit['snippet']}")
         if not hits:
             lines.append("No hits.")
         else:
@@ -260,6 +264,14 @@ class Searcher:
                                                                      between=path_cut),
                 "kind": found.kind, "writer": found.writer, "failed": found.failed,
                 "snippet": found.snippet, "_time": found.time}
+
+
+def _what(hit: Mapping[str, Any]) -> str:
+    """What a hit's text line says it is: its kind, or who delivered a delivered row."""
+    from ..rows import DELIVERED_WRITERS
+
+    writer = hit["writer"]
+    return f"delivered by {writer}" if writer in DELIVERED_WRITERS else hit["kind"]
 
 
 __all__ = ["ANNOTATIONS", "DESCRIPTION", "INPUT", "LIMIT_DEFAULT", "LIMIT_MAX", "NO_SESSIONS",

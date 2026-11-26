@@ -16,6 +16,7 @@ packages/moxi-dev/src/moxi_dev/testing.py	--markers	pytest's flag that lists the
 packages/moxi/src/moxi/_settle.py	nohup	the POSIX command that starts a program with hang-ups ignored
 packages/moxi/src/moxi/ipc/_pipe.py	INFINITE	the Windows API's constant for a wait with no timeout
 packages/moxi/src/moxi/modules.py	EntryPoint.load	the method of importlib.metadata's EntryPoint class that imports the entry point
+packages/moxi/src/moxi/place.py	ERROR_NOT_SAME_DEVICE	the Windows API's error code for a move from one volume to another
 packages/moxi/src/moxi/proc.py	KERN_PROC_PID	the macOS sysctl name for one process's kinfo_proc
 packages/moxi/src/moxi/proc.py	kp_eproc.e_ppid	the parent pid field of macOS's struct kinfo_proc
 packages/moxi/src/moxi/proc.py	kp_proc.p_pid	the pid field of macOS's struct kinfo_proc

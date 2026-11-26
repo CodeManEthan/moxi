@@ -755,3 +755,10 @@ so a listener can ask at each prompt:
 
 `word` may be left out of `send_scoped` and `scoped_state` when the module declares one
 word; with more than one, each call names it.
+
+**Finding a sent message where it was delivered.** `send_scoped` returns the message's id
+(`message_id`). A module that reads session transcripts finds that message in what the
+session was handed with `api.delivered_messages(text)`: one `api.DeliveredMessage`
+(`message_id`, and `start` and `end`, where it runs in the text, frame line to closing
+line) per message comms framed there, in order. It reads the text alone, and only lines
+at column zero count, so a body's text, every line of it indented, names no message.

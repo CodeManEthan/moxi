@@ -1,7 +1,7 @@
 """The settle step and the teardown, each in a child process of `moxi install` or
 `moxi uninstall`, and how the parent starts and waits for that child.
 
-    python -m moxi._settle MODULE [--replace] [--skills | --no-skills]
+    python -m moxi._settle MODULE [--replace [--accept-diff]] [--skills | --no-skills]
                                                    the settle step of one module
     python -m moxi._settle --setup-only MODULE     a module's SETUP alone, then its record
     python -m moxi._settle --teardown MODULE       a module's TEARDOWN
@@ -266,7 +266,7 @@ class Outcome:
 
 
 def child_argv(python: str, module: str, *, replace: bool = False,
-               teardown: bool = False, setup_only: bool = False,
+               accept_diff: bool = False, teardown: bool = False, setup_only: bool = False,
                install_skills: bool | None = None) -> list[str]:
     """The settle child's command line (or the teardown child's, or the `--setup-only`
     child's). `install_skills` is the install's answer ahead to the skills question: True
@@ -277,6 +277,8 @@ def child_argv(python: str, module: str, *, replace: bool = False,
     if setup_only:
         return [*argv, SETUP_ONLY, module]
     argv += [module] + (["--replace"] if replace else [])
+    if accept_diff:
+        argv.append("--accept-diff")
     if install_skills is not None:
         argv.append("--skills" if install_skills else "--no-skills")
     return argv
@@ -442,6 +444,9 @@ class Settle:
     #: The command a failed `SETUP`'s line says to run again; None for
     #: `moxi install <module>`.
     again: str | None = None
+    #: Whether a replace moves a placed skill's occupant aside though it differs from
+    #: the module's (`--accept-diff`); without it a terminal is asked and none refuses.
+    accept_diff: bool = False
 
     @property
     def restart(self) -> bool:
@@ -449,7 +454,8 @@ class Settle:
         return self.found.version != self.before
 
 
-def settle(module: str, *, replace: bool = False, install_skills: bool | None = None) -> int:
+def settle(module: str, *, replace: bool = False, accept_diff: bool = False,
+           install_skills: bool | None = None) -> int:
     """Run `module`'s settle step in this process; returns the exit code: 0, 1 on a
     failure, `INTERRUPTED` on a stop request."""
     from . import modules
@@ -459,7 +465,8 @@ def settle(module: str, *, replace: bool = False, install_skills: bool | None = 
         say(f"{module}: not set up, the module is {found.state}"
             + (f": {found.reason}" if found.reason else ""), err=True)
         return 1
-    step = Settle(module, found, replace, setup_version(module), skills=install_skills)
+    step = Settle(module, found, replace, setup_version(module), skills=install_skills,
+                  accept_diff=accept_diff)
     try:
         try:
             try:
@@ -951,7 +958,10 @@ def _skills(step: Settle) -> bool:
     if not own and (not wanted or not skills_wanted(step, wanted, usable)):
         return not misnamed
     with held():
-        done = place.apply(steps, replace=step.replace,
+        stdin = sys.stdin
+        terminal = stdin is not None and stdin.isatty()
+        done = place.apply(steps, replace=step.replace, accept_diff=step.accept_diff,
+                           ask=_ask if terminal else None,
                            say=lambda line: say(f"{module}: {line}"))
     return _skills_report(module, steps, done, replace=step.replace) and not misnamed
 
@@ -1280,6 +1290,7 @@ def _parse(argv: list[str]):
     parser = argparse.ArgumentParser(prog="python -m moxi._settle")
     parser.add_argument("module")
     parser.add_argument("--replace", action="store_true")
+    parser.add_argument("--accept-diff", action="store_true")
     parser.add_argument("--teardown", action="store_true")
     parser.add_argument(SETUP_ONLY, dest="setup_only", action="store_true")
     answer = parser.add_mutually_exclusive_group()
@@ -1308,7 +1319,8 @@ def main(argv: list[str] | None = None,
             return teardown(args.module)
         if args.setup_only:
             return setup_only(args.module)
-        return settle(args.module, replace=args.replace, install_skills=args.skills)
+        return settle(args.module, replace=args.replace, accept_diff=args.accept_diff,
+                      install_skills=args.skills)
     finally:
         _ignore_signals()
 

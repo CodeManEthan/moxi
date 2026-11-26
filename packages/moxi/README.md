@@ -74,6 +74,8 @@ commands:
   shows first, its group, unit, words for an enum's values, and whether a change can hurt
   or is made at the terminal or on another page). `moxi config set --json` and `unset
   --json` print one object, `{changed, problem, fix, units}`, in place of their lines.
+  Run inside an agent's session, a `set` or `unset` that would turn a module's timer on
+  is refused (exit 3): turning a timer on is for the person at the keyboard.
 - A module may keep one TOML table of rows in a file of its own, which it reads, checks
   and writes itself, and name it in its announcement's `CONFIG_TABLES`
   (`{"defaults": "package.module:NAME"}`, listed by `moxi modules --json` as
@@ -97,6 +99,12 @@ commands:
   help.
 - `moxi version` prints the versions of `moxi` and the modules it sees.
 
+A module that keeps an act for the person at the keyboard asks `moxi.terminal.agent()`,
+which names the agent (`claude`, `codex` or `opencode`) whose session started the run, or
+None. It reads the process tree and the marks a harness sets, on Windows, macOS and Linux.
+It is a fence, not a lock: a process that clears its environment and runs outside the
+agent's process tree is not caught.
+
 ## What it does outside its own folders
 
 The core keeps its own files in the usual places for this system (`moxi paths moxi`
@@ -113,7 +121,11 @@ behalf, and `moxi uninstall` removes what it wrote:
 - A module's daemons and timers, written as systemd user units in
   `~/.config/systemd/user` (launchd agents on macOS, Task Scheduler tasks on Windows).
   Each file is marked as Moxi's, and a file Moxi didn't write is never touched unless
-  `--replace` moves it aside.
+  `--replace` moves it aside. A skill or agent file in the way is first compared with the
+  module's: equal, it is replaced; different, `moxi install` asks at a terminal, refuses
+  without one, and replaces it without asking with `--accept-diff`. A place that fails
+  after the move puts the file back. `moxi.place.move_aside` moves a path no placement
+  holds into the same `displaced/` folder the same way, for a module that clears one.
 - Whatever the module's own setup does, which its README describes.
 
 A shortcut (`moxi shortcut`) is a small script written beside the `moxi` on PATH.

@@ -85,6 +85,10 @@ def test_endpoint_json_names_this_env_script(placed):
     assert data["command"] == str(paths.script("moxi-turns-endpoint"))
     assert Path(data["command"]).is_absolute()
     assert data["version"] == package_version()
+    from moxi_turns.guards import seen
+
+    assert data["guards_seen"] == str(seen.record_path())
+    assert Path(data["guards_seen"]).is_absolute()
 
 
 def test_the_config_key_wins_and_must_be_absolute(turns_env, placed):

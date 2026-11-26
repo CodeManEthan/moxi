@@ -1,11 +1,14 @@
 """`moxi loadout`: your skills, agents and settings, placed for each harness.
 
-    moxi loadout install [--user] [--project P]... [--replace ID]... [--dry-run] [--json]
+    moxi loadout install [--user] [--project P]... [--replace ID]... [--accept-diff]
+                         [--dry-run] [--json]
     moxi loadout status [--user] [--project P]... [--json]
     moxi loadout add KIND NAME [--user | --project P] [--harness H]... [--json]
     moxi loadout remove KIND NAME [--user | --project P] [--json]
     moxi loadout enable|disable ID [--user | --project P] [--json]
     moxi loadout list [--json]
+    moxi loadout take PATH [--user | --project P] [--json]
+    moxi loadout move-aside PATH [--json]
     moxi loadout global show [--diff] | global mode MODE | global remove
 
 `install` takes over the module skills you said yes to, plans the whole manifest and
@@ -13,8 +16,15 @@ applies the steps in scope (all of them without a flag). `--replace` takes a pat
 `<kind>:<name>@<harness>`. No write of loadout's destroys bytes it can't show it wrote:
 whatever a write goes over that isn't loadout's (what `--replace` replaces, an edited copy
 a removal takes away) is kept under the core's `displaced/` folder first, until you delete
-it, and the run names each copy with the command that puts it back (`BACK`).
-`status` prints one line per item that is not `ok`, then notes, then a count. `add` and
+it, and the run names each copy with the command that puts it back (`BACK`). A skill or
+agent in the way whose contents differ from what would be placed is asked about at a
+terminal, refused without one, and replaced without a question with `--accept-diff`.
+`status` prints one line per item that is not `ok`, then, under `not loadout's:`, each
+entry of a harness folder loadout places into that no placement holds (a stray), then
+notes, then a count. `take` copies a stray into the loadout folder as a source, lists it
+(in its own section unless one is named) and installs it, its bytes kept under
+`displaced/` first; `move-aside` moves a stray under `displaced/` and prints the command
+that puts it back. `add` and
 `remove` write a section's list (`add --harness` lists the item for those harnesses only,
 through that section's `disabled`, and `remove` takes the item's ids there out with it),
 `enable` and `disable` its `disabled` ids, then each installs with that item's steps as
@@ -88,6 +98,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--replace", action="append", default=[], metavar="ID",
                    help="keep what is in the way under displaced/ and place over it: a "
                         "path, or <kind>:<name>@<harness>; may repeat")
+    p.add_argument("--accept-diff", action="store_true",
+                   help="with --replace, place over a skill or agent whose contents differ "
+                        "without asking; at a terminal you are asked, and without one "
+                        "it is refused")
     p.add_argument("--dry-run", action="store_true", help="plan and print, change nothing")
     p = verb("status", "say what has drifted")
     scopes(p, many=True)
@@ -108,6 +122,11 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                                     "for every one")
         scopes(p, many=False)
     verb("list", "every item, with its kind, scope, harnesses and source")
+    p = verb("take", "copy a stray into the loadout folder, list it and install it")
+    p.add_argument("path", metavar="PATH", help="a stray, as status lists it")
+    scopes(p, many=False)
+    p = verb("move-aside", "move a stray under displaced/ and print how to put it back")
+    p.add_argument("path", metavar="PATH", help="a stray, as status lists it")
     p = verbs.add_parser("global", help="the global instruction file",
                          description="The global instruction file.")
     parts = p.add_subparsers(dest="part", metavar="PART")
@@ -209,7 +228,25 @@ def _run_install(args, scope, *, written: Sequence[str] = (), **kw) -> int:
 
 
 def _install(args) -> int:
-    return _run_install(args, _scope(args), replace=args.replace, dry_run=args.dry_run)
+    return _run_install(args, _scope(args), replace=args.replace, dry_run=args.dry_run,
+                        accept_diff=args.accept_diff, ask=_terminal_ask(args))
+
+
+def _terminal_ask(args):
+    """A yes-or-no question on stderr, answered on stdin, when both are a terminal and
+    the run prints no JSON; else None, so a different occupant is refused."""
+    if args.json or not (sys.stdin is not None and sys.stdin.isatty()
+                         and sys.stderr is not None and sys.stderr.isatty()):
+        return None
+
+    def ask(question: str) -> bool:
+        print(question, end="", file=sys.stderr, flush=True)
+        try:
+            answer = sys.stdin.readline()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return answer.strip().lower() in ("y", "yes")
+    return ask
 
 
 def _status(args) -> int:
@@ -338,8 +375,54 @@ def _global_show(args) -> int:
     return codes.OK
 
 
+def _take(args) -> int:
+    from moxi_loadout import strays
+
+    said: list[str] = []
+
+    def live(line: str) -> None:
+        print(line, file=sys.stderr, flush=True)
+        said.append(line)
+
+    try:
+        outcome = strays.take(args.path, project=args.project, user=args.user,
+                              ask=_terminal_ask(args), say=None if args.json else live)
+    except strays.Refused as exc:
+        print(f"moxi loadout take: {exc}", file=sys.stderr)
+        return codes.REFUSED
+    except OSError as exc:
+        print(f"moxi loadout take: {exc}", file=sys.stderr)
+        return codes.ERROR
+    return _emit(outcome, args, said)
+
+
+def _move_aside(args) -> int:
+    from moxi import place
+
+    from moxi_loadout import strays
+
+    try:
+        kept = strays.move_aside(args.path)
+    except strays.Refused as exc:
+        print(f"moxi loadout move-aside: {exc}", file=sys.stderr)
+        return codes.REFUSED
+    except place.PartlyMoved as exc:
+        print(f"moxi loadout move-aside: {exc}", file=sys.stderr)
+        return codes.ERROR
+    except OSError as exc:
+        print(f"moxi loadout move-aside: {exc}; it is where it was", file=sys.stderr)
+        return codes.ERROR
+    if args.json:
+        print(json.dumps(kept, indent=1))
+    else:
+        print(f"moved {kept['target']} to {kept['copy']}")
+        print(f"to put it back: {kept['back']}")
+    return codes.OK
+
+
 VERBS.update({"global": _global, "install": _install, "status": _status, "add": _add, "remove": _remove,
-              "enable": _enable, "disable": _disable, "list": _list})
+              "enable": _enable, "disable": _disable, "list": _list, "take": _take,
+              "move-aside": _move_aside})
 
 
 __all__ = ["VERBS", "EXTRA_VERBS", "main"]

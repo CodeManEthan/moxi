@@ -3,7 +3,8 @@
 Moxi's publishing module keeps private text out of a public git repo. You mark a repo
 public, and three git hook pieces, run by Moxi's repo module, guard what it commits and
 pushes. The pattern sets they read (credentials, and your private names) are Moxi's secrets
-module's.
+module's. A repo that isn't public can keep the same clean history without being called
+public ([Clean history](#clean-history)).
 
 ```sh
 moxi publishing enable ~/src/app --github alice/app
@@ -14,15 +15,138 @@ moxi publishing disable ~/src/app
 
 ## The public flag
 
-`enable` writes `moxi-publishing.public = true` into the repo's own git config, then
-registers the pieces `publishing/message` (commit-msg), `publishing/content` (pre-commit)
-and `publishing/push` (pre-push). Each piece reads the flag first: a piece registered in a
-repo without it refuses, since whoever registered it meant the repo to be guarded.
-`disable` removes the pieces, then the flag. `list` shows every repo marked public with
-each piece's state and settings.
+`enable` registers the pieces `publishing/message` (commit-msg), `publishing/content`
+(pre-commit) and `publishing/push` (pre-push), then writes `moxi-publishing.public = true`
+into the repo's own git config. A public repo always keeps a [clean
+history](#clean-history), so `enable` turns that on too: the clean flag, and the trailer
+keys commit-rules refuses. Each piece reads its flag first: a piece registered in a repo
+without it refuses, since whoever registered it meant the repo to be guarded.
+
+`disable` removes the push piece, then the public flag. Where `enable` turned clean
+history on, or the repo was enabled before clean history existed, `disable` turns it off
+too; a repo that kept a clean history before it was made public keeps it, and `disable`
+names `clean-history disable` for it.
+
+`list` shows every repo that keeps a clean history, has push approval, is marked public
+or is [left out of project add](#leaving-a-repo-out): a line with its choices (`public:
+yes; clean history: yes; push approval: main`, then `; project add: left out` where it
+is), then each piece's state and settings. `--json` gives them as `public`, `clean`,
+`approval` (the branch patterns, or null) and `left_out`.
 
 `enable` warns when secrets' private names list is empty: add yours with
 `moxi config secrets`.
+
+## Clean history
+
+A repo can keep its history publishable without being public: clean commit messages and
+no private text, so it could go public later, or be read by someone it is shared with.
+
+```sh
+moxi publishing clean-history enable ~/src/app
+moxi publishing clean-history disable ~/src/app
+```
+
+`clean-history enable` registers the message and content pieces (their settings seeded
+as `enable` seeds them), makes sure repo's commit-rules piece, `repo/commit-rules`,
+refuses each trailer key in publishing's `defaults.refused_trailers` (`Round` and
+`Reconciles`, the trailers Moxi's rounds writes for its own records), and writes
+`moxi-publishing.clean = true` into the repo's git config. A repo that already has
+commit-rules keeps its settings: the keys it doesn't refuse yet are added to its
+`refused-trailer` list, never replacing it.
+
+The message and content pieces then run as in a public repo: `Claude-Session` is dropped
+from every message, and a message or an added line holding a credential, a private name or
+a provenance pointer is refused. The push piece is not registered; nothing about pushing
+changes.
+
+`clean-history disable` removes the two pieces and the flag, and takes back out of
+`refused-trailer` only the keys `enable` added (recorded in
+`moxi-publishing.clean-trailers`). It removes commit-rules only when `enable` registered it
+and nothing else is set there. It refuses in a public repo, which always keeps clean
+history: run `moxi publishing disable` first.
+
+`moxi publishing enable` turns clean history on as part of marking a repo public.
+
+## Push approval
+
+A repo can ask for your approval before an agent pushes some of its branches. It is a
+choice of its own, apart from clean history and from being public.
+
+```sh
+moxi publishing approval enable ~/src/app --branch main --branch 'release/*'
+moxi publishing approval disable ~/src/app
+```
+
+`approval enable` registers the pre-push piece `publishing/approval` with its `branch`
+setting holding the patterns, replacing those it had. A pattern is a branch name (`main`,
+not `refs/heads/main`) in which `*`, `?` and `[...]` are wildcards; `*` alone is every
+branch. The piece reads no public or clean flag and assumes no branch names or CI: it
+guards exactly the branches its patterns name.
+
+When a push runs inside an agent's session (Moxi's agent test: a harness's program above
+the push, or the harness's mark in its environment), each ref line that creates, moves or
+deletes a named branch needs `MOXI_PUBLISHING_PUSH_WORD`, set to where the push was
+approved and matching `push.word_pattern` in full. Tags need it too: an agent's push that
+creates, moves or deletes any `refs/tags/` ref needs the word wherever approval is on,
+whatever the patterns name, so a release tag pushed by an agent needs your word even
+where the patterns name only `main`. A push from your own terminal, or from a Moxi unit
+such as notes' snapshot, needs no word.
+
+A push that passes is logged in the push log, `pushes.jsonl` in publishing's state
+directory, with the word or null and the harness the agent test named or null. Where the
+push piece runs too, its own record logs the push, word included.
+
+The message and content pieces run where the repo is marked clean or public; a public
+repo counts as clean, so a repo enabled before clean history existed needs nothing.
+Registered in a repo marked neither, they refuse every commit, naming both commands.
+
+## At project add
+
+Where projects is installed, `moxi projects add` asks two questions for a new project
+whose root is in a git repo, or whose `--create` makes one:
+
+- "Keep this repo's history publishable (clean commit messages, no private text)?",
+  suggested yes. Yes runs `moxi publishing clean-history enable` on the repo.
+- "Ask for approval before agents push to some branches?", suggested no. Yes asks which
+  branches (patterns, separated by spaces), with no suggestion; the patterns named go to
+  `moxi publishing approval enable`, and an empty answer turns nothing on.
+
+The add asks only with a terminal on both stdin and stdout. Run from a script or an
+agent's shell, it turns nothing on and prints each question with the command that sets it
+later. The Projects page's Add panel shows the same questions as fields.
+
+Three settings answer for the machine, so the add asks nothing for that choice and
+applies it, in a terminal or not:
+
+| key | values | default |
+|---|---|---|
+| `project_add.clean_history` | `ask`, `yes`, `no` | `ask` |
+| `project_add.push_approval` | `ask`, `yes`, `no` | `ask` |
+| `project_add.approval_branches` | branch patterns | `[]` |
+
+With `push_approval = "yes"` and no branches listed, a terminal add asks for them, and any
+other add turns nothing on and says so. The questions read no repo's git config, so a repo
+that already keeps a clean history is asked again; a yes then changes nothing.
+
+### Leaving a repo out
+
+A repo you never want a project add to change, say one that holds many projects' notes,
+can be left out:
+
+```sh
+moxi publishing project-add disable ~/src/shared
+moxi publishing project-add enable ~/src/shared
+```
+
+`disable` writes `moxi-publishing.left-out = true` into the repo's git config. After
+that, a project add whose root is in that repo turns neither clean history nor push
+approval on there, whatever you answer and whatever the `project_add.*` settings preset,
+and its output says so: `publishing: clean history left off: <repo> is left out of
+project add (moxi-publishing.left-out); ...`, with the command that turns it on by hand.
+The questions are still put, since they read no git config. `enable` removes the mark.
+Neither step turns clean history or push approval on or off, and `moxi publishing
+clean-history enable` and `approval enable` still act on a left-out repo. `moxi publishing
+list` and `moxi doctor publishing` show the mark for each repo repo has indexed.
 
 ## Settings
 
@@ -35,14 +159,15 @@ the repo for them.
 | message | `pass-trailer` | any number | Trailer keys a later commit-msg git hook in this repo reads: left in place at commit. |
 | push | `main` | one | The repo's main branch. |
 | push | `protected` | any number | Branches beside `main` a push may never delete. |
-| push | `word-required` | one | `true`: a push needs `MOXI_PUBLISHING_PUSH_WORD`. |
+| push | `word-required` | one | Retired: while it holds `true` every push is refused (see [The push piece](#the-push-piece)); `--set word-required=` removes it. |
 | push | `free-ref` | any number | Ref patterns outside branches and release tags a push may create, move or delete. |
-| push | `standing-branch` | any number | Patterns such as `ci/*` naming [standing branches](#standing-branches): pushed at a local branch's tip, with no word to the publishing remote. |
+| push | `standing-branch` | any number | Patterns such as `ci/*` naming [standing branches](#standing-branches): pushed only at a local branch's tip. |
 
 Where `enable` first registers a piece, the piece's settings start from publishing's
-config: `defaults.drop_trailers` (`Claude-Session` and `Commit-Check`), `defaults.main`
-(`main`) and `defaults.word_required` (`false`). Running `enable` again on a repo keeps the
-settings it has; a later change to a default reaches no repo already enabled.
+config: `defaults.drop_trailers` (`Claude-Session` and `Commit-Check`) and `defaults.main`
+(`main`). Running `enable` again on a repo keeps the settings it has; a later change to a
+default reaches no repo already enabled. `defaults.word_required` is retired: a config file
+that still sets it is read as though it didn't.
 
 `--set KEY=VALUE` sets one. Every `--set` for one key together give that key's whole
 list, **replacing** its seed or what the repo had, so `--set drop-trailer=Claude-Session`
@@ -162,14 +287,15 @@ through the message piece's sets and rules. A tag message gets neither the
 tag pattern in an annotated tag you write by hand goes public; `moxi publishing tag`
 writes a release tag's message from the CHANGELOG itself.
 
-With `word-required` set to `true`, a push needs `MOXI_PUBLISHING_PUSH_WORD`, matching
-`push.word_pattern` in full: where the push was approved. It is a record, not a proof; any
-process can set it. A blank one counts as none. The one push that needs no word is a push
-of standing branches only, to the publishing remote ([Standing
-branches](#standing-branches)). A push that passes is logged first, one JSON line in the
-module's state directory, `pushes.jsonl` (time, repo, remote, URL, word, refs, commits);
-`word` is null when none was given, and each ref of a standing branch names the pattern
-that allowed it (`standing`). A log that can't be written refuses the push.
+The push piece asks for no word: the word is [push approval](#push-approval)'s. A repo
+whose push piece still holds the retired `word-required = true` has every push refused,
+naming `moxi publishing approval enable PATH --branch PATTERN` and `moxi publishing enable
+PATH --set word-required=`, so no repo loses its approval silently. A push that passes is
+logged first, one JSON line in the module's state directory, `pushes.jsonl` (time, repo,
+remote, URL, word, refs, commits); `word` is `MOXI_PUBLISHING_PUSH_WORD` as the push
+carried it, or null when none (or a blank one) was given, and each ref of a standing
+branch names the pattern that allowed it (`standing`). A log that can't be written
+refuses the push.
 
 ### Standing branches
 
@@ -185,10 +311,10 @@ What it sends is judged as any push's, with no setting that narrows it; a forced
 what the remote's tracking refs and its old tip lack. A tag under the prefix (`refs/tags/ci/x`)
 is no standing branch.
 
-Where `word-required` is `true`, a push whose every ref is a standing branch needs no word
-when it goes to the publishing remote: the URL git hands the hook reduces to the
-OWNER/REPO in `moxi-publishing.github`. Only the whole URL in one of the three forms git
-sends to GitHub reduces:
+A standing branch needs no word from the push piece, and push approval guards one only
+where a pattern names it. The publishing remote is the URL git hands the hook that
+reduces to the OWNER/REPO in `moxi-publishing.github`; a push of `main` there waits for
+CI (below). Only the whole URL in one of the three forms git sends to GitHub reduces:
 
 - `git@github.com:OWNER/REPO`
 - `ssh://git@github.com[:PORT]/OWNER/REPO`
@@ -196,14 +322,11 @@ sends to GitHub reduces:
   one or more ASCII letters, digits, `.`, `_` and `-`
 
 each with one `.git` stripped (`R.git.git` reduces to `R.git`), OWNER being letters, digits
-and `-`, and REPO letters, digits, `.`, `_` and `-`. Anything else reduces to nothing and
-asks for the word: `http://`, a trailing `/` or newline, `ssh://git@github.com:OWNER/REPO`,
-another host, host letters in another case, an https USER holding any other byte (git sends
+and `-`, and REPO letters, digits, `.`, `_` and `-`. Anything else reduces to nothing:
+`http://`, a trailing `/` or newline, `ssh://git@github.com:OWNER/REPO`, another host, host
+letters in another case, an https USER holding any other byte (git sends
 `https://evil.example#@github.com/O/R` to evil.example), and `git@github.com/OWNER/REPO`,
-which has no colon and so is a local directory to git. A push that carries any other ref
-needs the word as before, and its standing branches are judged by the rules above. A word
-given on a standing push is judged as on any push: a malformed one refuses it, and a valid
-one is logged.
+which has no colon and so is a local directory to git.
 
 While `standing-branch` holds a bad pattern (one written into git config by hand, say),
 the piece refuses every push, naming it and the `enable` command that fixes it; a hand
@@ -236,11 +359,11 @@ passed, and one that passed and then failed on a re-run counts as failed. A read
 fails, or a missing `check-workflow` or `check-job` at C, refuses, naming which. When
 `main` moved on since the run, push the new tip to the standing branch again and wait, or
 move `main` to the commit that passed (`git push origin C:refs/heads/main`). The rule adds
-to the word and to fast-forward only; a push of any other branch or tag reads no CI here.
+to fast-forward only; a push of any other branch or tag reads no CI here.
 
 The rule is a standing-branch repo's, on its way to GitHub. A repo with no
 `standing-branch` pattern pushes `main` as it did before the setting existed: with the
-word where `word-required` is set, forward only, and with no CI read. So does a push of
+forward only, and with no CI read. So does a push of
 `main` to any other URL, a mirror off GitHub or a local remote among them, and so does
 every push while `moxi-publishing.github` is unset, since no URL then reduces to it.
 
@@ -521,8 +644,10 @@ until you know why.
 ## Doctor
 
 `moxi doctor publishing` reads each repo repo has indexed, and uses no network. It fails
-a repo marked public where a piece is missing or disabled; a piece registered where the
-repo isn't marked public; a hook command repo wrote for the pieces that runs another
+a repo marked public where a piece is missing or disabled; a repo that keeps a clean
+history where the message or content piece is missing or disabled; a piece registered
+where the repo isn't marked as it needs (clean or public for the message and content
+pieces, public for the push piece); a hook command repo wrote for the pieces that runs another
 interpreter than the one `enable` recorded in `moxi-publishing.interpreter`; and a repo
 where a commit-msg hook of its own runs after the pieces while the message piece's
 `drop-trailer` names `Commit-Check`, or holds no value, which reads as the seed that
@@ -533,14 +658,17 @@ pass key; when `moxi-publishing.github` is unset; when `publishing.yml`, the pub
 GitHub runs on every push, is missing (a missing `release.yml` only means the repo
 doesn't release); and when a workflow file `workflows write` writes is there but differs
 from the template; and, once, when secrets' private names list is empty and when the
-push log can't be written.
+push log can't be written. It fails a push piece that still holds the retired
+`word-required = true` (every push is then refused), naming both commands that move it to
+push approval, and warns where it holds any other value.
+A repo left out of project add gets one more `ok` row, `repo <root> project add`,
+saying so.
 
 For a repo whose push piece sets `standing-branch`, it fails a bad pattern (the piece then
-refuses every push) and an unset `moxi-publishing.github` (no push then goes with no word),
-each with the `enable` command that fixes it. It warns when no push URL of the remote
-`origin` reduces to `moxi-publishing.github` by the rule in [Standing
-branches](#standing-branches), naming each URL: standing pushes there will ask for the
-word. The URLs are git's own (`git remote get-url --push --all origin`): `pushurl` where
+refuses every push) and an unset `moxi-publishing.github` (no push of `main` then waits
+for CI), each with the `enable` command that fixes it. It warns when no push URL of the
+remote `origin` reduces to `moxi-publishing.github` by the rule in [Standing
+branches](#standing-branches), naming each URL: a push of `main` there waits for no CI. The URLs are git's own (`git remote get-url --push --all origin`): `pushurl` where
 set, else `url`, after `insteadOf` and `pushInsteadOf` rewriting, as git hands them to the
 hook. A repo with no `origin` warns the same way. Otherwise the repo's `ok` row names the
 patterns.

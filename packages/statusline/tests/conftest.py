@@ -31,3 +31,10 @@ def seen(site, monkeypatch) -> Site:
     for name in [m for m in sys.modules if m.startswith(("moxi_alpha", "moxi_beta",
                                                           "moxi_gamma"))]:
         del sys.modules[name]
+
+
+@pytest.fixture(autouse=True)
+def _no_effort_variable(monkeypatch):
+    """Claude Code may set `CLAUDE_EFFORT` in the shell the tests run in; a test sets it
+    itself when it reads it."""
+    monkeypatch.delenv("CLAUDE_EFFORT", raising=False)

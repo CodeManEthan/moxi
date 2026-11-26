@@ -9,8 +9,9 @@
 // The endpoint command: `MOXI_TURNS_ENDPOINT` in the session's environment, which a launch
 // through turns' launch additions sets; else the one `endpoint.json` beside this plugin
 // names, which turns' setup writes for a user-scope install. A variable that is set but
-// not an absolute path is no endpoint, and the file is not read then. A read of the
-// variable that throws counts as unset, so the file is read.
+// not an absolute path is no endpoint, and the file is not read for the command then. A
+// read of the variable that throws counts as unset, so the file is read. The file is read
+// at most once per module load, for the command and for the record's path (below).
 //
 // The internal leg (not the socket contract; it changes only with the package). The
 // endpoint's half, moxi_turns.claude_leg, states it in full; the runner's part:
@@ -222,11 +223,28 @@
 // when `next` was not called and a covering entry declared `on_error` deny, else it
 // passes the call on.
 // No table yet: until the endpoint has sent a table (on the hello or a `guards` line) the
-// runner can't tell whether question mode is on, so it refuses every `AskUserQuestion`
-// call, a subagent's too, with "turns' guards aren't loaded, so question mode can't check
-// this call; ask in prose", and logs the refusal; the catch refuses it the same way. Every
-// other call passes with no trip, as with an empty table. A headless session is not
-// refused, and a table that came stays when the endpoint ends.
+// runner can't ask a guard, so it refuses at once, with no trip, what a guard could have
+// refused:
+//   - every `AskUserQuestion` call, a subagent's too, with "turns' guards aren't loaded, so
+//     question mode can't check this call; ask in prose", whatever the record says;
+//   - a subagent's `Agent` or `Task` call (no-nested-agents), when the record says
+//     `no_nested_agents` or there is no record;
+//   - a `Bash` call whose `command` matches REMOVAL_MATCH, the removal guard's pre-filter,
+//     when the record says `removal` or there is no record;
+//   - at the ask step, a permission ask in `bypassPermissions` mode, except `ExitPlanMode`
+//     and `EnterPlanMode`, when the record says `ask_step` or there is no record: nobody
+//     is there to answer it.
+// Each refusal's reason says the guard table didn't load and what to do; each is logged,
+// and the catches refuse the same way. Every other call and ask passes with no trip, as
+// with an empty table. A headless session is not refused, and a table that came stays
+// when the endpoint ends.
+// The record (`guards-seen.json`, the endpoint's file; the runner writes nothing): the
+// facts of the last table any endpoint handed over, `removal`, `no_nested_agents` and
+// `ask_step`. Its path is `MOXI_TURNS_GUARDS_SEEN` in the session's environment (a read
+// that throws, or an empty value, counts as unset), else `guards_seen` in
+// `endpoint.json`. It is read once per module load, at the first session.start of a
+// session not known to be headless. Until that read ends, and when the record is missing,
+// unreadable, not JSON or lacks one of the three facts as a boolean, there is no record.
 //
 // The ask step: at `classic.PermissionRequest` the runner matches the `ask` entries
 // against the hook input's `tool_name`, `tool_input` and `agent_id`, the same way. Nothing
@@ -393,6 +411,19 @@ const CANNOT_CHECK = 'turns could not check this call'
 const QUESTION_TOOL = 'AskUserQuestion'
 /** The refusal of an `AskUserQuestion` call while no guard table has come. */
 export const NO_TABLE_DENY = "turns' guards aren't loaded, so question mode can't check this call; ask in prose"
+/** The removal guard's pre-filter on `command`, a copy of the Python `REMOVAL_MATCH`: an
+ *  `rm` or `rmdir` word, any case, with any run of `\`, `'` and `"` between its letters. A
+ *  Python test holds the two equal. */
+export const REMOVAL_MATCH = String.raw`\b(r[\\'"]*m([\\'"]*d[\\'"]*i[\\'"]*r)?)(?![A-Za-z_])`
+const REMOVAL_RE = new RegExp(REMOVAL_MATCH, 'i')
+/** The tools no-nested-agents covers on Claude Code. */
+const AGENT_TOOLS = new Set(['Agent', 'Task'])
+/** The asks whose dialogs stay up before a table, in a bypass session too. */
+const PLAN_TOOLS = new Set(['ExitPlanMode', 'EnterPlanMode'])
+/** The refusals before a table, one per guard the runner stands in for. */
+export const NO_TABLE_REMOVAL_DENY = "turns' guard table didn't load, so the removal guard can't check this command; nothing ran. Remove files with literal paths once guards load, or ask the person."
+export const NO_TABLE_NESTED_DENY = "turns' guard table didn't load, so the no-nested-agents guard can't check this call; nothing ran. Finish what you can, then report to your parent agent what else needs doing."
+export const NO_TABLE_ASK_DENY = "turns' guard table didn't load, so no guard can check this permission prompt, and in a bypass session nobody is there to answer it; it was refused. Try again once guards load, or do it another way."
 /** The keys of a `tool.call` envelope that are no argument of the tool. */
 const NOT_INPUT = new Set(['tool', 'tool_use_id', 'agentId', 'requestMeta', 'consent'])
 const SHELL_STOP_MS = 10_000
@@ -465,8 +496,15 @@ export type Fork = { delivery: string; ends: ForkEnd[]; wake: (() => void) | nul
 type ReadyFacts = { source: unknown; session_id: unknown; transcript_path: unknown }
 
 // Module state: a reload starts it over, with a new endpoint.
+/** The facts of the last table, from the endpoint's record. */
+export type LastTable = { removal: boolean; noNestedAgents: boolean; askStep: boolean }
+
 /** The decision: undefined until the first session.start, then kept. */
 let headless: boolean | undefined
+/** The record of the last table, or null: none read yet, or none to use. */
+let lastTable: LastTable | null = null
+/** `endpoint.json`'s read, made at most once: its parsed text, or `failed`. */
+let endpointDoc: Promise<{ doc: unknown } | 'failed'> | null = null
 /** Settles once, in the step that sets `headless`. */
 let decided: () => void = () => {}
 const decidedP = new Promise<void>(resolve => { decided = resolve })
@@ -1312,20 +1350,68 @@ async function readArgv($: Dollar): Promise<string[] | undefined> {
     }
     return [named]
   }
-  let doc: unknown
-  try {
-    doc = JSON.parse(await $.fs.read(`${$.plugin.root}/endpoint.json`))
-  } catch {
+  const read = await readEndpointDoc($)
+  if (read === 'failed') {
     log($, `no endpoint: ${$.plugin.root}/endpoint.json is missing or not JSON (run turns' setup)`)
     return undefined
   }
-  const d = (doc ?? {}) as Json
+  const d = (read.doc ?? {}) as Json
   const argv = Array.isArray(d.argv) ? d.argv : typeof d.command === 'string' ? [d.command] : undefined
   if (argv === undefined || argv.length === 0 || !argv.every(a => typeof a === 'string') || !(argv[0] as string).startsWith('/')) {
     log($, 'no endpoint: endpoint.json names no absolute command')
     return undefined
   }
   return argv as string[]
+}
+
+/** `endpoint.json` beside this plugin, read and parsed once per module load. */
+function readEndpointDoc($: Dollar): Promise<{ doc: unknown } | 'failed'> {
+  endpointDoc ??= (async () => {
+    try {
+      return { doc: JSON.parse(await $.fs.read(`${$.plugin.root}/endpoint.json`)) as unknown }
+    } catch {
+      return 'failed' as const
+    }
+  })()
+  return endpointDoc
+}
+
+/** The record's facts as the runner keeps them, or null when it lacks one as a boolean. */
+export function parseLastTable(v: unknown): LastTable | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null
+  const d = v as Json
+  if (typeof d.removal !== 'boolean' || typeof d.no_nested_agents !== 'boolean' || typeof d.ask_step !== 'boolean') return null
+  return { removal: d.removal, noNestedAgents: d.no_nested_agents, askStep: d.ask_step }
+}
+
+/** Read the record of the last table: its path from `MOXI_TURNS_GUARDS_SEEN`, else from
+ *  `guards_seen` in `endpoint.json`. Null when there is none to use. Never throws. */
+async function readLastTable($: Dollar): Promise<LastTable | null> {
+  let path: string | undefined
+  try {
+    path = await $.env.get('MOXI_TURNS_GUARDS_SEEN')
+  } catch {
+    path = undefined
+  }
+  if (path === undefined || path === '') {
+    const read = await readEndpointDoc($)
+    const named = read === 'failed' ? undefined : ((read.doc ?? {}) as Json).guards_seen
+    path = typeof named === 'string' && named !== '' ? named : undefined
+  }
+  if (path === undefined) {
+    log($, 'no record of the last guard table is named; before a table, every guard counts as on')
+    return null
+  }
+  let doc: unknown
+  try {
+    doc = JSON.parse(await $.fs.read(path))
+  } catch {
+    log($, `the record of the last guard table at ${path} is missing or not JSON; before a table, every guard counts as on`)
+    return null
+  }
+  const facts = parseLastTable(doc)
+  if (facts === null) log($, `the record of the last guard table at ${path} lacks a fact; before a table, every guard counts as on`)
+  return facts
 }
 
 async function spawn($: Dollar): Promise<void> {
@@ -1515,6 +1601,26 @@ function takeTable($: Dollar, v: unknown): void {
  *  may be on, and nothing can check the call. */
 export function noTableRefuses(tool: unknown, seen: boolean, headlessNow: boolean | undefined): boolean {
   return !seen && headlessNow !== true && tool === QUESTION_TOOL
+}
+
+/** The refusal of a tool call before the endpoint's first table, or null: question mode's
+ *  (`noTableRefuses`), then no-nested-agents' and the removal guard's, each when `last`
+ *  says that guard was on or there is no record (`last` null). */
+export function noTableDeny(tool: unknown, agentId: unknown, input: Json, seen: boolean, headlessNow: boolean | undefined, last: LastTable | null): string | null {
+  if (seen || headlessNow === true) return null
+  if (tool === QUESTION_TOOL) return NO_TABLE_DENY
+  if (typeof tool === 'string' && AGENT_TOOLS.has(tool) && !isMain(agentId) && (last === null || last.noNestedAgents)) return NO_TABLE_NESTED_DENY
+  if (tool === 'Bash' && typeof input.command === 'string' && REMOVAL_RE.test(input.command) && (last === null || last.removal)) return NO_TABLE_REMOVAL_DENY
+  return null
+}
+
+/** The refusal of a permission ask before the endpoint's first table, or null: an ask in
+ *  `bypassPermissions` mode other than the plan tools', when `last` says an ask-step guard
+ *  was on or there is no record. */
+export function noTableAskDeny(e: Json, seen: boolean, headlessNow: boolean | undefined, last: LastTable | null): string | null {
+  if (seen || headlessNow === true) return null
+  if (e.permission_mode !== 'bypassPermissions' || PLAN_TOOLS.has(String(e.tool_name))) return null
+  return last === null || last.askStep ? NO_TABLE_ASK_DENY : null
 }
 
 /** What the table says of one call. */
@@ -1790,10 +1896,14 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const hook = watch()
     try {
-      const took = headless === undefined ? takeDecision($, (e as Json).isInteractive) : null
+      const first = headless === undefined
+      const took = first ? takeDecision($, (e as Json).isInteractive) : null
       if (headless !== true) {
+        // Read once, beside the endpoint's spawn; a call before it ends counts as no record.
+        const reading = first ? readLastTable($).then(t => { lastTable = t }) : undefined
         // Spawned before `next`, so the endpoint's start overlaps the session's.
         await spawn($)
+        await reading
         // Claude Code awaits the first session.start before the first prompt, so the late
         // ready lands before turn one.
         if (took !== null) await lateReady($, took)
@@ -1970,9 +2080,10 @@ export const register: Register = on => {
       tasksMarked = true
     }
     try {
-      if (!own && noTableRefuses(e.tool, tableSeen, headless)) {
-        log($, `refused ${QUESTION_TOOL}: no guard table has come from the endpoint`)
-        return { deny: NO_TABLE_DENY }
+      const early = own ? null : noTableDeny(e.tool, e.agentId, inputOf(e as Json), tableSeen, headless, lastTable)
+      if (early !== null) {
+        log($, `refused ${e.tool}: no guard table has come from the endpoint`)
+        return { deny: early }
       }
       const d = own || headless === true || guards.length === 0 ? null : decide(guards, e.tool, e.agentId, inputOf(e as Json))
       let lines: string[] = []
@@ -1995,7 +2106,8 @@ export const register: Register = on => {
     // A grace of 1 s: decide at once, with no trip.
     if (next.called) return next(e)
     const own = ownCall(next.origin.plugin, e.agentId, e.tool, (e as Json).task_id, stopping)
-    if (!own && noTableRefuses(e.tool, tableSeen, headless)) return { deny: NO_TABLE_DENY }
+    const early = own ? null : noTableDeny(e.tool, e.agentId, inputOf(e as Json), tableSeen, headless, lastTable)
+    if (early !== null) return { deny: early }
     if (!own && catchRefuses(guards, e as Json)) return { deny: CANNOT_CHECK }
     if (!own) tasksMarked = true
     return next(e)
@@ -2007,6 +2119,11 @@ export const register: Register = on => {
     const hook = watch()
     try {
       const ev = e as unknown as Json
+      const early = noTableAskDeny(ev, tableSeen, headless, lastTable)
+      if (early !== null) {
+        log($, `refused the ${String(ev.tool_name)} ask: no guard table has come from the endpoint`)
+        return { decision: { behavior: 'deny', message: early } }
+      }
       const d = headless === true || guards.length === 0 ? null : decide(guards, String(ev.tool_name), ev.agent_id, askInput(ev), 'ask')
       if (d === null || (d.covering.length === 0 && d.broken.length === 0)) return behind(hook, performance.now(), await next(e))
       const message = await judgeAsk($, hook, ev, d)
@@ -2018,6 +2135,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => {
     // A grace of 1 s: decide at once, with no trip.
     if (next.called) return next(e)
+    const early = noTableAskDeny(e as unknown as Json, tableSeen, headless, lastTable)
+    if (early !== null) return { decision: { behavior: 'deny', message: early } }
     if (catchRefusesAsk(guards, e as unknown as Json)) return { decision: { behavior: 'deny', message: CANNOT_CHECK } }
     return next(e)
   })

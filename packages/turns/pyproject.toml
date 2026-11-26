@@ -16,7 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development",
 ]
-dependencies = ["moxi>=0.1.9,<0.2", "psutil>=5.9"]
+dependencies = ["moxi>=0.1.11,<0.2", "psutil>=5.9"]
 
 [project.optional-dependencies]
 codex = ["websockets>=17.0.1"]

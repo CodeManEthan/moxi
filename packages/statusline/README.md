@@ -92,7 +92,7 @@ The items, in the order `show` gives them:
 | `dir` | `workspace.current_dir`, else `cwd` | `~` for your home folder; `…/a/b` past `dir.parts` parts |
 | `branch` | the repository holding that folder | the branch in its `HEAD` file, or the first 7 characters of a detached commit |
 | `model` | `model.display_name` | with a leading `Claude ` cut |
-| `effort` | `effort.level` | as given |
+| `effort` | `effort.level` | as given; when it is missing or blank, the `CLAUDE_EFFORT` environment variable, trimmed |
 | `context` | `context_window.used_percentage` | `ctx:42%`, yellow from `context.warn_at`, red from `context.alert_at`; `ctx:—` before the first response |
 | `session` | `session_id` | `#` and its first 6 characters |
 | `transcript` | `transcript_path` | the file name |

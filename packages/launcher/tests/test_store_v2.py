@@ -116,7 +116,7 @@ def test_a_version_3_log_moves_to_4_with_fork_of_and_keeps_its_park_entries(
 
     conn = store.connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4 == len(store.STEPS)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.STEPS)
         assert snapshot(conn) == before
         assert [r[0] for r in conn.execute("SELECT fork_of FROM launches")] == [None] * 4
         assert [e.slot for e in store.open_entries(conn)] == [3]
@@ -128,8 +128,8 @@ def test_a_version_3_log_moves_to_4_with_fork_of_and_keeps_its_park_entries(
         conn.close()
 
 
-def test_a_fresh_log_is_made_at_version_4_with_fork_of(conn):
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4 == len(store.STEPS)
+def test_a_fresh_log_is_made_at_version_5_with_fork_of(conn):
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5 == len(store.STEPS)
     columns = [r[1] for r in conn.execute("PRAGMA table_info(launches)")]
     assert columns[-1] == "fork_of"
     assert conn.execute("SELECT count(*) FROM park_entries").fetchone()[0] == 0
@@ -566,9 +566,40 @@ def test_no_launcher_code_reads_or_writes_pending_compacts_but_prune():
     assert text.count("FROM pending_compacts") == body.count("FROM pending_compacts") == 2
 
 
-def test_the_schema_stays_at_version_4(conn):
-    assert len(store.STEPS) == 4
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+def test_the_schema_stays_at_version_5(conn):
+    assert len(store.STEPS) == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+
+
+def test_a_version_4_log_moves_to_5_keeping_every_pick_and_allowing_taken(
+        tmp_path, monkeypatch):
+    db = version_1(tmp_path / "launcher.db")
+    with monkeypatch.context() as patched:
+        patched.setattr(store, "STEPS", store.STEPS[:4])
+        conn = store.connect(db)
+        try:
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO picks (path, key, how, at) "
+                             "VALUES ('/h/x.md', 'lead', 'taken', 'now')")
+            before = snapshot(conn)
+        finally:
+            conn.close()
+    assert [how for (_, *_, how, _) in before["picks"]] == ["given", "shown"]
+
+    conn = store.connect(db)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert snapshot(conn) == before
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'index' "
+                            "AND name = 'picks_key_at'").fetchone() is not None
+        store.add_pick(conn, "/work/one/handoffs/h2.md", "seat:lead", "taken")
+        assert store.picked(conn, "seat:lead")[0] == "/work/one/handoffs/h2.md"
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO picks (path, key, how, at) "
+                         "VALUES ('/h/x.md', 'lead', 'seen', 'now')")
+    finally:
+        conn.close()
 
 
 def test_a_newer_store_than_this_launchers_is_refused(tmp_path):

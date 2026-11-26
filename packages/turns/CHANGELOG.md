@@ -2,6 +2,24 @@
 
 ## 0.2.8 (unreleased)
 
+- Before a Claude Code session's first guard table, the runner refuses what the last
+  table's guards could have refused, with a reason that says the table didn't load: a
+  subagent's `Agent` or `Task` call when no-nested-agents was on, a `Bash` command the
+  removal guard's pre-filter matches when the removal guard was on, and a bypass-mode
+  permission ask (not `ExitPlanMode` or `EnterPlanMode`) when an ask-step guard was on.
+  It reads the record once, at the first session start; with no usable record it refuses
+  all three. Headless sessions and sessions with a table are unchanged. The runner is
+  version 0.3.3, so `moxi install turns` updates an install at user scope.
+- The Claude endpoint records the guard table it hands the runner, at its first line and
+  at each ready, in `STATE/turns/guards-seen.json`: the time, and whether the table held
+  the removal guard, the no-nested-agents guard and any ask-step guard (all false for an
+  empty table). A table made while turns' config doesn't read is not recorded, so the
+  record before it stands. A launch names the path in `MOXI_TURNS_GUARDS_SEEN` (in `INTERNAL_ENV`
+  and `SESSION_ENV`), setup writes it as `guards_seen` in `endpoint.json`, and the store
+  is declared as `guards-seen`. `moxi_turns.guards.seen` reads and writes it.
+- Setup still replaces its own placed Claude plugin copy whatever it holds, moving the
+  old copy to the core's displaced folder: it passes the placer's new `accept_diff`, since
+  the copy is turns' own and setup runs with no one to ask. Needs `moxi>=0.1.11`.
 - The guard API gains a shell reader, exported from `moxi_turns`: `read_shell(text,
   dialect="sh")` reads `sh`, `powershell` or `cmd` command text (`DIALECTS`) without
   running it, as a `ShellText` of `ShellCommand`s (words, redirects, and the operator

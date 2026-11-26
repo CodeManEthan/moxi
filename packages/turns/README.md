@@ -133,6 +133,30 @@ then it runs when Claude Code is about to ask you to approve a call, and it can 
 that ask (Claude Code denies the call and the agent reads why) but never approve one.
 Only Claude Code has an ask step.
 
+Each time a Claude Code session's endpoint hands its runner the guard table, it records
+which guards the table held in `guards-seen.json` under turns' state directory: whether
+the removal guard was in it, whether the no-nested-agents guard was, and whether any guard
+runs at the ask step. The record holds no guard's text, and the last session to load a
+table writes it, except while turns' config doesn't read: that table is empty for want of
+the list, so the record before it stands. A launch names its path to the runner in `MOXI_TURNS_GUARDS_SEEN`; a
+user-scope install finds it through `guards_seen` in the plugin's `endpoint.json`, which
+`moxi install turns` writes.
+
+Until the endpoint has sent a session its first table, Claude Code's runner can't ask any
+guard, so it refuses at once what those guards could have refused, and says the guard table
+didn't load and what to do:
+
+- a subagent's `Agent` or `Task` call, when the record says the no-nested-agents guard was on;
+- a shell command with an `rm` or `rmdir` word (the removal guard's pre-filter), when the
+  record says the removal guard was on;
+- a permission prompt in a bypass session (other than entering or leaving plan mode), when
+  the record says an ask-step guard was on: nobody is there to answer it.
+
+With no usable record (none yet, or one it can't read) it refuses all three. Question
+mode's refusal of `AskUserQuestion` before a table holds whatever the record says. Once a
+table has come, even an empty one, only the table decides, and a headless session is
+refused none of this.
+
 ## Settings
 
 `moxi config turns` shows every key and its value; `moxi config set turns <key> <value>`

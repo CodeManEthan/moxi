@@ -19,8 +19,13 @@ classifiers = [
 ]
 # repo runs the git hook pieces; secrets holds the pattern sets and lists they read.
 # packaging reads the versions and requirements a release is judged by.
-dependencies = ["moxi>=0.1.9,<0.2", "moxi-repo>=0.1.3,<0.2", "moxi-secrets>=0.1,<0.2",
+dependencies = ["moxi>=0.1.11,<0.2", "moxi-repo>=0.1.3,<0.2", "moxi-secrets>=0.1,<0.2",
                 "packaging"]
+
+[project.optional-dependencies]
+# The questions `moxi projects add` puts about clean history and push approval. projects
+# reads them through its `moxi.projects` group below, from 0.1.5, which reads interface 3.
+projects = ["moxi-projects>=0.1.5,<0.2"]
 
 [project.urls]
 Homepage = "https://github.com/CodeManEthan/moxi"
@@ -31,11 +36,17 @@ Issues = "https://github.com/CodeManEthan/moxi/issues"
 [project.entry-points."moxi.modules"]
 publishing = "moxi_publishing.module"
 
-# The three git hook pieces, each declared beside the function it runs.
+# The four git hook pieces, each declared beside the function it runs.
 [project.entry-points."moxi.repo.git_hooks"]
 "publishing.message" = "moxi_publishing.message:MESSAGE"
 "publishing.content" = "moxi_publishing.content:CONTENT"
 "publishing.push" = "moxi_publishing.push:PUSH"
+"publishing.approval" = "moxi_publishing.approval:APPROVAL"
+
+# projects reads the questions `moxi projects add` puts, and acts on their answers, from
+# here; publishing never imports projects.
+[project.entry-points."moxi.projects"]
+publishing = "moxi_publishing.projects_link"
 
 [dependency-groups]
 dev = ["pytest", "moxi-dev"]

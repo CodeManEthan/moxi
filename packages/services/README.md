@@ -47,6 +47,15 @@ neither, `add` tells you what the supervisor reads now. On Windows an adopted ta
 daemon, judged by whether its process runs, unless you give `--timer`; give it for a
 scheduled task, or for a launcher whose action starts a program and exits.
 
+Turning a timer on is for the person at the keyboard. Run inside an agent's session
+(Claude Code, Codex or OpenCode, as the core's agent test finds it), `moxi services
+enable` of a timer and a `moxi services add --enable` that makes a timer (`--timer`, or
+an adopted systemd `.timer` with or without it) are refused with exit 3 and change
+nothing; ask the person to run them, or to turn the timer on from the services
+page. Turning a timer off, and anything about a daemon, is never refused. It is a fence,
+not a lock: a program that clears its environment and runs outside the agent's process
+tree is not caught.
+
 Exit codes: 0 done; 1 an act failed, or the state read after it doesn't match; 2 asked
 wrongly; 3 refused; 75 busy, try again. Given several ids, a verb acts on each and exits
 with the worst.

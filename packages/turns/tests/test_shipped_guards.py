@@ -528,3 +528,33 @@ def test_end_to_end_a_subagents_agent_call_is_refused_without_a_trip(endpoint):
     (entry,) = fake.first["guards"]
     assert entry["id"] == "turns.no-nested-agents" and entry["judge"] is False
     assert entry["deny"] == guards.NO_NESTED_AGENTS_DENY and entry["who"] == "agents"
+
+
+
+# -- the record of the last table ------------------------------------------------------------
+
+def test_the_first_line_and_each_ready_write_the_record_of_the_table(endpoint, turns_env):
+    from moxi_turns.guards import seen
+
+    fake = endpoint("[guards]\nremoval = true\nquestion_mode = true\n")
+    record = seen.read_record()
+    assert {k: record[k] for k in seen.FACTS} == {
+        "removal": True, "no_nested_agents": False, "ask_step": False}
+    assert isinstance(record["at"], float)
+    assert set(record) == {"at", *seen.FACTS}       # no entry's text
+
+    write_config(turns_env, '[guards]\nrun = ["turns.no-nested-agents"]\n')
+    fake.post(leg.PATH_CONTEXT, {"event": "ready", "source": "clear", "session_id": "s-2"})
+    assert [e["id"] for e in fake.tables.get(timeout=2)] == ["turns.no-nested-agents"]
+    record = seen.read_record()
+    assert {k: record[k] for k in seen.FACTS} == {
+        "removal": False, "no_nested_agents": True, "ask_step": False}
+
+
+def test_an_empty_table_records_all_three_false(endpoint):
+    from moxi_turns.guards import seen
+
+    fake = endpoint("")
+    assert fake.first["guards"] == []
+    record = seen.read_record()
+    assert {k: record[k] for k in seen.FACTS} == dict.fromkeys(seen.FACTS, False)

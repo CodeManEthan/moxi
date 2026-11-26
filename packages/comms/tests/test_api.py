@@ -126,7 +126,7 @@ def test_interface_2_holds_its_names():
         "OPERATOR_ENV", "POLICY_DIRECTORS_ENV", "policy_directors", "effective", "PROJECT_ENV", "SCOPE_ENV", "SECRET_PREFIX_ENV",
         "SHELL_REACH_ENV", "SHIM_SOCKET_ENV", "TOKEN_ENV", "TOKEN_STORE_ENV", "URL_ENV",
         "send_scoped", "scoped_sender", "scoped_state", "ScopedSender", "ScopedState",
-        "SCOPED_REASONS"}
+        "SCOPED_REASONS", "delivered_messages", "DeliveredMessage"}
     for name in api.__all__:
         assert hasattr(api, name), name
     assert api.ClaimServer is ClaimServer

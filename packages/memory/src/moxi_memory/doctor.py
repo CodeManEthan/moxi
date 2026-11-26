@@ -11,7 +11,9 @@
   reindex` reads again (or a generation at schema 1 that memory's next write brings up
   to date); those of compressed Codex rollouts, which no reindex reads; and how many
   sessions wait on a folder that didn't answer, which each walk reads again. The chat's
-  `search_memory` leaves out every row with no writer.
+  `search_memory` leaves out every row with no writer. It says when the generation was
+  made before memory kept delivered messages, so holds none for the sessions it read
+  until `moxi memory reindex`.
 - ingest: each harness's last catch-up walk, the sources changed since it (behind, the
   same count as `moxi memory status`'s backlog), the compressed Codex rollouts memory
   can't read, and a request waiting for the writer lock. A request queued behind a
@@ -130,6 +132,7 @@ def _index() -> Row:
         kept = index.meta_get(conn, "kept")
         replaced = index.meta_get(conn, REPLACED_KEY)
         stored = index.stored_redact_version(conn)
+        delivered = index.keeps_delivered(conn)
         try:     # a state store that can't be read is the sessions row's to say
             alias = ("st" if r.attach_state("st") and state_mod.has_waiting(conn, "st")
                      else None)
@@ -150,6 +153,10 @@ def _index() -> Row:
                      f"secrets' redact version {now} catches; run `{REINDEX}` once to "
                      "redact them again")
         state = "warn"
+    if not delivered:
+        from .status import DELIVERED_BEHIND
+
+        parts.append(DELIVERED_BEHIND)
     if unwritten is None:
         parts.append("its rows record no writer until memory next writes to the index")
     else:
