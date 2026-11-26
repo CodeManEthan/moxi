@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (unreleased)
 
 - `Add a repo` reads the typed folder's plan through moxi-ui's `readLater`, so the page
   root's `data-reading` mark counts that read from the keystroke until the plan is drawn,
