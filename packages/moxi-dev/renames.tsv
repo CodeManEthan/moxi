@@ -3599,6 +3599,7 @@ launcher	packages/launcher/src/moxi_launcher/handoffs.py	own_folder	name	folder	
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	request_id = env.get(listeners.REQUEST)	use	listeners.REQUEST	listeners.REQUEST_ENV
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	return handoffs_dir(str(cwd), create=create, override=notes_dir)	keep	create	create
 launcher	packages/launcher/src/moxi_launcher/handoffs.py	got = handoffs_dir(str(cwd), create=create, override=notes_dir)	keep	create	create
+launcher	packages/launcher/src/moxi_launcher/handoffs.py	session = turns.find(pid=os.getpid())	keep	find	find
 launcher	packages/launcher/src/moxi_launcher/identity.py	check	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/job.py	"""`error`, a refusal from before a launch's row, as a `launch-refused` event's detail	keep	error	error
 launcher	packages/launcher/src/moxi_launcher/job.py	Choice.__init__	kwonly	chain	chain
@@ -4474,6 +4475,9 @@ launcher	packages/launcher/tests/test_handoffs.py	notes.answer["folder"] = None	
 launcher	packages/launcher/tests/test_handoffs.py	return answer["folder"]	keep	folder	folder
 launcher	packages/launcher/tests/test_handoffs.py	test_the_folder_is_not_made_when_create_is_off	name	folder	handoff_dir
 launcher	packages/launcher/tests/test_handoffs.py	test_without_notes_the_folder_is_the_launchers_own_and_private	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_handoffs.py	fake.find = lambda *, pid: Found() if pid == os.getpid() else None	keep	find	find
+launcher	packages/launcher/tests/test_handoffs.py	fake.find = lambda *, pid: None	keep	find	find
+launcher	packages/launcher/tests/test_handoffs.py	fake.find = broken	keep	find	find
 launcher	packages/launcher/tests/test_keep_warm_chain.py	[(text, _)] = director.delivered	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keep_warm_chain.py	assert director.delivered == []	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keep_warm_chain.py	assert len(director.delivered) == 1	keep	delivered	delivered
@@ -8914,6 +8918,9 @@ publishing	packages/publishing/src/moxi_publishing/cli.py	metavar="PATTERN", req
 publishing	packages/publishing/src/moxi_publishing/cli.py	help="a branch name in which *, ? and [...] are wildcards; '*' alone "	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser("disable", help="remove push approval",	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/cli.py	"list", help="every repo with clean history, push approval or the public flag",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	"project-add", help="let a project add turn a repo's choices on, or not",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser("disable", help="leave the repo out of project add",	keep	help	help
+publishing	packages/publishing/src/moxi_publishing/cli.py	s = steps.add_parser("enable", help="let project add act in the repo again",	keep	help	help
 publishing	packages/publishing/src/moxi_publishing/content.py	"fail": "closed",	keep	closed	closed
 publishing	packages/publishing/src/moxi_publishing/content.py	FileChange.__init__	kwonly	new	new
 publishing	packages/publishing/src/moxi_publishing/content.py	f"{hit.path}:{hit.line}: {hit.hit.set}/{hit.hit.rule}"))	keep	set	set
@@ -12772,6 +12779,7 @@ services	packages/services/src/moxi_services/acts.py	return _outcome("disable")(
 services	packages/services/src/moxi_services/acts.py	return _outcome("disable")(_switch_body)(ident, on=False, by=by)	use	on=	enabled=
 services	packages/services/src/moxi_services/acts.py	return _outcome("enable")(_switch_body)(ident, True, by=by)	use	)(ident, True,	)(ident, on=True,
 services	packages/services/src/moxi_services/acts.py	return _outcome("enable")(_switch_body)(ident, on=True, by=by)	use	on=	enabled=
+services	packages/services/src/moxi_services/acts.py	"""The kind, `daemon` or `timer`, a row adopting foreign unit `ref` takes on this	keep	timer	timer
 services	packages/services/src/moxi_services/cli.py	"rss_bytes": int(rss), "cpu_s": round(cpu.user + cpu.system, 2)}	keep	round	round
 services	packages/services/src/moxi_services/cli.py	#: What `show` says of an adopted Windows timer: how it is judged, and what to do when it	keep	show	show
 services	packages/services/src/moxi_services/cli.py	_VERBS = {"list": _list, "show": _show, "add": _add, "remove": _remove, "start": _act,	keep	show	show
