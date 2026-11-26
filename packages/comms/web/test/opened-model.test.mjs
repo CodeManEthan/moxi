@@ -149,7 +149,7 @@ test("with launcher: Session leads, linked to its transcript with sessions; laun
   assert.deepEqual(got.before, [
     { key: "session", label: "Session", value: "planner's session · claude", tail: null,
       link: { kind: "sessions", route: "claude/s-planner" } },
-    { key: "cache", label: "Cache", value: "warm until 20:04", tail: "kept warm while 1 agent works, next keep-alive 19:49",
+    { key: "cache", label: "Cache", value: "warm until 20:04", tail: "kept warm while 1 agent works",
       link: { kind: "cache" } },
   ]);
   // Without sessions: no link.
@@ -178,22 +178,6 @@ test("with launcher: the Session line names the model and effort it was started 
   // A launch that joins no row draws nothing of its own.
   const other = join(r, [entry("reviewer", { model: "opus", effort: "high" })]);
   assert.deepEqual(opened(r, mail(), "planner", {}, other).before, []);
-});
-
-test("with launcher: the next keep-alive only for a covered session, only while it is ahead", () => {
-  const r = roster([bound("planner")]);
-  const tail = (fields, now = NOW) => opened(r, mail(), "planner", { now }, join(r, [entry("planner", fields)])).before[1].tail;
-  const covered = { waits: { kind: "agents", count: 1 }, covered: true };
-  assert.equal(tail(covered), "kept warm while 1 agent works, next keep-alive 19:49");
-  assert.equal(tail({ ...covered, cache: { state: "warm", until: iso("20:04"), estimated: true } }),
-               "kept warm while 1 agent works, next keep-alive 19:49, est.");
-  // Its time passed: keep-warm's asks are already under way, so nothing of it.
-  assert.equal(tail(covered, at("19:49")), "kept warm while 1 agent works");
-  // Not covered: no keep-alive comes.
-  assert.equal(tail({}), null);
-  assert.equal(tail({ waits: { kind: "agents", count: 1 }, coverable: { cap: 3 } }), null);
-  // Cold: the cold words, no keep-alive.
-  assert.equal(tail({ ...covered, cache: { state: "cold", until: iso("18:40"), estimated: false } }), COLD_TAIL);
 });
 
 test("without launcher: no Session line", () => {

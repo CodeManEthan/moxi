@@ -1,10 +1,10 @@
-"""What is this agent running on, and when is it next kept warm? comms' page in a browser, on
-a test shell over the rig, with launcher's `/api/running` answered in the browser.
+"""What is this agent running on? comms' page in a browser, on a test shell over the rig,
+with launcher's `/api/running` answered in the browser.
 
 An opened agent's `Session` line names the model and effort its launch was started with,
-where launcher gives them, and a covered session's `Cache` line ends with its next
-keep-alive. A launch that gives neither shows neither. Without launcher, and once launcher's
-read fails after a good one, nothing of them shows and nothing of the last good answer stays.
+where launcher gives them; a launch that gives neither shows neither. Without launcher, and
+once launcher's read fails after a good one, nothing of them shows and nothing of the last
+good answer stays.
 
 The shell starts after the rig, with the rig's roots in its environment (`page_shell`), as on
 the rest of the page's tests; `LauncherStub` serves launcher's routes in launcher's declared
@@ -76,7 +76,7 @@ def open_agent(root: Any, name: str) -> None:
 
 
 @needs_launcher
-def test_the_session_line_names_model_and_effort_and_the_cache_line_the_next_keep_alive(
+def test_the_session_line_names_the_model_and_effort_the_launch_was_started_with(
         page_shell, rig, ui_contexts):
     planner = rig.shim(**PLANNER)
     reviewer = rig.shim(**REVIEWER)
@@ -93,11 +93,11 @@ def test_the_session_line_names_model_and_effort_and_the_cache_line_the_next_kee
 
     open_agent(root, P)
     expect(opened_line(root, P, "session")).to_have_text("planner's session · claude · opus · high")
-    # Warm for 20 minutes; keep-warm first asks 15 minutes before it goes cold.
+    # The Cache line keeps launcher's words and nothing more.
     expect(opened_line(root, P, "cache")).to_have_text(
-        re.compile(rf"^warm until {T} · kept warm while 1 agent works, next keep-alive {T}$"))
+        re.compile(rf"^warm until {T} · kept warm while 1 agent works$"))
 
-    # A launch that gives no model, no effort and is not covered: neither shows.
+    # A launch that gives no model and no effort: neither shows.
     open_agent(root, R)
     expect(opened_line(root, R, "session")).to_have_text("review pass · claude")
     expect(opened_line(root, R, "cache")).to_have_text(re.compile(rf"^warm until {T}$"))
@@ -112,7 +112,6 @@ def test_without_launcher_nothing_of_the_launch_shows_and_nothing_asks_it(
     page, root, _, asked = open_watched(shell, ui_contexts)
     open_agent(root, P)
     opened = root.locator('[data-part="opened"][data-to="planner"]')
-    expect(opened).not_to_contain_text("keep-alive")
     # With sessions, its own Session line from the rig's transcript: it ends at the harness.
     session = opened.locator('[data-line="session"] > .f')
     if importlib.util.find_spec("moxi_sessions") is not None:
@@ -136,12 +135,12 @@ def test_a_read_of_launcher_failing_after_a_good_one_leaves_no_launch_fact(
     ])
     open_agent(root, P)
     expect(opened_line(root, P, "session")).to_have_text("planner's session · claude · opus · high")
-    expect(opened_line(root, P, "cache")).to_contain_text("next keep-alive")
+    expect(opened_line(root, P, "cache")).to_contain_text("kept warm while 1 agent works")
 
     stub.failing = True
     roster_kit.show_tab(page)
     opened = root.locator('[data-part="opened"][data-to="planner"]')
-    expect(opened).not_to_contain_text("keep-alive")
     expect(opened).not_to_contain_text("opus")
+    expect(opened).not_to_contain_text("kept warm")
     expect(opened).not_to_contain_text("planner's session")
     expect(agent(root, P)).not_to_have_attribute("where", "slot 3 · atlas-api")

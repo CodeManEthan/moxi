@@ -375,10 +375,7 @@ the session, its harness, and the model and effort it was launched with where la
 has them (`planner · claude · opus · high`), or, where launcher gives none, the name typed for it in the
 harness (else its folder), when it started and its harness as sessions has them, with
 `Sessions` (sessions is asked again each time the row is opened, so a name typed since
-shows); `Cache`, the cache fact in full, with `Cache`, and for a session launcher keeps
-warm its next keep-alive (`kept warm while 1 agent works, next keep-alive 19:49`), the
-time keep-warm first asks to nudge it, 15 minutes before the cache goes cold, shown while
-that time is ahead; the mail in the books for that
+shows); `Cache`, the cache fact in full, with `Cache`; the mail in the books for that
 address, `Held` (running) or `Waiting` (not running) and `Unread` (in its session but not
 yet read), each message with its time, author and text cut at four lines with `Show all`,
 and `Take back` on yours while the books can still take it back; `Waits on`, each name it
@@ -461,7 +458,7 @@ reads adds to it when installed:
 
 - **launcher**, read from its `/api/running`: where each session it runs works, its
   `Session` line with the model and effort the launch was started with, launcher's cache
-  words and a kept-warm session's next keep-alive, the row for a warm session waiting on other agents with nothing keeping it warm,
+  words, the row for a warm session waiting on other agents with nothing keeping it warm,
   and `Keep warm` on it when launcher can keep it warm. A press is disabled until launcher
   answers and its next reading comes, or for 20 s; a refusal leads line three with `Not
   kept warm: <why>` until then. Without launcher, or while its read fails: none of these, the cache fact from comms

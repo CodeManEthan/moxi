@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import test from "node:test";
 
 import {
-  answered, caseOf, expired, factOf, joinRunning, KEEP_ALIVE_LEAD_S, KEEP_WARM_PATH, keepWarmTitle, NO_PRESSES, NOT_KEPT, parseRunning,
+  answered, caseOf, expired, factOf, joinRunning, KEEP_WARM_PATH, keepWarmTitle, NO_PRESSES, NOT_KEPT, parseRunning,
   pressBody, pressed, pressNote, PRESS_WAIT_MS, RUNNING_PATH, runningLine, stampOf, valueCame, waitsWords, whereText,
 } from "../src/launched-model.ts";
 
@@ -91,7 +91,7 @@ test("launcher's words: where, the three cases, the fact with est., the lead, th
   assert.equal(one({ cache: null }).fact, null);
   assert.equal(one({ cache: null }).cache, null);
   assert.deepEqual(one({ cache: { state: "cold", until: iso("18:35"), estimated: false } }).cache,
-                   { warm: false, until: Date.parse(iso("18:35")) / 1000, estimated: false, kept: null, keepAlive: null });
+                   { warm: false, until: Date.parse(iso("18:35")) / 1000, estimated: false, kept: null });
   assert.equal(whereText({ target: "terminal", slot: null, project_key: null, folder: "notes" }), "terminal · notes");
   assert.equal(whereText({ target: "slot", slot: null, project_key: "p", folder: "f" }), "slot · p");
 });
@@ -120,28 +120,6 @@ test("the model and effort the launch was started with: present, null, or anythi
   // An entry that joins no row gives the page nothing of it.
   const unmatched = joinRunning(running([entry("r1", { identity: "b", model: "opus", effort: "high" })]), [bound("a")], when);
   assert.equal(unmatched.size, 0);
-});
-
-test("the next keep-alive: a covered session's cold time less keep-warm's lead; none otherwise", () => {
-  const one = (fields) => joinRunning(running([entry("r1", { identity: "a", ...fields })]), [bound("a")], when).get("a");
-  const covered = one({ waits: { kind: "agents", count: 1 }, covered: true });
-  assert.equal(covered.cache.keepAlive, Date.parse(iso("19:22")) / 1000 - KEEP_ALIVE_LEAD_S);
-  assert.equal(when(covered.cache.keepAlive), "19:07");
-  // Not covered (loud or with nothing to wait on), no time, or no cache read: none.
-  assert.equal(one({ waits: { kind: "agents", count: 1 }, coverable: { cap: 3 } }).cache.keepAlive, null);
-  assert.equal(one({}).cache.keepAlive, null);
-  assert.equal(one({ waits: { kind: "agents", count: 1 }, covered: true,
-                     cache: { state: "warm", until: null, estimated: false } }).cache.keepAlive, null);
-  assert.equal(one({ waits: { kind: "agents", count: 1 }, covered: true, cache: null }).cache, null);
-});
-
-test("the keep-alive's lead is launcher's keep-warm timer's own", () => {
-  // Held equal to the timer launcher subscribes, where its source sits beside comms'.
-  const theirs = new URL("../../../launcher/src/moxi_launcher/cachetimers.py", import.meta.url);
-  if (!existsSync(theirs)) return;
-  const found = readFileSync(theirs, "utf8").match(/\{"name": KEEP_WARM, "at": -(\d+),/);
-  assert.notEqual(found, null);
-  assert.equal(KEEP_ALIVE_LEAD_S, Number(found[1]));
 });
 
 test("Keep warm's words, path and wait are launcher's own", async () => {

@@ -17,10 +17,7 @@
 // worded by the page's `when`, never mixed with comms' own `until` in one fact.
 //
 // The `Session` line carries the model and effort the launch was started with, where
-// launcher gives them. A covered session's `Cache` line says when its next keep-alive comes:
-// keep-warm's first ask about a session is `KEEP_ALIVE_LEAD_S` before its cache goes cold,
-// and a covered session is one that ask would nudge. Once that time has passed the line says
-// nothing of it, since the ask is then already under way.
+// launcher gives them.
 //
 // Every string here goes into the page as text.
 
@@ -93,9 +90,6 @@ export const KEEP_WARM_PATH = "api/keep-warm";
 export const RUNNING_PATH = "api/running";
 /** How long a pressed `Keep warm` stays disabled at most, in milliseconds. */
 export const PRESS_WAIT_MS = 20_000;
-/** How long before a session's cache goes cold keep-warm first asks whether to nudge it, in
- * seconds: launcher's keep-warm timer opens there. */
-export const KEEP_ALIVE_LEAD_S = 900;
 /** No press waiting and no note. */
 export const NO_PRESSES: Presses = { waiting: {}, notes: {} };
 /** How each note a press leaves begins. */
@@ -239,9 +233,6 @@ export interface LaunchedCache {
   until: number | null;
   estimated: boolean;
   kept: string | null;
-  /** When keep-warm next asks to nudge a covered session, in epoch seconds; null where the
-   * session is not covered or launcher gives no time. */
-  keepAlive: number | null;
 }
 
 /** What launcher says of the launch running at an address. `fact` and `where` are its row's
@@ -269,7 +260,6 @@ function sessionRoute(harness: string, sessionId: string | null): string | null 
 function launchedOf(entry: RunningEntry, row: RosterRow, when: (at: number) => string): Launched {
   const cache = entry.cache;
   const kind = caseOf(entry);
-  const until = cache === null ? null : stampOf(cache.until);
   return {
     where: whereText(entry.where) || null,
     fact: factOf(entry, when),
@@ -281,9 +271,8 @@ function launchedOf(entry: RunningEntry, row: RosterRow, when: (at: number) => s
     session: { name: entry.name, harness: entry.harness, model: entry.model, effort: entry.effort,
                route: sessionRoute(entry.harness, entry.session_id ?? row.session_id) },
     cache: cache === null ? null : {
-      warm: cache.state === "warm", until, estimated: cache.estimated,
+      warm: cache.state === "warm", until: stampOf(cache.until), estimated: cache.estimated,
       kept: kind === "covered" ? keptWords(entry.waits as Waits) : null,
-      keepAlive: kind === "covered" && until !== null ? until - KEEP_ALIVE_LEAD_S : null,
     },
   };
 }
