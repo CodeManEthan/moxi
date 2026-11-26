@@ -938,7 +938,8 @@ def running_entry(found: api.Running) -> dict[str, Any]:
             "where": {"target": found.target, "slot": found.slot,
                       "project_key": found.project_key,
                       "folder": os.path.basename(os.path.normpath(found.cwd))},
-            "started_at": found.created_at, **UNJOINED}
+            "started_at": found.created_at, "model": found.model, "effort": found.effort,
+            **UNJOINED}
 
 
 def gather_running(joined: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:

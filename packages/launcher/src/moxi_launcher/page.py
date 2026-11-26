@@ -305,11 +305,13 @@ ACTIVITY = _table(nullable=True, at=_text(), by=_text(nullable=True),
 #: covered: `cap`, the most nudges in a row it would send for the case it would nudge for.
 #: Null where it would not.
 COVERABLE = _table(nullable=True, cap=Out("int"))
-#: One launch running now. `started_at` is when its row was written. `cache`, `waits`,
+#: One launch running now. `started_at` is when its row was written; `model` and `effort`
+#: are the values it was launched with, null where it set none. `cache`, `waits`,
 #: `coverable` and `activity` are null and `covered` false while nothing was read of them.
 RUNNING_LAUNCH = _table(
     request_id=_text(), harness=_text(), session_id=_text(nullable=True), name=_text(),
-    identity=_text(nullable=True), where=WHERE, started_at=_text(), cache=CACHE,
+    identity=_text(nullable=True), where=WHERE, started_at=_text(),
+    model=_text(nullable=True), effort=_text(nullable=True), cache=CACHE,
     waits=WAITS, covered=Out("bool"), coverable=COVERABLE, activity=ACTIVITY,
 )
 #: The launches running now, newest first: `count` of them, every one in `sessions`.
