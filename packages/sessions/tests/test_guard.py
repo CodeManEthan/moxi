@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import shlex
 from pathlib import Path
 
 import pytest
@@ -183,6 +184,39 @@ def test_a_shell_c_script_is_judged_as_commands_of_its_own(home):
     t = transcript(home)
     assert refused("Bash", {"command": f"bash -lc 'cat {t}'"}, home)
     assert not refused("Bash", {"command": f"bash -lc 'moxi sessions find {t}'"}, home)
+
+
+def test_a_path_cut_at_a_substitution_is_judged_by_the_text_before_it(home):
+    assert refused("Bash", {"command": "cat ~/.claude/projects/$(ls)/x.jsonl"}, home)
+
+
+def test_every_script_handed_to_a_shell_is_judged_in_its_own_dialect(home):
+    t = transcript(home)
+    for command in (f"bash <<< 'cat {t}'", f"echo 'cat {t}' | sh",
+                    f"bash <<'EOF'\ncat {t}\nEOF", f"cat <<'EOF' | bash\ncat {t}\nEOF",
+                    f"pwsh -Command 'Get-Content {t}'", f"powershell.exe -c 'gc {t}'",
+                    f'cmd /c "type {t}"', f"x=$(bash -c 'cat {t}')",
+                    f"mksh -c 'cat {t}'", f"ash -c 'cat {t}'",
+                    f"bash -co pipefail 'cat {t}'", f"bash --login -c 'cat {t}'"):
+        assert refused("Bash", {"command": command}, home), command
+    assert refused("Bash", {"command": ["pwsh", "-Command", f"Get-Content {t}"]}, home,
+                   harness="codex")
+    for command in (f"echo 'moxi sessions find {t}' | bash",
+                    f"pwsh -c 'moxi sessions find {t}'",
+                    f"cat <<'EOF'\ncat {t}\nEOF"):
+        assert not refused("Bash", {"command": command}, home), command
+
+
+def test_a_script_past_the_depth_is_judged_by_its_words(home):
+    t = transcript(home)
+    deep = f"cat {t}"
+    for _ in range(readguard.DEPTH):
+        deep = f"bash -c {shlex.quote(deep)}"
+    assert refused("Bash", {"command": deep}, home)
+    past = t
+    for _ in range(readguard.DEPTH + 1):
+        past = f"bash -c {shlex.quote(past)}"
+    assert refused("Bash", {"command": past}, home)
 
 
 def test_a_tool_it_does_not_cover_runs(home):

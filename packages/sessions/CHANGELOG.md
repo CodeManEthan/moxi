@@ -3,11 +3,17 @@
 ## Unreleased
 
 - The transcript-read guard reads shell text through turns' shell reader (`read_shell`)
-  in place of a splitter of its own. It now reads a `$(...)` inside double quotes
-  (`echo "$(cat <transcript>)"` is refused) and `$'...'` as the shell does, so a command
-  after one is no longer missed. A heredoc's body is no longer read as commands, one fed
-  to a shell included; an unquoted one's substitutions still are. The `turns` extra asks
-  for moxi-turns 0.2.8 or later.
+  in place of a splitter of its own, and finds the scripts a command hands a shell with
+  turns' `shell_scripts` in place of its own `-c` finder. It now reads a `$(...)` inside
+  double quotes (`echo "$(cat <transcript>)"` is refused) and `$'...'` as the shell does,
+  so a command after one is no longer missed. It reads more scripts, each in its shell's
+  language: a heredoc or here-string fed to a shell, literal text `echo` or `cat` pipes
+  into one, `pwsh` and `powershell` scripts, `cmd /c` scripts, and `-c` after long
+  options or with an option that takes a value (`bash --login -c`, `bash -co pipefail`).
+  A heredoc's body fed to anything but a shell is no longer read as commands; an unquoted
+  one's substitutions still are. `readguard.split` and `readguard.SHELLS` are gone;
+  `readguard.commands(text, dialect, depth)` reads a call. The `turns` extra asks for
+  moxi-turns 0.2.8 or later.
 - With cache installed, a row of `Active recently` ends its first line in `warm until
   <time>` or `cold`, from cache's clock record for the session, and turns cold at its
   time; opened, it has a `Cache` line linking cache's page. A day's rows say nothing of

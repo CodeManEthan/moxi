@@ -16,7 +16,12 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
   double quotes included; one is refused when one of its words, or the file one of its
   redirects names, is such a path. A word is read as a path when it starts with `/`, `~`, `$HOME`
   or `${HOME}`, or holds a `/` (then it is joined to the working directory); a word
-  `--name=value` or `NAME=value` is read by its value too.
+  `--name=value` or `NAME=value` is read by its value too. Each script a command hands a
+  shell, as turns' `shell_scripts` finds it (a `-c`, `-Command` or `/c` argument, or a
+  heredoc, here-string or literal text piped into a shell), is read the same way in that
+  shell's dialect, down to `DEPTH` scripts deep, and the words it was made from are not
+  judged as words; past `DEPTH` they are. Codex's list of words is written back into
+  shell text (`shlex.join`) and read as `sh`.
 
 The roots are each harness's `source.root()`: the configured root when a config key names
 one, and the harness's own rule over the launch's environment. Each archive folder
@@ -34,7 +39,7 @@ command after it on the same line is judged on its own, so `moxi sessions root; 
 process, which is no tool call, so the guard never sees them.
 
 **A nudge, not a boundary.** A relative path after `cd`, a variable, a path built at run
-time, a heredoc's body, or a script the command runs gets past it. Of a word that holds a
+time, a heredoc's body fed to anything but a shell, or a script file gets past it. Of a word that holds a
 substitution, the text before its first one is judged, and the text after its last one
 when that starts with `/`, `~`, `$HOME` or `${HOME}`.
 
@@ -51,6 +56,7 @@ from __future__ import annotations
 import _thread
 import os
 import posixpath
+import shlex
 import sysconfig
 from collections.abc import Iterable, Iterator, Mapping
 
@@ -66,9 +72,7 @@ LOGGER = "moxi.sessions"
 #: name, and its shipped default (settings.toml holds the same list).
 ESCAPES_KEY = "guard.transcript_read_escapes"
 ESCAPES = frozenset({"sessions"})
-#: Shell names whose `-c` script is read as commands of its own.
-SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "mksh", "ash"})
-#: How deep a `-c` script inside a `-c` script is read.
+#: How many scripts deep a script handed to a shell inside another is read.
 DEPTH = 3
 
 DENY = (
@@ -346,54 +350,33 @@ def _values(word: str) -> Iterator[str]:
 
 # --- the shell --------------------------------------------------------------------------
 
-def commands(command: object, depth: int = DEPTH) -> list[list[str]]:
-    """The simple commands of a shell call's `command`, each as its words with quotes
-    taken off. A list of words is one command. A shell's `-c` script adds its own
-    commands, down to `depth`."""
-    if isinstance(command, (list, tuple)) and all(isinstance(w, str) for w in command):
-        found = [list(command)] if command else []
-    elif isinstance(command, str):
-        found = split(command)
-    else:
+def commands(text: object, dialect: str = "sh", depth: int = DEPTH) -> list[list[str]]:
+    """The simple commands of a shell call's `text`, read in `dialect` by turns' shell
+    reader, each as its words with quotes taken off and then the word each of its
+    redirects names (so `wc -l < f` names `f`).
+
+    The commands of each substitution in a command, a word's, a redirect's or an unquoted
+    heredoc's body's, follow it, read at the same `depth`: a substitution runs in the same
+    shell. So do the commands of each script the command hands a shell (turns'
+    `shell_scripts`), read in that shell's dialect at `depth - 1` while `depth` is above
+    0; the words such a script was made from are then left out of the command's own. At
+    `depth` 0 a script is not read, and its words stay. A substitution stands in its word
+    as a NUL. A list of words is written back into `sh` text with `shlex.join` and read
+    the same way. Text the reader can't read (nested too deep) gives no commands."""
+    if isinstance(text, (list, tuple)) and all(isinstance(w, str) for w in text):
+        if not text:
+            return []
+        text, dialect = shlex.join(text), "sh"
+    elif not isinstance(text, str):
         return []
-    out = []
-    for words in found:
-        at = _script(words)
-        if at is None or depth <= 0:
-            out.append(words)
-            continue
-        out.append(words[:at] + words[at + 1:])
-        out.extend(commands(words[at], depth - 1))
-    return out
-
-
-def _script(words: list[str]) -> int | None:
-    """Where the `-c` script of a command that runs a shell is among its words, or
-    None."""
-    skip = len(words) - len(_past_assignments(words))
-    if skip >= len(words) or posixpath.basename(words[skip]) not in SHELLS:
-        return None
-    for i in range(skip + 1, len(words)):
-        word = words[i]
-        if not word.startswith("-") or word.startswith("--"):
-            return None
-        if "c" in word[1:] and i + 1 < len(words):
-            return i + 1
-    return None
-
-
-def split(text: str) -> list[list[str]]:
-    """`text` split into simple commands of words, quotes taken off, as turns' shell
-    reader (`read_shell`) reads it.
-
-    Each command gives its words, then the word each of its redirects names (so
-    `wc -l < f` names `f`), and after it the commands of each substitution in it, a
-    word's, a redirect's or an unquoted heredoc's body's, read the same way. A
-    substitution stands in its word as a NUL. A heredoc's body is not read as commands.
-    Text the reader can't read (nested too deep) gives no commands."""
+    turns = _turns()
+    shell = turns.read_shell(text, dialect=dialect)
+    scripts = turns.shell_scripts(shell, dialect=dialect) if depth > 0 else ()
     out: list[list[str]] = []
-    for command in _turns().read_shell(text).commands:
-        words = [w.text for w in command.words]
+    for index, command in enumerate(shell.commands):
+        own = [script for script in scripts if script.command_index == index]
+        taken = {i for script in own for i in script.word_indexes}
+        words = [w.text for i, w in enumerate(command.words) if i not in taken]
         words += [r.target.text for r in command.redirects if r.target is not None]
         if words:
             out.append(words)
@@ -403,7 +386,9 @@ def split(text: str) -> list[list[str]]:
             if r.target is not None:
                 subs += r.target.subs
         for sub in subs:
-            out.extend(split(sub))
+            out.extend(commands(sub, dialect, depth))
+        for script in own:
+            out.extend(commands(script.text, script.dialect, depth - 1))
     return out
 
 
@@ -481,5 +466,5 @@ def _fail(kind: str, message: str) -> None:
 
 
 __all__ = ["NAME", "GUARD_ID", "SWITCH", "CALLS", "ESCAPES_KEY", "ESCAPES", "DENY", "judge",
-           "decide", "transcript_roots", "escapes", "commands", "split", "escaped",
+           "decide", "transcript_roots", "escapes", "commands", "escaped",
            "own_moxi", "reset"]

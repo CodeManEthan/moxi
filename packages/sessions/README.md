@@ -402,8 +402,11 @@ transcript root: Claude Code's Read, Grep and Glob, and a shell command on Claud
 Codex. turns' shell reader splits a shell command into simple commands, each judged on its
 own, and so are the commands of each substitution in it, a `$(...)` in double quotes or
 in an unquoted heredoc's body included; one is refused when one of its words, or the file
-one of its redirects names, is such a path. The refusal points the agent to `moxi
-sessions read <session>`. The roots are each harness's root, the configured one included,
+one of its redirects names, is such a path. A script a command hands a shell is read the
+same way, in that shell's language: a `-c` argument (`bash -lc`, `bash --login -c`,
+`bash -co pipefail`), a heredoc or here-string fed to a shell, literal text `echo` or
+`cat` pipes into one, and `pwsh -Command` and `cmd /c` scripts. The refusal points the
+agent to `moxi sessions read <session>`. The roots are each harness's root, the configured one included,
 and each archive folder. An archive folder is compared by its path as written, with a
 trailing `/`, `//`, `.` and `x/..` folded by the text alone, and is never resolved, so
 judging a call touches no archive folder.
@@ -424,14 +427,16 @@ installed, since then nothing enforces it.
 The guard is a nudge, not a boundary. Its known gaps:
 
 - A relative path after `cd`, a variable, or a path a script builds gets past it.
-- A heredoc's body is not read as commands, even one fed to a shell (`bash <<EOF`);
-  only the substitutions of an unquoted one are.
+- A heredoc's body fed to anything but a shell is not read as commands; only the
+  substitutions of an unquoted one are.
 - A path counts only when it is a transcript root or lies under one, so a search that
   starts above a root passes: `grep -r x ~/.claude`, Grep with the path `~/.claude` and
   the glob `projects/**`, or Glob with the path `~/.claude` and the pattern
   `**/projects/*.jsonl`.
-- A shell's `-c` script is read only when the options before it are short ones:
-  `bash -l -c '...'` and `bash -lc '...'` are read, `bash --login -c '...'` is not.
+- A script is read only where turns' shell reader finds one: a script file, text handed
+  to a program other than a shell (`python -c`, `ssh`), a file or another program's
+  output piped into a shell, and a shell option the reader doesn't know get past it. A
+  script inside a script is read three deep; past that its words are judged as words.
 - A path that reaches an archive folder through a symbolic link passes, since the guard
   compares an archive folder by its written path and never resolves it.
 - OpenCode's root is its database file, so the `opencode.db-wal` and `opencode.db-shm`
