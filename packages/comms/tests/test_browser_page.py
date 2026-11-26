@@ -117,14 +117,15 @@ def iso_in(seconds: float) -> str:
 
 
 def running_entry(request_id: str, session_id: str, name: str, *, slot_number: str, project: str,
-                  waits: int = 0, covered: bool = False, coverable: bool = False) -> dict:
+                  waits: int = 0, covered: bool = False, coverable: bool = False,
+                  model: str | None = None, effort: str | None = None) -> dict:
     """One running launch in launcher's declared shape (`RUNNING_LAUNCH`), warm for 20
-    minutes, waiting on `waits` agents."""
+    minutes, waiting on `waits` agents, started with `model` and `effort`."""
     return {
         "request_id": request_id, "harness": "claude", "session_id": session_id, "name": name,
         "identity": None, "where": {"target": "slot", "slot": slot_number, "project_key": project,
                                     "folder": project},
-        "started_at": iso_in(-3600),
+        "started_at": iso_in(-3600), "model": model, "effort": effort,
         "cache": {"state": "warm", "until": iso_in(20 * 60), "estimated": False},
         "waits": {"kind": "agents", "count": waits} if waits else None,
         "covered": covered, "coverable": {"cap": 3} if coverable else None, "activity": None,

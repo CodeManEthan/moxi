@@ -20,19 +20,38 @@
 // the set of sessions in the records changes, when its tab is shown and every 60 seconds
 // while the tab is visible. A session's row waits up to 2 seconds for a names answer that
 // holds it.
+//
+// With launcher installed it reads launcher's `/api/running` and `/api/state` when it opens
+// and when its tab is shown, and at the desk follows their topics `running` and `sessions`:
+// a row a running launch holds is named and placed by the launch, carries its keep-warm
+// case, the loud row first, and `Keep warm` where a press would cover it; its opened row
+// has the `Keep warm` line and the effort. A press posts the launch's request id to
+// launcher's `/api/keep-warm`. With usage installed it reads usage's `/api/session` for each
+// timed session (again when its last request moves, when the tab is shown and every 60
+// seconds) and `/api/prices` for their models: line two says what going cold costs, and the
+// opened row has the `If cold` line and its `Usage` link. A module that is not installed,
+// or whose read fails, gives nothing, and the page reads as without it.
 
 import { css, html, LitElement, nothing } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { repeat } from "lit/directives/repeat.js";
-import { api, navigate, subscribe } from "/m/ui/client.js";
+import { api, gateway, installed, navigate, subscribe } from "/m/ui/client.js";
 
+import { UsageReads } from "./cost.ts";
 import { Feed } from "./feed.ts";
+import {
+  answered, expired, KEEP_WARM, KEEP_WARM_PATH, NO_PRESSES, OtherRead, parseKeepWarms, parseLaunched, pressBody,
+  pressed, pressNote, PRESS_WAIT_MS, RUNNING_PATH, RUNNING_TOPIC, STATE_PATH, STATE_TOPIC, valueCame,
+} from "./launched.ts";
+import type { KeepWarms, Launched, Presses } from "./launched.ts";
 import {
   Arrivals, CLOSE, COPIED, COPIED_MS, COPY, COPY_ID, commandParts, factText, keep, keyOf, ModelReads, NAMES_EVERY_MS,
   NamesFeed, namesBy, OPEN, openedModel, pageModel, parsePageClocks, SESSION_LABEL, SESSIONS_LINK, sessionPath,
-  SETTINGS_LINK, SETTINGS_ROUTE, todayOf, WAITING_MS, WATCHER_LABEL,
+  SETTINGS_LINK, SETTINGS_ROUTE, timed, todayOf, WAITING_MS, WATCHER_LABEL,
 } from "./model.ts";
-import type { GroupModel, Kept, LastLine, PageClocks, PageModel, RowModel, UntimedModel, WatcherRow } from "./model.ts";
+import type {
+  GroupModel, Kept, LastLine, Others, PageClocks, PageModel, RowModel, UntimedModel, WatcherRow,
+} from "./model.ts";
 
 const TAG = "moxi-cache-page";
 const TICK_MS = 1000;
@@ -60,6 +79,9 @@ const STYLES = css`
   .grp .gl { grid-column: 2; min-width: 0; }
   moxi-ui-row[open] + moxi-ui-row { border-top: 1px solid var(--moxi-border); padding-top: 3px; }
   .do { font-size: 13px; line-height: 18px; color: var(--moxi-text-dim); }
+  /* Keep warm is set in the text colour: the one act a session going cold uncovered carries. */
+  .do.warm { color: var(--moxi-text); }
+  .do:disabled { opacity: 0.6; cursor: default; }
 
   .stop { padding: 7px 0; }
   .stop .l1 { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; line-height: 20px; }
@@ -132,11 +154,23 @@ export class CachePage extends LitElement {
   #namesTimer: ReturnType<typeof setInterval> | undefined;
   #dueTimer: ReturnType<typeof setTimeout> | undefined;
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Launcher's running launches and their states, with launcher installed. */
+  #launched: OtherRead<Launched> | null = null;
+  #keepWarms: OtherRead<KeepWarms> | null = null;
+  /** usage's facts of the timed sessions, with usage installed. */
+  #usage: UsageReads | null = null;
+  /** The presses of `Keep warm`, and each press's longest wait, by request id. */
+  #presses: Presses = NO_PRESSES;
+  #pressWaits = new Map<string, ReturnType<typeof setTimeout>>();
+  #stops: (() => void)[] = [];
 
   #shown = (): void => {
     if (document.visibilityState !== "visible") return;
     void this.#feed?.refresh();
     void this.#names?.ask();
+    void this.#launched?.refresh();
+    void this.#keepWarms?.refresh();
+    this.#usage?.again();
   };
 
   connectedCallback(): void {
@@ -153,10 +187,13 @@ export class CachePage extends LitElement {
       if (this.#feed === feed) this.#stop = subscribe("cache", "clocks", (data) => feed.topic(data));
     });
     void names.ask();
+    this.#readOthers();
     document.addEventListener("visibilitychange", this.#shown);
     this.#tickTimer = setInterval(() => { this.tick += 1; }, TICK_MS);
     this.#namesTimer = setInterval(() => {
-      if (document.visibilityState === "visible") void this.#names?.ask();
+      if (document.visibilityState !== "visible") return;
+      void this.#names?.ask();
+      this.#usage?.again();
     }, NAMES_EVERY_MS);
     this.#timers.push(setTimeout(() => this.requestUpdate(), WAITING_MS));
   }
@@ -168,6 +205,16 @@ export class CachePage extends LitElement {
     this.#feed = this.#names = null;
     this.#stop?.();
     this.#stop = null;
+    this.#launched?.close();
+    this.#keepWarms?.close();
+    this.#usage?.close();
+    this.#launched = this.#keepWarms = null;
+    this.#usage = null;
+    for (const stop of this.#stops) stop();
+    this.#stops = [];
+    for (const wait of this.#pressWaits.values()) clearTimeout(wait);
+    this.#pressWaits.clear();
+    this.#presses = NO_PRESSES;
     document.removeEventListener("visibilitychange", this.#shown);
     clearInterval(this.#tickTimer);
     clearInterval(this.#namesTimer);
@@ -191,8 +238,49 @@ export class CachePage extends LitElement {
       this.#names?.clocks(value.clocks);
       const keys = new Set(value.clocks.map(keyOf));
       for (const key of [...this.#opened]) if (!keys.has(key)) this.#closed(key);
+      this.#usage?.sessions(value.clocks.filter(timed).map((row) => ({
+        key: keyOf(row), harness: row.harness, session: row.session, last: row.last_request ?? null })));
     }
     this.requestUpdate();
+  }
+
+  /** Reads launcher's and usage's facts where each is installed; at the desk, follows
+   * launcher's topics once its first read has come. */
+  #readOthers(): void {
+    const update = (): void => this.requestUpdate();
+    if (installed("launcher")) {
+      const launched = new OtherRead<Launched>(() => api("launcher", RUNNING_PATH), parseLaunched, () => {
+        if (launched.value !== null) this.#presses = valueCame(this.#presses, launched.value);
+        update();
+      });
+      const states = new OtherRead<KeepWarms>(() => api("launcher", STATE_PATH), parseKeepWarms, update);
+      this.#launched = launched;
+      this.#keepWarms = states;
+      const desk = !gateway();
+      void launched.refresh().then(() => {
+        if (desk && this.#launched === launched) {
+          this.#stops.push(subscribe("launcher", RUNNING_TOPIC, (data) => launched.topic(data)));
+        }
+      });
+      void states.refresh().then(() => {
+        if (desk && this.#keepWarms === states) {
+          this.#stops.push(subscribe("launcher", STATE_TOPIC, (data) => states.topic(data)));
+        }
+      });
+    }
+    if (installed("usage")) this.#usage = new UsageReads((path) => api("usage", path), update);
+  }
+
+  /** What launcher and usage say, as the page's model takes it. */
+  #others(): Others {
+    const usage = this.#usage;
+    return {
+      launched: this.#launched?.value ?? null,
+      keepWarms: this.#keepWarms?.value ?? null,
+      usage: usage === null ? null : { facts: (key) => usage.facts(key), rates: usage.rates },
+      presses: this.#presses,
+      desk: !gateway(),
+    };
   }
 
   // -- acts --------------------------------------------------------------------------------
@@ -209,6 +297,27 @@ export class CachePage extends LitElement {
   #closed(key: string): void {
     this.#opened.delete(key);
     this.#models.close(key);
+  }
+
+  /** A press of `Keep warm`: posts the launch's request id to launcher and waits, its
+   * button disabled, for the answer and the next value of `running`, or `PRESS_WAIT_MS`;
+   * a press that went reads that value at once. */
+  async #press(request: string): Promise<void> {
+    if (this.#presses.waiting[request] !== undefined) return;
+    this.#presses = pressed(this.#presses, request);
+    clearTimeout(this.#pressWaits.get(request));
+    this.#pressWaits.set(request, setTimeout(() => {
+      this.#pressWaits.delete(request);
+      this.#presses = expired(this.#presses, request);
+      this.requestUpdate();
+    }, PRESS_WAIT_MS));
+    this.requestUpdate();
+    const answer = await api("launcher", KEEP_WARM_PATH, pressBody(request));
+    if (!this.isConnected) return;
+    const note = pressNote(answer);
+    this.#presses = answered(this.#presses, request, note);
+    this.requestUpdate();
+    if (note === null) void this.#launched?.refresh();
   }
 
   /** Puts `text` on the clipboard; the act named `what` then reads `Copied` for a while. */
@@ -246,7 +355,7 @@ export class CachePage extends LitElement {
     return pageModel({
       feed, kept: this.#kept, now: feed.now(), names: { answer: names.answer, failed: names.failed },
       arrivals: this.#arrivals, nowMs, waitedMs: nowMs - this.#openedAt, opened: this.#opened,
-      untimedShown: this.#untimedShown,
+      untimedShown: this.#untimedShown, others: this.#others(),
     });
   }
 
@@ -308,8 +417,15 @@ export class CachePage extends LitElement {
 
   #row(row: RowModel) {
     const toggle = (): void => this.#toggle(row);
-    return html`<moxi-ui-row toggles data-key=${row.key} name=${row.name} where=${ifDefined(row.where ?? undefined)}
-        fact=${factText(row)} rest=${ifDefined(row.rest ?? undefined)} ?open=${row.open} @moxi-row-toggle=${toggle}>
+    const request = row.request;
+    return html`<moxi-ui-row toggles data-key=${row.key} data-request=${ifDefined(request ?? undefined)} name=${row.name}
+        where=${ifDefined(row.where ?? undefined)} fact=${factText(row)} ?fact-heavy=${row.factHeavy}
+        lead=${ifDefined(row.lead ?? undefined)} ?lead-heavy=${row.lead !== null} rest=${ifDefined(row.rest ?? undefined)}
+        tail=${ifDefined(row.tail ?? undefined)} note=${ifDefined(row.note ?? undefined)} ?open=${row.open}
+        @moxi-row-toggle=${toggle}>
+      ${row.keepWarm !== null && request !== null ? html`<button type="button" slot="acts" class="do warm"
+        data-action="keep-warm" title=${row.keepWarm} aria-description=${row.keepWarm} ?disabled=${row.pressing}
+        @click=${() => void this.#press(request)}>${KEEP_WARM}</button>` : nothing}
       <button type="button" slot="acts" class="do" data-action="open" aria-expanded=${row.open ? "true" : "false"}
         @click=${toggle}>${row.open ? CLOSE : OPEN}</button>
       ${row.open ? this.opened(row) : nothing}
@@ -325,12 +441,14 @@ export class CachePage extends LitElement {
     if (kept === null || now === null || record === undefined) return nothing;
     const answer = this.#names?.answer ?? null;
     const view = openedModel(record, now, namesBy(answer), answer?.home ?? null, this.#models.get(row.key),
-                             todayOf(kept, answer));
+                             todayOf(kept, answer), undefined, this.#others());
     const copied = `id ${row.key}`;
     return html`<div class="det" data-part="opened">
       ${view.lines.map((line) => html`<div class="r" data-line=${line.label}><span class="k">${line.label}</span><span
-        class="f"><span class="at">${line.value}</span>${line.tails.map((tail) => html` <span class="d">· ${tail}</span>`)
-        }</span><span></span></div>`)}
+        class="f"><span class="at">${line.value}</span>${line.after !== undefined ? html` <span class="d">${line.after}</span>`
+        : nothing}${line.tails.map((tail) => html` <span class="d">· ${tail}</span>`)}</span>${line.link !== undefined
+        ? this.#link(line.link.module, line.link.route, line.link.text, { cls: "x", action: line.link.module })
+        : html`<span></span>`}</div>`)}
       <div class="r" data-line="session"><span class="k">${SESSION_LABEL}</span><span class="f">${view.session.map((part, at) =>
         html`${at > 0 ? " " : ""}<span class=${part.dim ? "d" : ""}>${at > 0 ? "· " : ""}${part.text}</span>`)}</span>${
         view.sessions !== null ? this.#link("sessions", view.sessions, SESSIONS_LINK, { cls: "x", action: "sessions" })

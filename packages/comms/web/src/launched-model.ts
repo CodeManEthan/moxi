@@ -16,6 +16,9 @@
 // Launcher's cache times are date strings, not epoch seconds: each is parsed as a date and
 // worded by the page's `when`, never mixed with comms' own `until` in one fact.
 //
+// The `Session` line carries the model and effort the launch was started with, where
+// launcher gives them.
+//
 // Every string here goes into the page as text.
 
 import type { RosterRow } from "./feed.ts";
@@ -50,6 +53,9 @@ export interface RunningEntry {
   name: string;
   identity: string | null;
   where: Where;
+  /** The model and effort the launch was started with; null where it set none. */
+  model: string | null;
+  effort: string | null;
   cache: Cache | null;
   waits: Waits | null;
   covered: boolean;
@@ -99,6 +105,10 @@ function text(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+function word(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
 function parseCache(value: unknown): Cache | null {
   if (!isTable(value) || (value.state !== "warm" && value.state !== "cold")) return null;
   return { state: value.state, until: text(value.until), estimated: value.estimated === true };
@@ -128,6 +138,8 @@ function parseEntry(value: unknown): RunningEntry | null {
     identity: text(value.identity),
     where: { target: text(where.target) ?? "", slot: text(where.slot), project_key: text(where.project_key),
              folder: text(where.folder) ?? "" },
+    model: word(value.model),
+    effort: word(value.effort),
     cache: parseCache(value.cache),
     waits: parseWaits(value.waits),
     covered: value.covered === true,
@@ -225,8 +237,9 @@ export interface LaunchedCache {
 
 /** What launcher says of the launch running at an address. `fact` and `where` are its row's
  * words; `uncovered` is launcher's loud case, with `waits` leading line two; `coverable`
- * draws `Keep warm` with `title`; `session` is the `Session` line, with the route of the
- * Sessions page's transcript when the launch has a session id. */
+ * draws `Keep warm` with `title`; `session` is the `Session` line, with the model and effort
+ * the launch was started with and the route of the Sessions page's transcript when the
+ * launch has a session id. */
 export interface Launched {
   where: string | null;
   fact: { text: string; heavy: boolean } | null;
@@ -235,7 +248,7 @@ export interface Launched {
   coverable: boolean;
   title: string | null;
   request_id: string;
-  session: { name: string; harness: string; route: string | null };
+  session: { name: string; harness: string; model: string | null; effort: string | null; route: string | null };
   cache: LaunchedCache | null;
 }
 
@@ -255,7 +268,7 @@ function launchedOf(entry: RunningEntry, row: RosterRow, when: (at: number) => s
     coverable: kind === "uncovered" && entry.coverable !== null,
     title: kind === "uncovered" && entry.coverable !== null ? keepWarmTitle(entry.coverable.cap) : null,
     request_id: entry.request_id,
-    session: { name: entry.name, harness: entry.harness,
+    session: { name: entry.name, harness: entry.harness, model: entry.model, effort: entry.effort,
                route: sessionRoute(entry.harness, entry.session_id ?? row.session_id) },
     cache: cache === null ? null : {
       warm: cache.state === "warm", until: stampOf(cache.until), estimated: cache.estimated,

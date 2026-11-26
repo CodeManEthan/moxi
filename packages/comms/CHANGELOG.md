@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- With launcher, an opened agent's `Session` line names the model and effort its launch
+  was started with (`planner · claude · opus · high`). Without launcher, or while its read
+  fails, neither shows.
 - The launched sessions on the page read launcher's `holds` wait as launcher's Home row
   does: a session whose open holds alone keep it waiting reads `waiting on 1 open hold`,
   or `kept warm while 1 hold is open`, and gets `Keep warm` where a press would cover it.

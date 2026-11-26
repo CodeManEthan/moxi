@@ -1824,6 +1824,7 @@ comms	packages/comms/tests/test_claim_ops.py	h.on_end = ended.set	keep	set	set
 comms	packages/comms/tests/test_claim_send.py	assert len(calls) == 1 and rig.record.history(rig.names_channel) == []	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	assert phrase in out and rig.record.history(rig.names_channel) == []	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	assert rig.record.history(rig.names_channel) == []	keep	record	record
+comms	packages/comms/tests/test_claim_send.py	assert wait_for(lambda: (s.record() or {}).get("state") == "offline")	keep	record	record
 comms	packages/comms/tests/test_claim_send.py	code, out = rig.cli(["reply", mine, "fine"], env=as_claim(s))     # its own message	keep	env	env
 comms	packages/comms/tests/test_claim_send.py	code, out = rig.cli(["reply", other.id, "fine"], env=as_claim(s))  # another's	keep	env	env
 comms	packages/comms/tests/test_claim_send.py	code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))	keep	env	env
@@ -15394,7 +15395,7 @@ turns	packages/turns/tests/test_commands.py	t, out = in_thread(lambda: s.command
 turns	packages/turns/tests/test_contract.py	"environ": ("environ", {"values"}),	keep	environ	environ
 turns	packages/turns/tests/test_contract.py	"environ": (True, True, True),	keep	environ	environ
 turns	packages/turns/tests/test_contract.py	"refused": ("delivery", "ref", "reason"),	keep	refused	refused
-turns	packages/turns/tests/test_contract.py	"stale", "ready"),	keep	stale	stale
+turns	packages/turns/tests/test_contract.py	"stale", "ready", "ended_at", "box", "live_error"),	keep	stale	stale
 turns	packages/turns/tests/test_contract.py	"stops.handle": ("stop-handler", set()),	keep	set	set
 turns	packages/turns/tests/test_contract.py	"timeout_ms": 0}, timeout=5)	use	timeout=	timeout_s=
 turns	packages/turns/tests/test_contract.py	#: Each value's kind and its fields on the wire. A command's `refused` writes `reason`	keep	refused	refused
@@ -18108,6 +18109,34 @@ turns	packages/turns/tests/test_stale_agents.py	self.record = root / "s-1.jsonl"
 turns	packages/turns/tests/test_stale_agents.py	self.record.write_text("")	keep	record	record
 turns	packages/turns/tests/test_stale_agents.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_stale_agents.py	out = judge(listed, str(self.record), now=NOW, **kw)	keep	record	record
+turns	packages/turns/src/moxi_turns/client.py	WHYS = ("unreachable", "timeout", "closed", "gone", "version", "refused", "unreadable")	keep	closed	closed
+turns	packages/turns/src/moxi_turns/client.py	"""Why a connection failed with `exc`: `timeout` when its time ran out, `unreadable`	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/client.py	`closed`."""	keep	closed	closed
+turns	packages/turns/src/moxi_turns/client.py	return "closed"	keep	closed	closed
+turns	packages/turns/src/moxi_turns/client.py	code=exc.code, data=exc.data, why="refused")	keep	refused	refused
+turns	packages/turns/src/moxi_turns/client.py	error = TurnsError("this Session is closed", why="closed")	keep	closed	closed
+turns	packages/turns/src/moxi_turns/endpoint.py	value = self.future().result(timeout=max(0.0, timeout))	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/page.py	"draft": lb.Out("bool", nullable=True),	keep	nullable	nullable
+turns	packages/turns/src/moxi_turns/page.py	"typed_name": lb.Out("string", mark="redact", nullable=True),	keep	nullable	nullable
+turns	packages/turns/src/moxi_turns/pagereader.py	"closed": "its link closed during the read",	keep	closed	closed
+turns	packages/turns/src/moxi_turns/pagereader.py	"refused": "it refused the read",	keep	refused	refused
+turns	packages/turns/src/moxi_turns/pagereader.py	if self._held.get(held.key) is not held or held.typed_name == name:	keep	_held	_held
+turns	packages/turns/tests/panel_kit.py	sessions_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/test_claude_record.py	sessions_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/test_claude_record.py	return {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "HOME": str(tmp_path / "home"),	keep	HOME	HOME
+turns	packages/turns/tests/test_client.py	assert caught.value.why == "refused"	keep	refused	refused
+turns	packages/turns/tests/test_client.py	assert client.WHYS == ("unreachable", "timeout", "closed", "gone", "version", "refused",	keep	closed	closed
+turns	packages/turns/tests/test_client.py	assert caught.value.why == "closed"	keep	closed	closed
+turns	packages/turns/tests/test_client.py	# A link that closes before the answer is still `closed`.	keep	closed	closed
+turns	packages/turns/tests/test_page.py	assert pagehandlers._reader_now._held[key].ended is None	keep	_held	_held
+turns	packages/turns/tests/test_page.py	pagehandlers._reader_now._held["claude-named"].dirty.set()	keep	_held	_held
+turns	packages/turns/tests/test_page.py	raise turns.TurnsError("the endpoint did not answer agents", why="closed")	keep	closed	closed
+turns	packages/turns/tests/test_page.py	assert pagereader.read_error({"agents": "gone", "facts": "refused"}) == (	keep	refused	refused
+turns	packages/turns/tests/test_page.py	assert pagereader.read_error({"agents": "unreadable", "watch": "closed"}) == (	keep	closed	closed
+turns	packages/turns/tests/test_page.py	("closed", "its link closed during the read"),	keep	closed	closed
+turns	packages/turns/tests/test_page.py	("refused", "it refused the read"),	keep	refused	refused
+turns	packages/turns/tests/test_page.py	assert set(pagereader.REASONS) == set(client.WHYS)	keep	set	set
+turns	packages/turns/tests/test_page.py	assert len(set(pagereader.REASONS.values())) == len(client.WHYS)	keep	set	set
 sessions	packages/sessions/tests/test_browser_address.py	pick(view, "folder", "atlas")	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_text(re.compile("^atlas"))	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_class("set")	keep	folder	folder
@@ -18374,3 +18403,12 @@ rounds	packages/rounds/tests/test_page.py	return {"id": ruled.id, "text": ruled.
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": BUSY, "id": "C9"}),	keep	round	round
 rounds	packages/rounds/tests/test_page.py	("/api/record", {"what": "ruling", "round": "kestrel/nowhere", "id": "C1"}))	keep	round	round
 rounds	packages/rounds/tests/test_page.py	assert missing == nowhere == {"gone": True, "record": None}	keep	record	record
+cache	packages/cache/tests/test_browser_others.py	LAUNCHES = [{"request_id": "r-slot", "session": SLOT, "target": "slot", "slot": "4", "folder": "atlas-api",	keep	folder	folder
+cache	packages/cache/tests/test_browser_others.py	"folder": "kestrel-web", "values": {"name": "planner", "model": "sonnet"}}]	keep	folder	folder
+cache	packages/cache/tests/test_browser_others.py	shell = ui_shells(leave_out=leave_out, env={"CLAUDE_CONFIG_DIR": str(base / "claude-home")})	keep	env	env
+cache	packages/cache/tests/test_browser_others.py	f"{round(CONTEXT / 1000)}k")	keep	round	round
+cache	packages/cache/tests/test_browser_others.py	"where": {"target": "slot", "slot": "2", "project_key": project, "folder": project},	keep	folder	folder
+cache	packages/cache/tests/test_browser_others.py	self.answer: dict = {"refused": None}	keep	refused	refused
+cache	packages/cache/tests/test_browser_others.py	self._fulfill(route, {"state": "up", "detail": None, "refused": None, "sessions": self.states})	keep	refused	refused
+cache	packages/cache/tests/test_browser_others.py	stub.answer = {"refused": {"code": "unsupported", "problem": "turns can't nudge this session"}}	keep	refused	refused
+cache	packages/cache/tests/test_browser_others.py	assert any(reads in url for url in check.requests), check.requests	keep	any	any
