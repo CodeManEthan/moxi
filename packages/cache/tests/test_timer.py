@@ -232,7 +232,7 @@ def test_discovery_reads_the_entry_point_group_from_installed_metadata(tmp_path,
     make("moxi-cache-watch")
     probe, stranger = timer.from_modules(eps, find)
     assert isinstance(probe, Subscription) and probe.source == "module sample"
-    assert probe.argv0.endswith("/scripts/moxi-sample-timers-run")
+    assert Path(probe.argv0).parts[-2:] == ("scripts", "moxi-sample-timers-run")
     assert isinstance(stranger, Refusal)
     assert "not one of the module's own console scripts (moxi-sample-timers-run)" in \
         stranger.reason
@@ -772,7 +772,7 @@ def test_a_windows_asks_file_keeps_its_last_256_kib(tmp_path, as_windows):
     t = Timer(config_entries=lambda: [], log_file=tmp_path / "timer.jsonl",
               modules=[py_sub("loud", "import sys\n"
                                       f"for i in range({lines}): "
-                                      "sys.stdout.write('%07d\\n' % i)")])
+                                      "sys.stdout.buffer.write(b'%07d\\n' % i)")])
     t.tick({A: record(pid=31)}, T0 + TTL)
     reap_all(t)
     (line,) = logged(t)
@@ -940,7 +940,10 @@ def test_a_refusal_lasts_only_while_its_cause_does(tmp_path, caplog):
     late.chmod(0o755)
     assert asks(t, live, T0 + TTL + 2) == [("late", A)]
     assert [s.name for s in t.loaded.subscriptions] == ["late"] and not t.loaded.refused
-    late.chmod(0o644)
+    if os.name == "nt":                 # no mode bit makes a file not run there: it goes
+        late.unlink()
+    else:
+        late.chmod(0o644)
     assert asks(t, live, T0 + TTL + 100) == [] and asks(t, live, T0 + TTL + 101) == []
     assert [r.name for r in t.loaded.refused] == ["late"]
     refusals = [m for m in caplog.messages if "refused subscription late" in m]
@@ -1152,7 +1155,10 @@ run = ["~/bin/x"]
            "MOXI_TEST_UNSET_VAR=on" in out
     assert "refused: 1" in out and "tilde (config): run[0] '~/bin/x' starts with ~" in out
     assert "live sessions: 2" in out
-    assert "on-expiry: not asked: the process lacks MOXI_TEST_UNSET_VAR=on" in out
+    if timer.env_checkable():
+        assert "on-expiry: not asked: the process lacks MOXI_TEST_UNSET_VAR=on" in out
+    else:
+        assert f"on-expiry: not asked: {timer.ENV_UNREAD}\n" in out
     assert "before-expiry: asks when the window opens, in 43m" in out
     assert "before-expiry: window open: asks at the watcher's next tick" in out
 

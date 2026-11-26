@@ -81,7 +81,8 @@ def test_a_learning_read_writes_the_lowering_before_it_returns(tmp_path, learner
                                                                      "gpt-5.6-sol")
     row = table.load_table().lookup("codex", "openai", "gpt-5.6-sol")
     assert (entry["row_seconds"], entry["row_checked"]) == (row.seconds, row.checked)
-    assert oct(drift.record_path().stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":                 # mode bits are POSIX's
+        assert oct(drift.record_path().stat().st_mode & 0o777) == "0o600"
 
 
 def test_the_judged_turn_lives_in_the_store(tmp_path, learner):

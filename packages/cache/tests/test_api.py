@@ -65,9 +65,9 @@ def test_the_read_signature_is_fixed():
 
 def test_projects_root_is_sessions_rule_re_exported(tmp_path):
     env = {"HOME": "/home/someone"}
-    assert api.projects_root(env) == "/home/someone/.claude/projects"
+    assert api.projects_root(env) == str(Path("/home/someone/.claude/projects"))
     env = {"HOME": "/home/someone", "CLAUDE_CONFIG_DIR": "~/elsewhere"}
-    assert api.projects_root(env) == "/home/someone/elsewhere/projects"
+    assert api.projects_root(env) == str(Path("/home/someone/elsewhere/projects"))
     assert api.projects_root(env) == str(sessions_api.projects_root(env))
     assert api.projects_root(None) == str(claude_config() / "projects")
 

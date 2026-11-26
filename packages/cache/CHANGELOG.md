@@ -2,6 +2,10 @@
 
 ## 0.1.7 (unreleased)
 
+- `moxi cache timers` said "not asked: the process lacks the process's environment cannot
+  be read" for a `requires_env` subscription where a process's environment can't be read
+  (always on Windows). It says "not asked: the process's environment cannot be read";
+  `timer.ENV_UNREAD` names that entry of `missing_env`.
 - The render audit hook moved to the core as `moxi.render`; `moxi_cache.render` is
   gone. `moxi cache segment` installs the core's hook, which refuses the same things.
 - cache needs moxi 0.1.11 or later, for that hook.

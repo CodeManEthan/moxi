@@ -50,6 +50,7 @@ from collections.abc import Sequence
 from moxi.config import ConfigError
 
 from . import api, drift, records, table
+from .timer import ENV_UNREAD
 from . import timer as _timer
 from .clock import COLD, WARM, Clock
 from .settings import current
@@ -250,6 +251,7 @@ def _sub_line(sub: dict) -> str:
 _STATES = {
     "no-clock": "no clock to count from (no request read yet)",
     "env-not-met": "not asked: the process lacks {missing}",
+    "env-unread": "not asked: {missing}",
     "closed": "window closed {closes}",
     "waiting": "asks when the window opens, {next}",
     "due": "window open: asks at the watcher's next tick",
@@ -289,7 +291,10 @@ def _timers(args) -> int:
                  else s["kind"])
         print(f"  {s['session']} (pid {s['pid']}): {clock}")
         for ask in s["asks"]:
-            words = _STATES[ask["state"]].format(
+            state = ask["state"]
+            if state == "env-not-met" and ask["missing_env"] == [ENV_UNREAD]:
+                state = "env-unread"
+            words = _STATES[state].format(
                 missing=", ".join(ask["missing_env"]),
                 closes=_clock_time(ask["closes_at"], now),
                 next=_clock_time(ask["next_at"], now),

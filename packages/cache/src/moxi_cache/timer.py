@@ -426,10 +426,15 @@ def env_met(sub: Subscription, env: Mapping[str, str] | None) -> bool:
     return True
 
 
+#: `missing_env`'s one entry where the process's environment can't be read.
+ENV_UNREAD = "the process's environment cannot be read"
+
+
 def missing_env(sub: Subscription, env: Mapping[str, str] | None) -> list[str]:
-    """The `requires_env` entries a process's environment does not meet, in words."""
+    """The `requires_env` entries a process's environment does not meet, in words; only
+    `ENV_UNREAD` where the environment can't be read (always on Windows)."""
     if env is None:
-        return ["the process's environment cannot be read"]
+        return [ENV_UNREAD]
     out = []
     for var, want in sub.requires_env:
         have = env.get(var)
@@ -840,6 +845,6 @@ def plan(sub: Subscription, record: Mapping, now: float, env, asks: list[dict]) 
 __all__ = ["GROUP", "ATTRIBUTE", "CONFIG_KEY", "CONFIG", "FIELDS", "LOG_NAME", "LOG_LIMIT",
            "Subscription", "Refusal", "Loaded", "Timer", "Track", "check", "from_config",
            "from_modules", "combine", "load", "read_process_env", "env_checkable", "env_met",
-           "missing_env", "Detached", "ASKS_DIR", "ASK_OUTPUT_LIMIT", "ASK_FILES_KEPT",
+           "missing_env", "ENV_UNREAD", "Detached", "ASKS_DIR", "ASK_OUTPUT_LIMIT", "ASK_FILES_KEPT",
            "append_log", "read_log", "log_path", "spawn", "due", "plan",
            "resolve_config_argv0", "module_argv0_resolver"]
