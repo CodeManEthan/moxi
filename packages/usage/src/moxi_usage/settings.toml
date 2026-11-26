@@ -103,6 +103,14 @@ label = "Wait for a mark's handler"
 group = "Marks"
 unit = "ms"
 
+[stop.deny_text]
+type = "string"
+default = "This session is past its stop mark ({mark}). Only wrap-up works now: commit your work with git, write your handoff in {folder}, send what you owe on comms, then run moxi launcher relaunch --self --handoff FILE."
+doc = "The line given when a session passes the stop mark its launch set (the launcher's stop_at), and the reason for each tool call refused after it; {mark} and {folder} (the launch's handoff folder) are filled in."
+read = "use"
+label = "The stop's words"
+group = "Marks"
+
 [restart_point.days]
 type = "int"
 default = 21
@@ -211,7 +219,7 @@ group = "Worker ceiling"
 [ceiling.allow_commands]
 type = "list"
 default = [["moxi", "repo", "rules"]]
-doc = "More commands a subagent past its ceiling may run, each the list of a whole command's words; a word written <...>, such as <key>, stands for one name word."
+doc = "More commands a subagent past its ceiling may run, each the list of a whole command's words; the word <handoff> stands for a Markdown file's path under a handoff root, and any other word written <...>, such as <key>, for one name word."
 read = "use"
 label = "Commands it may still run"
 group = "Worker ceiling"

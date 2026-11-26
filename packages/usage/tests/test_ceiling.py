@@ -97,7 +97,8 @@ def started(base=20_000):
 def test_the_guard_is_declared_as_turns_reads_it():
     from moxi_usage.guards import GUARDS
 
-    (g,) = GUARDS
+    assert [g.name for g in GUARDS] == ["ceiling", "stop"]
+    g = GUARDS[0]
     assert isinstance(g, turns.Guard)
     assert (g.name, g.who, g.judge, g.switch, g.on_error) == (
         "ceiling", "agents", "moxi_usage.ceiling:judge", "ceiling.enabled", "allow")

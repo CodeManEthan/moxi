@@ -99,8 +99,9 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # ShellMark(kind, position), what a strict guard may refuse,
                               # its kind one of MARK_KINDS
     turns.command_word_index(command, *, dialect="sh")   # the index of the word naming
-                              # what a command runs, past assignments, reserved words and
-                              # wrappers; None when it runs nothing the reader can name
+                              # what a command runs, past assignments (PowerShell's too),
+                              # reserved words and wrappers; None when it runs nothing
+                              # the reader can name
     turns.shell_scripts(t, *, dialect="sh")   # (ShellScript(text, dialect, command_index,
                               # source, word_indexes), ...): the text a command hands a
                               # shell to run, from its argument, a heredoc, a here-string

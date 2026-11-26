@@ -734,6 +734,26 @@ launcher never clears or compacts a session at a context limit.
   recorded with `compact` shows `compact (no longer acts)`, and its relaunch, resume or
   fork runs `off`, with a warning; a recorded `limit_at` is dropped.
 
+**Stop.** `--stop-at <k>x` (needs usage, turns and slots), unset unless set, is a hard
+stop past the relaunch line: once the session's context passes it, usage holds the
+session to wrap-up (git, its handoff, comms, `moxi launcher relaunch --self`) and
+refuses every other tool call with what to do next (usage's README, "The stop"). The
+mark is a multiple `<k>x` on usage's scale, k a number of at most two decimal places and
+at least 1, and it must lie past `warn_at`: with `warn_at = 2x`, `2.5x` or `3x`. Since a
+stopped session's one way out is relaunching itself, a stop is taken only on a launch
+that relaunches itself and is warned at a mark. A `stop_at` typed or set by the preset
+is refused (`stop-mark`, exit 3) when it is not of the form `<k>x`, when the launch has
+no `warn_at` mark (hint: set `warn_at` first), when it is not past `warn_at` (naming
+that mark), and when the launch can't relaunch itself (naming what it fails). One from
+`[defaults]` is left out, with a warning, of a launch that can't relaunch itself, and
+refused otherwise by the same rules. `presets check` flags a preset's `stop_at` by the
+same rules, as an error for the form and `warn_at` and as a warning where a launch of
+the preset can't relaunch itself (`recycle_at_limit` not `relaunch`, a Codex preset, a
+scratch folder); only the handoff folder, which needs the launch's folder, waits for the
+launch. It leaves a `[defaults]` `stop_at` out where it can show a launch can't relaunch
+itself, as that launch does. The launch stamps the mark as `MOXI_USAGE_STOP_AT` and its handoff folder as
+`MOXI_USAGE_STOP_HANDOFFS`. A fork drops it.
+
 **Keep-warm.** `--keep-warm on` (needs turns and cache) nudges a session shortly before
 its prompt cache would expire while it waits on work it handed out. It is off unless a
 flag, a preset, `[defaults]` or the launch page sets it on, and `off` from any of them
@@ -805,6 +825,51 @@ covered.
 recycle and keep-warm state (this session's when none is named). It reads red, with
 `failed` or `blocked` and why, when the latest run on the launch failed or was blocked
 and nothing has gone well since; a session merely waiting is never red.
+
+## The wake guard
+
+A session whose cache has gone cold wakes when something outside it ends its background
+shells or its subagents' work: the session gets a turn on a cold cache, which means
+reading its whole context again uncached. The wake guard, `launcher.wake`, is a turns
+guard that refuses that. Before a shell call runs (Claude Code's `Bash` and `PowerShell`
+tools, Codex's `Bash`, in a main session or a subagent), it works out which processes a
+kill in it would end (`kill`, `pkill`, `killall`, `pgrep ... | xargs kill`,
+`taskkill`, PowerShell's `Stop-Process`), finds the session each runs under, and asks
+cache whether that session is cold. If one is, the call is refused before it runs,
+naming the session and how long its cache has been cold, and saying to relaunch it
+(`moxi launcher relaunch NAME`, as its director) or leave it.
+
+The guard reads the call through turns' shell reader, so a kill is found wherever the
+shell would run it: after `&&`, `;` or `|`, inside `if`, `while` or `{ }`, behind
+`sudo`, `env`, `nohup` or `timeout` and their options, short or long, on the right of a
+PowerShell assignment (`$null = Stop-Process -Id:211`), in a `$(...)` or backtick
+substitution, in an
+unquoted heredoc's body, and in a script handed to another shell (`bash -c '...'`,
+`pwsh -Command '...'`, `cmd /c ...`, a heredoc on `bash`, `echo '...' | sh`), three
+shells deep. A kill in a quoted heredoc or a single-quoted string is text, and ends
+nothing.
+
+What passes: a kill of your own session's processes, of a session's own harness process
+(that ends the session rather than waking it), of processes under no session, or under a
+session whose cache is warm, fresh or can't be read. A command the shell reader doesn't
+read passes too: one that needs running to know what it does (a variable, `eval`,
+`printf ... | sh`, a script file, an option of `sudo` or `env` the reader doesn't know,
+such as `sudo --login`), a target the guard can't work out (a file it reads), and a kill
+written in another language, which the guard doesn't see. If the guard breaks or runs
+late, the call goes ahead.
+
+The guard is on by default where turns and cache are installed. Turn it off with
+`moxi config set launcher wake_guard.enabled false`; naming `launcher.wake` on turns'
+`guards.run` turns it on again regardless.
+
+**On Windows** Claude Code's `Bash` tool runs Git Bash, whose `kill` takes Git Bash's
+own process ids, not Windows ones, and whose `pkill` and `killall` see only Git Bash's
+own processes. The guard can't map those to Windows processes, so on Windows `kill`,
+`pkill`, `killall` and `xargs kill` go through unjudged: they can wake a cold session.
+On the shell there it judges only `taskkill`. PowerShell's `Stop-Process` is judged as
+on any system, and Codex's shell tool, which runs PowerShell on Windows, is read as
+PowerShell. Each call let through this way is logged at info level, and nothing else
+says so.
 
 ## The page
 
@@ -1077,7 +1142,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key; with ui, the launcher's facts on the Projects page | `cwd` paths and scratch launches only |
 | notes | the `notes_dir` row, and notes' handoff folder; a launch notes gives no notes directory has none | the launcher's own handoff folder |
-| usage | the `warn_at` and `recycle_at_limit` rows | the rows are not offered |
+| usage | the `warn_at`, `recycle_at_limit` and `stop_at` rows | the rows are not offered |
 | ui | the launcher's page, and its state views on other pages | the command line only |
 | sessions | the latest thing said in each running session, on Home's Sessions row; `Open` and `All sessions` go to the sessions page | the row shows when each session was launched, and its links go to the launcher's page |
 | memory | the `subconscious` row: `--subconscious automatic` or `--subconscious on-demand` (needs turns too) stamps the mode under the variable memory names, `MOXI_MEMORY_SUBCONSCIOUS`, and memory's subconscious runs in that session; the `subconscious_route` row, `--subconscious-route subagent` (the default: a fork inside the session) or `slot` (a forked session in a slot you can watch; needs slots and comms, and refused where tmux slots don't run, but only with the subconscious on, so a route set in `[defaults]` or a preset doesn't refuse a launch with it off), stamped beside the mode as `MOXI_MEMORY_SUBCONSCIOUS_ROUTE`; on Codex only `slot` runs a recall, so a Codex launch on `subagent` has the subconscious off at run time (memory's log and doctor say so); a fork drops both rows; a recall's slot fork, which memory launches through `fork` and ends with its recall, is left alone by park, restore and crash discovery (above) | the rows are not offered |
@@ -1186,6 +1251,8 @@ Set with `moxi config set launcher <key> <value>`:
 - `relaunch.director_pass_env` (empty): the same for a director's relaunch, read from
   the director's environment. Empty, nothing of the director's reaches the session.
 - `relaunch.notice_retry_s` (30): how long a refused notice is tried again.
+- `wake_guard.enabled` (on): whether the wake guard runs where cache is installed (see
+  "The wake guard").
 - `keep_warm.subagent_cap` (3) and `keep_warm.director_cap` (10): how many nudges in a row
   each case gets; `keep_warm.subagent_texts` and `keep_warm.director_texts` are their
   words. `keep_warm.director_cap` also caps the nudges for the agents a director

@@ -44,7 +44,7 @@ experimental: no real run has confirmed it yet.
 
 turns is a library with no command of its own; `moxi doctor turns` checks it. Its API is
 the `moxi_turns` package, and the wire under it is described in
-[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.8/packages/turns/contracts/socket-protocol.md).
+[contracts/socket-protocol.md](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.9/packages/turns/contracts/socket-protocol.md).
 
 ## Install
 
@@ -124,7 +124,8 @@ A judge that reads a shell command reads it with `read_shell(text, dialect="sh")
 (`"powershell"` and `"cmd"` too), which gives its commands, words, redirects and
 substitutions as the shell would read them and runs nothing (a word's `fields` are the
 words bash splits an unquoted `${x:-default}` into), with `command_word_index`
-for the word that names what a command runs and `shell_scripts` for the text it hands
+for the word that names what a command runs (past a wrapper's options, short or long, and
+in PowerShell past an assignment's `$x =`) and `shell_scripts` for the text it hands
 another shell. What needs evaluating to know what runs (a variable, `eval`, `printf`'s
 escapes, a script file) is not read; each guard decides that itself.
 
@@ -328,4 +329,4 @@ the other modules give them.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.8/packages/turns/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-turns-v0.2.9/packages/turns/LICENSE).

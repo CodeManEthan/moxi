@@ -184,6 +184,17 @@ label = "Retry a refused notice for"
 group = "Relaunch"
 unit = "seconds"
 
+[wake_guard.enabled]
+type = "bool"
+default = true
+doc = "Run the wake guard where cache is installed: refuse a shell call that would end processes under another live session whose cache is cold, since ending them gives that session a turn on a cold cache. Naming launcher.wake on turns' guards.run runs it too."
+read = "use"
+needs = "cache"
+label = "Wake guard"
+line = "Refuses a kill that would end a cold session's background shells or subagents from outside it, and says to relaunch it or leave it."
+group = "Relaunch"
+hurts = { when = "off", says = "turns this guard off", confirm = "From each session's next start, a kill may end a cold session's background work and wake it, unless turns' guards.run names launcher.wake." }
+
 [keep_warm.subagent_cap]
 type = "int"
 default = 3

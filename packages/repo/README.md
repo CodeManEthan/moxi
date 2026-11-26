@@ -605,6 +605,21 @@ page changes no repo outside the copy's folder: a repo whose work tree, git fold
 folder lies outside it is refused, and the page only reads it. A `moxi repo` command typed
 in the copy's terminal acts as typed.
 
+**On the Projects page.** With projects' page in the shell too, repo places a
+`project-facts` component on the Projects page. A project whose repo has a broken git
+hook says so on its closed row, heavy: `a git hook broke at <time>`, at the newest
+breakage's time. Broken means a failing check of the repo, a piece whose run broke, a push
+that failed, or an auto-commit pass that ended in an error. A refusal is not breakage: a
+piece or hook that refused a commit did its job. An opened project gets a `Git hooks`
+row. For each repo it says what broke first, then what else needs saying (a refused
+auto-commit, a warning), then the repo's pieces in run order by this page's names, with
+`<piece> is switched off here` for each one switched off. With two or more repos each
+line starts with the repo's folder, and past six lines the sixth ends `<n> more`. The
+row's `Git hooks` link opens this page at `project/<key>`, with the project's first repo
+open. The component reads only `/api/repos`, when it is placed, every 60 seconds while
+the tab is visible, and once when the tab is shown again. A read that fails, or an answer
+that isn't `up`, leaves out everything of repo's until the next good read.
+
 ## Install
 
 Linux, Python 3.12 or later, git 2.39 or later, and [uv](https://docs.astral.sh/uv/).

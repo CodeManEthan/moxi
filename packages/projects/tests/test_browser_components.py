@@ -141,7 +141,8 @@ def test_the_page_keeps_the_contract_and_opens_its_add_in_the_panel(seeded, ui_p
     # one's `project-facts` component, which reads that module's routes; of turns, only its
     # component's own script, route and topic.
     check = ui_component_check(ui_page, "projects", "page", keep=True,
-                               allow=("services", "sessions", "launcher", "loadout", "turns"))
+                               allow=("services", "sessions", "launcher", "loadout", "turns", "usage",
+                               "comms", "repo"))
     assert not turns_asked(check.requests), turns_asked(check.requests)
     assert check.element == "moxi-projects-page"
     # The shell's top line names the page; the page draws no heading of its own.

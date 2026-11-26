@@ -36,6 +36,14 @@ COMPONENTS = {
     "page": {"script": "page.js", "title": "Git hooks", "contract": 1, "place": "page",
              "group": "setup", "order": 20,
              "doc": "Each repo's git hook pieces, committer specs and open records"},
+    "project-facts": {"script": "project-facts.js", "title": "Git hooks",
+                      "doc": "Each project's broken git hooks and the opened one's pieces, "
+                             "for the Projects page",
+                      "contract": 1, "place": "inline",
+                      "attributes": {"projects": {"type": "string",
+                                                  "doc": "the projects the page holds, JSON"},
+                                     "open": {"type": "string",
+                                              "doc": "the key of the opened project"}}},
 }
 STORES = {
     "repos": {"root": "state", "path": "repos.json", "kind": "file", "private": True,

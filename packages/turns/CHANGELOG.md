@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.9 (unreleased)
+
+- `command_word_index` reads every option of each wrapper that still runs the command,
+  short and long, as the tool's own manual gives it, with a value in the next word or
+  after `=`: `sudo`'s `-B`/`--bell`, `-N`/`--no-update`, `-T`/`--command-timeout`,
+  `--askpass`, `--background`, `--set-home`, `--reset-timestamp`, `--non-interactive`,
+  `--preserve-groups`, `--stdin`, `--close-from`, `--chdir`, `--host`, `--prompt`,
+  `--role`, `--chroot`, `--type` and `--other-user`; `env`'s `-a`/`--argv0`,
+  `-v`/`--debug`, `-S`/`--split-string`, `--ignore-environment`, `--null`, `--unset`,
+  `--chdir` and the signal options; `nice`'s `--adjustment`; `timeout`'s `-f`, `-p`,
+  `--verbose`, `--signal` and `--kill-after`; `setsid`'s `--ctty`, `--fork` and
+  `--wait`; `stdbuf`'s `--input`, `--output` and `--error`. So `sudo --non-interactive
+  kill 1`, `sudo --bell kill 1` and `env --unset=X kill 1` name `kill`, where the read
+  used to end at the option. `env -S`'s value is read as a value: the command line in
+  it isn't read.
+- In PowerShell, `command_word_index` finds the command word past an assignment: the
+  pipeline on the right of `$x = ...`, `$null = ...`, `[int]$x = ...`, `$a, $b = ...`
+  (`$a , $b` too), the compound forms (`+=`, `-=`, `*=`, `/=`, `%=`, `??=`) and a chain
+  of them is a command. `read_shell` ends a word where an assignment's operator is
+  written against the pipeline (`$x=Stop-Process` gives `$x=` and `Stop-Process`, `$x
+  =Stop-Process` gives `=` and `Stop-Process`), as PowerShell ends a variable there; a
+  quoted or escaped `=`, and one in an argument, stay in their word. `shell_scripts`
+  reads the command as any other (`$x = pwsh -c '...'`).
+
 ## 0.2.8 (unreleased)
 
 - Before a Claude Code session's first guard table, the runner refuses what the last
