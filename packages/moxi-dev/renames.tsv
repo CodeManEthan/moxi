@@ -3270,7 +3270,7 @@ launcher	packages/launcher/src/moxi_launcher/api.py	launch_kinds	name	timeout	ti
 launcher	packages/launcher/src/moxi_launcher/api.py	preview	name	environ	env
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	- `launcher.keep-warm` (`KEEP_WARM`): from 900 s before the session's cache expires until	use	`KEEP_WARM`	`KEEP_WARM_ENV`
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	__all__ = ["JOB", "KEEP_WARM", "TIMERS"]	keep	KEEP_WARM	KEEP_WARM
-launcher	packages/launcher/src/moxi_launcher/catalog.py	WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint")	keep	refused	refused
+launcher	packages/launcher/src/moxi_launcher/catalog.py	WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint", "applies_with")	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	`refused` and `hint`, the words a launch or preset that breaks it is refused	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	code = "refused"	keep	refused	refused
 launcher	packages/launcher/src/moxi_launcher/catalog.py	elif values is not None and set(danger) - set(values):	keep	set	set
@@ -3334,6 +3334,7 @@ launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has since {s
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has type {kind!r}; use one of {', '.join(TYPES)}")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has typed_with {typed_with!r}, which is not a module name")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has unknown field(s) {', '.join(unknown)}")	keep	bad	bad
+launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} applies_with {applies_with!r}, which is not a "	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when for {value!r}, which is not one of its values")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} target {target!r}, which is not a target's name")	keep	bad	bad
 launcher	packages/launcher/src/moxi_launcher/catalog.py	raise bad(f"has when.{value} without the words it is refused with (refused "	keep	bad	bad
@@ -6065,6 +6066,7 @@ memory	packages/memory/tests/test_doctor.py	assert not any("moxi memory" in a fo
 memory	packages/memory/tests/test_doctor.py	NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention"]	keep	folders	folders
 memory	packages/memory/tests/test_doctor.py	NAMES = ["index", "ingest", "folders", "sets", "start", "sessions", "links", "retention",	keep	folders	folders
 memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes"}	keep	set	set
+memory	packages/memory/tests/test_doctor.py	assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets", "notes",	keep	set	set
 memory	packages/memory/tests/test_index.py	return self.proc.wait(timeout=30)	keep	timeout	timeout
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=0.1):	keep	wait	wait
 memory	packages/memory/tests/test_index.py	with w.rebuilding(wait=1.0) as started:	keep	wait	wait
@@ -6134,6 +6136,7 @@ memory	packages/memory/tests/test_settings.py	-	name	test_every_key_is_read_at_i
 memory	packages/memory/tests/test_settings.py	-	name	test_the_folders_are_the_cores_for_memory	test_the_dirs_are_the_cores_for_memory
 memory	packages/memory/tests/test_settings.py	assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {"MOXI_MEMORY_SUBCONSCIOUS"}	keep	set	set
 memory	packages/memory/tests/test_settings.py	assert set(module.OPTIONAL) == {"comms", "launcher", "connector", "secrets",	keep	set	set
+memory	packages/memory/tests/test_settings.py	assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {	keep	set	set
 memory	packages/memory/tests/test_setup.py	-	name	test_setup_and_teardown_on_a_fresh_environment_with_no_harness_roots	test_setup_and_teardown_on_a_fresh_env_with_no_harness_roots
 memory	packages/memory/tests/test_setup.py	-	name	test_auto_memory_is_offered_where_claude_codes_folder_exists_without_settings	test_auto_memory_is_offered_where_claude_codes_dir_exists_without_settings
 memory	packages/memory/tests/test_table.py	-	name	test_the_store_lives_in_memorys_state_directory	test_the_store_lives_in_memorys_state_dir
@@ -6151,6 +6154,7 @@ memory	packages/memory/src/moxi_memory/recall_cli.py	"discard", help="end a reca
 memory	packages/memory/src/moxi_memory/recall_cli.py	d.add_argument("recall_id", metavar="RECALL_ID", help="the recall's id, as list shows it")	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_cli.py	out.append(f"round {r.get('round', '?')}  {when}  {said}")	keep	round	round
 memory	packages/memory/src/moxi_memory/recalls.py	if not gate.acquire(timeout=-1 if timeout_s is None else max(timeout_s, 0.0)):	keep	timeout	timeout
+memory	packages/memory/src/moxi_memory/recalls.py	out = set()	keep	set	set
 memory	packages/memory/tests/test_recalls.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recalls.py	"rounds": [{"round": 1, "text": "Recalled from past sessions:\n- a point",	keep	round	round
 memory	packages/memory/tests/test_recalls.py	{"round": 2, "lost": "gone", "error": "gone: the bound passed"}],	keep	round	round
@@ -6161,6 +6165,7 @@ memory	packages/memory/src/moxi_memory/recall_brief.py	prompt=text,	keep	prompt	
 memory	packages/memory/src/moxi_memory/recall_brief.py	notes=notes_line,	keep	notes	notes
 memory	packages/memory/src/moxi_memory/recall_brief.py	first=FIRST if rounds > 1 else "",	keep	first	first
 memory	packages/memory/src/moxi_memory/recall_brief.py	stream=STREAM if rounds > 1 else "",	keep	stream	stream
+memory	packages/memory/src/moxi_memory/recall_brief.py	seen: set[str] = set(skip)	keep	set	set
 memory	packages/memory/src/moxi_memory/recall_child.py	self.record = record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_child.py	"""Write the line with `line`'s fields, and the record with `record`'s, under	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_child.py	self.record = records.update(self.session_id, self.recall_id,	keep	record	record
@@ -6174,18 +6179,26 @@ memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--se
 memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--session", required=True, help="the main session's id")	keep	required	required
 memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--recall", help="the recall's id")	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_child.py	help="take over the session's lines whose owner is gone, and exit")	keep	help	help
+memory	packages/memory/src/moxi_memory/recall_child.py	recall.put(record={"holder": me} if me is not None else None, child=child,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "discard"]	keep	find	find
+memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "late", "discard"]	keep	find	find
+memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "turns_session", "find", "late", "discard"]	keep	find	find
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not command.isprintable() or any(c in REFUSED_CHARS for c in command):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	if not any(argv[:len(entry)] == entry for entry in entries):	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether the child of recall `record` is known to have ended: its log line names a	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a recall whose fork's id is not yet written while its child	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether a round of `record`'s recall was asked, so its fork may have started."""	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""The holder `record` names, as a mapping, else the child its log line names (a	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""(whether `record`, on any route, still awaits its fork's id, why not when it might	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Whether `record` is a subagent-route recall whose fork's id is not yet written	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_guard.py	"""Judge a fork's `call` against `record`, of session `session_id`, under the	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": answer, "at": now})	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	state = recall.record.get("state")	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record=fields, state=recalls.BACK, rounds=rounds)	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	if round_number == 1 or not recall.record.get("answered"):	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.LOST, "reason": reason,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	return recall.line.get("comms_name") or recall.record.get("comms_name") or None	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "lost": reason, "error": error,	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"rounds": round_number}, state=recalls.OPEN, ref=round_ref,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	text = continue_text(recall.record, settings, now=clock())	keep	record	record
@@ -6198,21 +6211,67 @@ memory	packages/memory/src/moxi_memory/recall_stream.py	recall.put(record={"stat
 memory	packages/memory/src/moxi_memory/recall_stream.py	record = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.record = record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.put(record={"state": records.LOST, "reason": records.HURRIED, "error": error},	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record=record, state=recalls.SENDING, rounds=rounds, sending_at=now,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.LOST, "reason": GONE, "error": PAST_BOUND},	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "lost": GONE, "error": PAST_BOUND,	keep	round	round
+memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.ENDED}, state=recalls.BACK, rounds=rounds,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": end.answer, "at": now,	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_take.py	current = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_take.py	return recalls.is_safe(session_id) and any(	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.LOST, "reason": recall.line.get("reason"),	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.ENDED}, hurried=hurried)	keep	record	record
 memory	packages/memory/src/moxi_memory/records.py	"""Write `record` whole and return it as written. The caller holds the session's	keep	record	record
+memory	packages/memory/src/moxi_memory/records.py	default=0)	keep	default	default
+memory	packages/memory/src/moxi_memory/records.py	"""Write `record` whole and return it as written, its `at` clamped to now (see the	keep	record	record
+memory	packages/memory/src/moxi_memory/records.py	"STARTING_GRACE_S", "session_ids", "find", "sweep_old"]	keep	find	find
 memory	packages/memory/tests/test_recall_ends.py	records.write(dict(records.read(SESSION, recall.recall_id), at=1000.0))	keep	at	at
 memory	packages/memory/tests/test_recall_ends.py	records.write(dict(records.read(SESSION, young.recall_id), at=now - 10))	keep	at	at
+memory	packages/memory/tests/test_recall_ends.py	rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_ends.py	recall = a_recall(state="sending", rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_ends.py	rounds=[{"round": 1, "text": "- late", "late": True}],	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	rounds=[{"round": 1, "text": "- a", "at": 1.0}])	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	assert line["rounds"][-1]["round"] == 2 and line["rounds"][-1]["lost"] == "gone"	keep	round	round
 memory	packages/memory/tests/test_recall_take.py	assert line["rounds"] == [{"round": 1, "text": "- a", "at": 1.0}]	keep	round	round
 memory	packages/memory/tests/test_recall_guard.py	held.set()	keep	set	set
 memory	packages/memory/tests/test_recall_guard.py	done.set()	keep	set	set
+memory	packages/memory/tests/test_recall_guard.py	assert slot.who == slot_ask.who == "any"	keep	any	any
+memory	packages/memory/tests/test_recall_guard.py	assert set(slot.calls) == {"claude", "codex"}	keep	set	set
 memory	packages/memory/tests/test_recall_stream.py	self.held = set()	keep	set	set
 memory	packages/memory/tests/test_recall_stream.py	self.refuse = set(refuse)	keep	set	set
 memory	packages/memory/tests/test_recall_stream.py	assert route.held == set()	keep	set	set
+memory	packages/memory/src/moxi_memory/guards.py	Guard(name="subconscious-slot", calls=SLOT_CALLS, who="any",	keep	any	any
+memory	packages/memory/src/moxi_memory/guards.py	Guard(name="subconscious-slot-ask", calls=CALLS, who="any", deny=ASK_REFUSED,	keep	any	any
+memory	packages/memory/src/moxi_memory/recall_holder.py	"""How long ago `record`'s recall started, in seconds. See the module's docstring.	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_route.py	record = getattr(recall, "record", None) or {}	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_send.py	word=WORD, interrupt=True, expires="never",	keep	interrupt	interrupt
+memory	packages/memory/tests/test_recall_comms_send.py	recall.write(state=recalls.SENDING, rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_comms_send.py	rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_comms_send.py	recall.put(ref=f"{rid}:1", kept=True, record={"state": records.LOST})	keep	record	record
+memory	packages/memory/tests/test_recall_host_fork.py	self.ends, self.asked, self.deliveries, self.closed = list(ends), [], [], False	keep	closed	closed
+memory	packages/memory/tests/test_recall_host_fork.py	self.closed = True	keep	closed	closed
+memory	packages/memory/tests/test_recall_host_fork.py	monkeypatch.setattr(moxi_turns, "find", find)	keep	find	find
+memory	packages/memory/tests/test_recall_host_fork.py	assert session.closed	keep	closed	closed
+memory	packages/memory/tests/test_recall_host_fork.py	monkeypatch.setattr(moxi_turns, "find",	keep	find	find
+memory	packages/memory/tests/test_recall_send.py	self.sent.append(dict(module=module, parent=parent, to=to, text=text, word=word,	keep	text	text
+memory	packages/memory/tests/test_recall_send.py	interrupt=interrupt, expires=expires))	keep	interrupt	interrupt
+memory	packages/memory/tests/test_recall_send.py	return types.SimpleNamespace(outcome="refused", message_id=None,	keep	refused	refused
+memory	packages/memory/tests/test_recall_send.py	text="Recalled ...:\n- a point", word="subconscious",	keep	text	text
+memory	packages/memory/tests/test_recall_send.py	interrupt=True, expires="never")]	keep	interrupt	interrupt
+memory	packages/memory/tests/test_recall_slot.py	self.delivered, self.closed = [], False	keep	closed	closed
+memory	packages/memory/tests/test_recall_slot.py	self.delivered, self.closed = [], False	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	self.delivered.append((text, kw))	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	return types.SimpleNamespace(id=f"d{len(self.delivered)}", ref=kw.get("ref"))	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	self.closed = True	keep	closed	closed
+memory	packages/memory/tests/test_recall_slot.py	assert turns.endpoint.delivered == [("the brief", {"by": "memory", "ref": "r-1:1",	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	assert turns.endpoint.delivered[1] == ("go on", {"by": "memory", "ref": "r-1:2",	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	assert turns.endpoint.closed	keep	closed	closed
+memory	packages/memory/tests/test_recall_slot.py	assert route.started(None) is None and turns.endpoint.delivered == []	keep	delivered	delivered
+memory	packages/memory/tests/test_recall_slot.py	rounds=[{"round": 1, "text": "- a"}])	keep	round	round
+memory	packages/memory/tests/test_recall_slot.py	at_limit.put(ref=f"{at_limit.recall_id}:1", record={"state": records.LOST})	keep	record	record
+memory	packages/memory/tests/test_recall_slot.py	rounds=[{"round": 1, "text": "- a"},	keep	round	round
+memory	packages/memory/tests/test_recall_slot.py	{"round": 2, "lost": "gone", "error": "bound"}])	keep	round	round
+memory	packages/memory/tests/test_recall_slot.py	recall.put(ref=f"{rid}:2", record={"state": records.ENDED, "answered": True})	keep	record	record
+memory	packages/memory/tests/test_recall_start.py	{"round": 1, "text": "Recalled ...:\n- the lock is held by the writer"}]})	keep	round	round
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any

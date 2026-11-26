@@ -103,6 +103,8 @@ def test_presets_check_refuses_a_preset_with_the_rules_words(tmp_path, readable)
     'offered_with = "nothing"\n',
     '[x.when.zz]\nrefused = "r"\nhint = "h"\n',
     '[x.when.a]\nrequires = "slots"\n',
+    '[x.when.b]\nrefused = "r"\nhint = "h"\napplies_with = "nothing"\n',
+    '[x.when.b]\nrefused = "r"\nhint = "h"\napplies_with = 3\n',
 ])
 def test_the_catalog_refuses_malformed_new_fields(spec):
     text = ('[x]\ntype = "enum"\ndefault = "a"\nvalues = ["a", "b"]\ndoc = "d"\n' + spec)
@@ -171,3 +173,44 @@ def test_a_keep_warm_launch_has_its_identity_line():
     assert block.splitlines()[-1] == "keep warm:     " + common.KEEP_WARM_LINE
     assert "agents you direct at work keep you warm" in common.KEEP_WARM_LINE
     assert "keep warm" not in common.identity_block(session_id="s", cwd="/w", posture="go")
+
+
+def test_the_subconscious_route_row():
+    row = catalog.launcher()["subconscious_route"]
+    assert row.values == ("subagent", "slot") and row.default == "subagent"
+    assert row.required == ("turns", "memory")
+    assert "On Codex only slot runs a recall" in row.doc
+
+
+def test_the_slot_route_needs_slots_and_comms(readable):
+    values = {"subconscious": "automatic", "subconscious_route": "slot"}
+    catalog.refuse_values("claude", values, available=everything)
+    catalog.refuse_values("codex", values, available=everything)
+    for absent in ("slots", "comms"):
+        with pytest.raises(NeedsModule, match="the subconscious in a slot needs slots and "
+                                              "comms"):
+            catalog.refuse_values("claude", values, available=without(absent))
+    catalog.refuse_values("claude", {**values, "subconscious_route": "subagent"},
+                          available=without("slots", "comms"))
+
+
+def test_the_slot_route_is_not_refused_with_the_subconscious_off(monkeypatch):
+    # A route from [defaults] or a preset does nothing while the subconscious is off,
+    # so a machine without slots or comms still launches.
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    for values in ({"subconscious": "off", "subconscious_route": "slot"},
+                   {"subconscious_route": "slot"}):
+        catalog.refuse_values("claude", values, available=without("slots", "comms"))
+    with pytest.raises(NeedsModule, match="the subconscious in a slot"):
+        catalog.refuse_values("claude", {"subconscious": "automatic",
+                                         "subconscious_route": "slot"},
+                              available=without("slots", "comms"))
+    assert catalog.launcher()["subconscious_route"].when["slot"].applies_with == \
+        "subconscious"
+
+
+def test_the_slot_route_is_refused_where_slots_cant_run(monkeypatch):
+    monkeypatch.setattr(catalog, "slots_here", lambda: False)
+    values = {"subconscious": "on-demand", "subconscious_route": "slot"}
+    with pytest.raises(NeedsModule, match="the subconscious in a slot"):
+        catalog.refuse_values("claude", values, available=everything)

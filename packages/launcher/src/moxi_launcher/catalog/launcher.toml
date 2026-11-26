@@ -258,3 +258,21 @@ fork = "drop"
 group = "lifecycle"
 sub = "Memory"
 label = "Subconscious"
+
+[subconscious_route]
+type = "enum"
+default = "subagent"
+values = ["subagent", "slot"]
+requires = ["turns", "memory"]
+doc = "How the subconscious runs: a fork inside the session (subagent), or a forked session in a slot you can watch (slot). The slot route needs comms and a comms name for the session. On Codex only slot runs a recall, and that fork does not read the session's prompt cache; with subagent the subconscious is off there. Where no route can run, memory's log and doctor say why."
+fork = "drop"
+group = "lifecycle"
+sub = "Memory"
+label = "Subconscious route"
+
+[subconscious_route.when.slot]
+requires = ["slots", "comms"]
+condition = "slots-here"
+applies_with = "subconscious"
+refused = "the subconscious in a slot needs slots and comms"
+hint = "use --subconscious-route subagent, or launch where tmux slots run"

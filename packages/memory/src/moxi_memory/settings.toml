@@ -51,7 +51,7 @@ read = "use"
 type = "enum"
 values = ["project", "project-first", "everywhere"]
 default = "project-first"
-doc = "Where a recall searches past sessions and notes: project, the session's project only; project-first, the project first, then everywhere when the project finds nothing; everywhere, the whole index and the notes root."
+doc = "Where a recall searches past sessions and notes: project, the session's project only; project-first, every search covers the project and everything beyond it, the project's results first (the first search shows the project's best hits and notes, then the best beyond it not already shown, and the fork's own searches run without --project); everywhere, the whole index and the notes root. A session with no project label searches everywhere."
 read = "use"
 
 [subconscious.limit_s]
@@ -81,7 +81,7 @@ read = "use"
 [subconscious.prefetch_hits]
 type = "int"
 default = 8
-doc = "How many search hits the recall puts in the fork's brief before the fork starts; 0 runs no first search."
+doc = "How many search hits the recall puts in the fork's brief before the fork starts, from each part of its first search: the project's, and under project-first the one beyond it as well; 0 runs no first search."
 read = "use"
 
 [subconscious.on_demand_per_prompt]

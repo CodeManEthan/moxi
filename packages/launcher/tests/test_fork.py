@@ -7,10 +7,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import launcher_fake_turns as fake_turns
+from moxi import modules as moxi_modules
 from launcher_fake_harness import Harness
 from moxi_launcher import api, catalog, cli, fork, store, targets
 from moxi_launcher.api import LaunchRequest, ReplayRequest
@@ -378,6 +380,19 @@ def test_the_api_forks_with_stamps(work, harness, no_exec, memory_lists):
     assert got.session_id not in (None, SID)
     assert no_exec[-1]["env"][FORK_ENV] == "recall-1"
     assert (row("r2").fork_of, row("r2").kind) == (SID, "fork")
+    assert row("r2").env[FORK_ENV] == "recall-1"
+
+
+def test_a_recalls_fork_is_known_by_memorys_stamp_in_its_recorded_env(work, harness,
+                                                                      no_exec, monkeypatch):
+    parent(work)
+    fork.fork(SID, request_id="r2", stamps={FORK_ENV: "recall-1"})
+    assert fork.recall_fork(row("r2")) and not fork.recall_fork(row("r1"))
+    assert not fork.recall_fork(None)
+    real = moxi_modules.load
+    monkeypatch.setattr(moxi_modules, "load", lambda name, **kw: (
+        SimpleNamespace(ok=False, api=None) if name == "memory" else real(name, **kw)))
+    assert not fork.recall_fork(row("r2"))
 
 
 @pytest.mark.parametrize("name, said", [
@@ -458,3 +473,12 @@ def row_absent(rid: str) -> bool:
         return store.get(conn, rid) is None
     finally:
         conn.close()
+
+
+def test_the_api_says_whether_slots_run_here_as_the_launcher_reads_it(monkeypatch):
+    from moxi_launcher import catalog
+
+    for here in (True, False):
+        monkeypatch.setattr(catalog, "slots_here", lambda here=here: here)
+        assert api.slots_here() is here
+    assert "slots_here" in api.__all__

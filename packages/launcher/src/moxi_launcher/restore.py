@@ -17,6 +17,8 @@ with none is `nothing parked in slot N`), and, one at a time in slot order:
 - its liveness unread: `liveness unread`, the entry left open with its reservation;
 - a later launch holds the session (it was resumed some other way): the entry closed
   `restored` with that launch's id, and its reservation released;
+- a recall's slot fork (`fork.recall_fork`), parked before park left them out: the entry
+  closed `dropped` and its reservation released;
 - otherwise it is resumed by the parked session's path below, with no first turn: restore
   is given no brief, so it resumes each session as `--plain` does, a `go` launch's too.
 
@@ -54,7 +56,7 @@ from typing import Any
 
 from moxi import exit as codes
 
-from . import catalog, first, identity, parks, relaunch, resume, slots, store, target
+from . import catalog, first, fork, identity, parks, relaunch, resume, slots, store, target
 
 log = logging.getLogger("moxi.launcher.restore")
 
@@ -70,6 +72,8 @@ OUTCOMES = ("restored", "still-running", "liveness-unread", "refused", "kept", "
             "nothing-parked", "failed")
 #: The outcomes that leave the entry open.
 LEFT_OPEN = ("still-running", "liveness-unread", "refused", "kept", "failed")
+#: What restore says of a recall's slot fork's entry, which it drops.
+RECALL_FORK = "a recall's fork, which nothing brings back"
 #: What a resume refused for want of comms says.
 COMMS_OFFLINE = "comms is offline"
 
@@ -332,6 +336,10 @@ def _restore_one(conn: sqlite3.Connection, entry: store.ParkEntry, api: Any, tur
     before = _before(conn, entry, turns)
     if before is not None:
         outcome, why, later = before
+        if outcome == "dropped":
+            released = _release(api, entry, why)
+            why += f"; slot {entry.slot}'s reservation released" if released else ""
+            store.close_entry(conn, entry.entry_id, "dropped", detail=why)
         if outcome == "restored":
             released = _release(api, entry)
             why += f"; slot {entry.slot}'s reservation released" if released else ""
@@ -346,7 +354,10 @@ def _restore_one(conn: sqlite3.Connection, entry: store.ParkEntry, api: Any, tur
 def _before(conn: sqlite3.Connection, entry: store.ParkEntry,
             turns: Any) -> tuple[str, str, str | None] | None:
     """What restore finds before it resumes an entry's session: `(outcome, why, later
-    launch)`, or None to resume it."""
+    launch)`, or None to resume it. A recall's slot fork is dropped: memory forked it for
+    one recall, which no restore can carry on."""
+    if fork.recall_fork(store.get(conn, entry.request_id)):
+        return "dropped", RECALL_FORK, None
     holder = store.resolve(conn, entry.session_id)
     if holder is not None and holder.request_id not in _entry_line(conn, entry):
         return "restored", f"launch {holder.request_id} took it up since", holder.request_id
@@ -382,14 +393,16 @@ def _summary(notes: list[str], said: list[Restored], *, dry_run: bool = False) -
     for one in said:
         lines.extend(one.lines)
         lines.append(one.line())
-    taken = [s for s in said if s.outcome != "nothing-parked"]
+    # A recall's fork dropped is no parked session restore failed to bring back.
+    forks = [s for s in said if s.outcome == "dropped" and s.why.startswith(RECALL_FORK)]
+    taken = [s for s in said if s.outcome != "nothing-parked" and s not in forks]
     done = sum(1 for s in taken if s.outcome == "restored")
     verb = "would restore" if dry_run else "restored"
     summary = f"{verb} {done} of {len(taken)} parked session{'s' if len(taken) != 1 else ''}"
     if any(COMMS_OFFLINE in s.why for s in said):
         summary += "; run moxi launcher restore again once comms is up"
     lines.append(summary)
-    ok = dry_run or (done == len(taken) and len(taken) == len(said))
+    ok = dry_run or (done == len(taken) and len(taken) + len(forks) == len(said))
     return Result(codes.OK if ok else codes.ERROR, tuple(lines), data={
         "outcome": "dry-run" if dry_run else ("restored" if ok else "partly"),
         "notes": notes, "slots": [s.as_json() for s in said]})
@@ -469,5 +482,5 @@ def _unpark_one(conn: sqlite3.Connection, api: Any, entry: store.ParkEntry,
                      conn=conn)
 
 
-__all__ = ["COMMS_OFFLINE", "LEFT_OPEN", "OUTCOMES", "Restored", "restore", "resume_entry",
+__all__ = ["COMMS_OFFLINE", "LEFT_OPEN", "OUTCOMES", "RECALL_FORK", "Restored", "restore", "resume_entry",
            "resume_parked", "unpark"]

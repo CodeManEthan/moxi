@@ -84,9 +84,22 @@
 - The `subconscious` row (`off`, `automatic`, `on-demand`; needs turns and memory) turns
   memory's subconscious on for one launch, or for every launch of a preset that sets it:
   a launch with it on stamps the mode under memory's `SUBCONSCIOUS_ENV`, read from
-  memory's API. For now a recall runs on Claude Code only: a Codex launch with the row
-  on is accepted and has the subconscious off at run time, which memory's log and doctor
-  say. A fork drops it. memory joins the optional links, with a `memory` extra.
+  memory's API. A fork drops it. memory joins the optional links, with a `memory` extra.
+- The `subconscious_route` row (`subagent`, the default, or `slot`; needs turns and
+  memory, and for `slot` with the subconscious on, slots, comms and tmux slots that run
+  here) picks where a launch's recalls run, stamped beside the mode under memory's
+  `SUBCONSCIOUS_ROUTE_ENV`; nothing is stamped with the subconscious off. On Codex only
+  `slot` runs a recall: a Codex launch on `subagent` is accepted and has the
+  subconscious off at run time, which memory's log and doctor say. A fork drops it.
+- A value's `when` table in a catalog takes `applies_with`, another launcher row: the
+  value's needs hold only while that row is set off its default. `subconscious_route`'s
+  `slot` applies with `subconscious`, so a route set in `[defaults]` or a seat preset
+  doesn't refuse a launch with the subconscious off where slots or comms are missing.
+- A recall's slot fork, a launch whose recorded environment carries memory's
+  `SUBCONSCIOUS_FORK_ENV`, is memory's to end: park lists it `a recall's fork, which
+  memory ends; left alone` and neither exits nor reserves its slot, crash discovery
+  settles its slot rather than reserving it, and restore drops an entry made for one
+  before this, releasing its slot, without counting it against the exit status.
 - A headless launch with an identity keeps `keep_warm = "on"`, with no warning, as any
   other launch does. A nudge is a turn, which starts the exit rule's `idle=` count again,
   so the session ends by its rule once keep-warm stops nudging. `recycle_on_expiry` is
@@ -190,8 +203,9 @@
   kind `fork`, first in the order `launch_kind` decides by, and a resume of a fork keeps
   it. A fork is pointed to no handoff and marks none picked. An older launcher refuses
   the log once it is at version 4.
-- Interface 3 adds `fork(session_id, target=, slot=, stamps=)` and
-  `exit_session(session_id, dry_run=)` to the API. A fork's `stamps` are set on its
+- Interface 3 adds `fork(session_id, target=, slot=, stamps=)`,
+  `exit_session(session_id, dry_run=)` and `slots_here()`, whether tmux slots run here
+  as the launcher reads it, to the API. A fork's `stamps` are set on its
   environment after the scrub; each must be listed in the `SESSION_ENV` of the present
   module its own prefix names, and the launcher's and turns' are refused.
 - `exit-session` exits a quiet Codex session under turns' Codex host by stopping the

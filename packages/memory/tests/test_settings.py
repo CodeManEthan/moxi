@@ -46,7 +46,9 @@ def test_every_key_is_read_at_its_use_and_none_from_the_env():
         "subconscious.max_rounds", "subconscious.max_points", "subconscious.prefetch_hits",
         "subconscious.on_demand_per_prompt", "subconscious.fork_commands"}
     assert all(key.read == "use" and key.env is None for key in keys)
-    assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {"MOXI_MEMORY_SUBCONSCIOUS"}
+    assert set(module.INTERNAL_ENV) == set(module.SESSION_ENV) == {
+        "MOXI_MEMORY_SUBCONSCIOUS", "MOXI_MEMORY_SUBCONSCIOUS_ROUTE",
+        "MOXI_MEMORY_SUBCONSCIOUS_FORK"}
 
 
 def test_an_edit_takes_effect_at_the_next_read():

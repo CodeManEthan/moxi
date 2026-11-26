@@ -63,9 +63,9 @@ def work(tmp_path) -> Path:
 
 
 def launch_row(conn, rid="r3", sid=SID, *, target="slot", harness="claude", cwd="/tmp",
-               values=None, **more):
+               values=None, env=None, **more):
     store.insert(conn, request_id=rid, by="ann", harness=harness, target=target,
-                 cwd=cwd, values=values or {}, argv=[harness], env={}, posture="",
+                 cwd=cwd, values=values or {}, argv=[harness], env=env or {}, posture="",
                  session_id=sid, slot="3" if target == "slot" else None, **more)
     store.set_state(conn, rid, "ready")
     return store.get(conn, rid)
@@ -174,6 +174,17 @@ def test_a_crashed_slot_with_nothing_to_restore_is_settled_with_the_reason(conn,
     [settle] = rig.calls("settle")
     assert settle["why"] == found.why
     assert rig.calls("hold") == []
+
+
+def test_a_crashed_slot_whose_launch_was_a_recalls_fork_is_settled(conn, rig):
+    launch_row(conn, env={"MOXI_MEMORY_SUBCONSCIOUS_FORK": "recall-1"})
+    rig.plan(slots={"3": crashed()})
+    [found] = discover(conn)
+    assert found.action == "settle"
+    assert found.why == "launch r3 was a recall's fork, which nothing brings back"
+    assert store.open_entries(conn) == [] and rig.calls("hold") == []
+    [settle] = rig.calls("settle")
+    assert settle["why"] == found.why
 
 
 def test_a_session_whose_liveness_cant_be_read_is_reserved_all_the_same(conn, rig):
