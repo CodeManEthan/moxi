@@ -232,7 +232,7 @@ def test_without_sessions_there_is_no_activity_and_without_cache_no_cache(tmp_pa
     facts = one_pass().joined()["r1"]
     assert facts["cache"]["state"] == "warm" and "activity" not in facts
     monkeypatch.setattr(joiner, "cache_api", lambda: None)
-    assert one_pass().joined()["r1"] == {"session_id": sid}
+    assert one_pass().joined()["r1"] == {"session_id": sid, "next_keep_alive_at": None}
     [entry] = pagehandlers.gather_running(one_pass().joined())["sessions"]
     assert (entry["cache"], entry["activity"]) == (None, None)
 
@@ -363,7 +363,69 @@ def test_a_read_that_raises_gives_nothing_and_the_next_read_still_runs(monkeypat
         raise OSError("the transcript went away")
 
     monkeypatch.setattr(joiner, "READS", (broken, lambda each, launch: {"covered": True}))
-    assert one_pass().joined()["r1"] == {"covered": True, "session_id": sid}
+    assert one_pass().joined()["r1"] == {"covered": True, "next_keep_alive_at": None,
+                                         "session_id": sid}
+
+
+# --- next keep-alive ----------------------------------------------------------------------------
+
+class Clocked:
+    """cache, reading every session warm with a lifetime of an hour and its last request at
+    `stamp`, its age measured `jitter` seconds long."""
+
+    def __init__(self, stamp: float):
+        self.stamp, self.jitter = stamp, 0.0
+
+    def read(self, harness, session_id, *, now):
+        return warm(self.stamp, now + self.jitter, ttl_s=3600.0)
+
+
+def test_next_keep_alive_holds_across_passes_and_moves_once_per_change(monkeypatch):
+    kit.seed(HERE, "r1", live=True)
+    # A whole second, so a read off by under a second stays within `UNTIL_SAME_S` of the
+    # `until` published.
+    cache = Clocked(time.time() // 1 - 600.0)
+    state = SimpleNamespace(covered=True)
+    monkeypatch.setattr(joiner, "cache_api", lambda: cache)
+    monkeypatch.setattr(joiner, "READS",
+                        (joiner.read_cache, lambda each, launch: {"covered": state.covered}))
+    join = joiner.Joiner(clock=Skewed())
+    topics = pagehandlers.lb.Topics("running")
+    sent = []
+    real = topics.publish
+
+    def publish(name, data):
+        sent.append(data["sessions"][0]["next_keep_alive_at"])
+        real(name, data)
+
+    topics.publish = publish
+    snapshot = pagehandlers.lb.Snapshot(lambda: pagehandlers.gather_running(join.joined()),
+                                        topics, "running")
+
+    async def passes(count: int) -> str | None:
+        for _ in range(count):
+            await join.run(snapshot.on_changed)
+        return join.joined()["r1"]["next_keep_alive_at"]
+
+    async def go():
+        due = await passes(1)
+        assert due is not None
+        assert epoch(due) == epoch(join.joined()["r1"]["cache"]["until"]) - 900.0
+        # The same clock read again with its age off by under a second: the same value.
+        cache.jitter = 0.6
+        assert await passes(2) == due
+        cache.jitter = -0.4
+        assert await passes(1) == due
+        # A new request moves it by as much as the request moved.
+        cache.stamp += 30.0
+        moved = await passes(2)
+        assert epoch(moved) - epoch(due) == 30.0
+        # Covered no longer: null.
+        state.covered = False
+        assert await passes(2) is None
+        assert sent == [due, moved, None]
+
+    asyncio.run(go())
 
 
 # --- the feed: one pass at a time, the first wait, publishing ----------------------------------

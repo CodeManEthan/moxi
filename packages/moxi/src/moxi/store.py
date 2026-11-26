@@ -61,7 +61,9 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     A missing file raises `StoreError` with `create=False`. With `create=True` each
     missing directory on the way to it is made, one level at a time, the file is created
     0600 before SQLite opens it (on Windows with an access list that grants only the
-    current user), and the store is switched to write-ahead logging.
+    current user), and the store is switched to write-ahead logging. While another
+    connection holds the new store's write lock (another process opening it at the same
+    time) the switch is tried again for up to `timeout_s` seconds.
 
     `private` covers only what this call creates: with `private=True` each directory it
     makes is 0700 (on Windows given the owner-only access list), and with `private=False`
@@ -120,7 +122,7 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
     try:
         conn.execute(f"PRAGMA busy_timeout = {int(timeout_s * 1000)}")
         if fresh:
-            conn.execute("PRAGMA journal_mode = WAL")
+            _switch_to_wal(conn, timeout_s)
         else:
             mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
             if str(mode).lower() != "wal":
@@ -134,6 +136,35 @@ def connect(path: str | os.PathLike, *, private: bool = True, create: bool = Tru
         conn.close()
         raise
     return conn
+
+
+def _switch_to_wal(conn: sqlite3.Connection, timeout_s: float) -> None:
+    """Switch the fresh store on `conn` to write-ahead logging, waiting up to `timeout_s`
+    seconds while another connection writes it.
+
+    The switch reads the store's header and then asks for the write lock. SQLite answers
+    a reader that asks for the write lock while another connection holds it with
+    "database is locked" at once, without the busy timeout, since waiting could deadlock.
+    Another process opening the same new store at once (switching it too, or writing its
+    schema) holds that lock for a moment, so the switch is tried again, its read lock let
+    go in between, until the timeout runs out; then the last error is raised.
+    """
+    import sqlite3
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    pause_s = 0.001
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            busy = getattr(exc, "sqlite_errorcode", 0) & 0xFF == sqlite3.SQLITE_BUSY
+            left_s = deadline - time.monotonic()
+            if not busy or left_s <= 0:
+                raise
+        time.sleep(min(pause_s, left_s))
+        pause_s = min(pause_s * 2, 0.05)
 
 
 def _create_file(path: Path) -> None:

@@ -917,7 +917,11 @@ where it runs and its cache, with no time, no message and no `Open`. The row rea
 phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
 Each entry also carries `model` and `effort`, the values the launch was made with as the
 command line spells them, each null where the launch set none; neither is marked, so the
-phone gets them as the desk does.
+phone gets them as the desk does. `next_keep_alive_at` says when keep-warm's next nudge
+is due for a session it covers (`covered`): the moment its window opens, 900 seconds
+before `cache.until`, written as `until` is (`2026-11-26T14:32:07Z`). A time already
+past means the nudge goes at the timer's next ask, within about two minutes. It is null
+whenever keep-warm would not nudge the session, and not marked.
 
 **Keep warm on the row.** Opened at the desk, a session that waits with nothing keeping
 it warm (one of those that come first) has `Keep warm` before `Open` when a press would
