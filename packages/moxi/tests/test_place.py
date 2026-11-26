@@ -636,7 +636,8 @@ def test_git_s_must_be_a_number(skill):
 
 
 def _occupy(case, target, src, other):
-    """Put occupant `case` at `target`, `src` being the item's source."""
+    """Put occupant `case` at `target`, `src` being the item's source; a link points at
+    the folder `other`."""
     if case == "a link not the placer's":
         link_dir(target, other)
     elif case == "an unmarked folder":
@@ -682,7 +683,12 @@ def test_an_occupant_git_tracks_is_cause_tracked_with_the_same_reason(
     skills_dir.mkdir(parents=True)
     git("init", "-q", repo)
     target = skills_dir / "x"
-    _occupy(case, target, src, tmp_path)
+    # The link points at a folder outside the repo, not at one holding it: Git for Windows
+    # walks a junction as a folder, and through a loop it stops at the path length limit.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "SKILL.md").write_text("someone else's\n")
+    _occupy(case, target, src, elsewhere)
     item = Item(src, "claude", "x", kind=kind, dest=target)
 
     step = one(place.plan("loadout", [item], form="copy"), "refuse")
