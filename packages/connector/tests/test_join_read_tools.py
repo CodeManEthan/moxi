@@ -13,6 +13,10 @@ a change or a join after the redaction would make (a key's value apart from its 
 no-break space, a subagent id holding `token` before its title), and read_session opens a
 nested subagent by the pair a search_memory hit gives. Outside a workspace with memory, sessions, notes and secrets'
 chat redaction installed beside the host, the module skips.
+
+On Windows memory's index takes no lock (no fcntl), so memory doesn't run there: the world
+is built without it, and sessions' and notes' tools, the canary and the call log are read
+the same way (read_session opens the nested pair by the ids the test made).
 """
 
 from __future__ import annotations
@@ -38,9 +42,12 @@ from moxi_connector.oauth import OAuth
 from moxi_connector.provider import refused_field
 from moxi_connector.providers import Registry
 
+#: Whether memory's read tool joins: memory doesn't run on Windows (its index takes no
+#: lock without fcntl), so there the world is built without it.
+MEMORY = os.name != "nt"
 #: The read tools' modules, and each one's tools in the order the door lists them.
 TOOLS = {
-    "memory": ["search_memory"],
+    **({"memory": ["search_memory"]} if MEMORY else {}),
     "sessions": ["list_sessions", "read_session"],
     "notes": ["list_notes", "read_note", "search_notes"],
 }
@@ -51,16 +58,14 @@ if (not all(modules.load(m).ok for m in TOOLS) or not _secrets.ok
         or not callable(getattr(_secrets.api, "chat_redact", None))):
     pytest.skip("memory, sessions, notes and secrets' chat redaction aren't installed "
                 "beside the host; the joins run in the workspace", allow_module_level=True)
-if os.name == "nt":
-    pytest.skip("on Windows memory's index takes no lock (no fcntl), so memory doesn't run "
-                "there and its read tool can't join", allow_module_level=True)
 
 # Memory and sessions are optional beside the host and connector doesn't depend on them,
 # so the test reaches them by name, once the skip above has found them installed:
 # sessions through its API, memory's walk through its own modules.
 sessions_api = modules.load("sessions").api
-ingest = importlib.import_module("moxi_memory.ingest")
-links = importlib.import_module("moxi_memory.links")
+if MEMORY:
+    ingest = importlib.import_module("moxi_memory.ingest")
+    links = importlib.import_module("moxi_memory.links")
 
 #: A made-up token of a credentials rule's shape: the canary.
 CANARY = "ghp_" + "Zq7Lm2Xc9Vb4Nn1Pk8Rt3Ws6Yd5Hf0Jg2UaX"
@@ -90,6 +95,13 @@ def _memory_config() -> dict:
             "index.tail_chars": 1000, "redact.sets": ["credentials", "broad"]}
 
 
+def _index(config: dict) -> None:
+    """Memory's own ingest over the test's home, where memory runs."""
+    if MEMORY:
+        assert ingest.run("walk", config=config, launcher=links.Link(links.NONE),
+                          then=lambda args: None) is not None
+
+
 @pytest.fixture
 def world(tmp_path):
     """A Claude Code session under the test's home holding the canary, memory's index of
@@ -106,9 +118,7 @@ def world(tmp_path):
     t.assistant(f"The widget deploy is done; the key {CANARY} worked. Logged to "
                 f"{project}/docs/deploy-log.md, live at http://localhost:8080/status.")
     t.write()
-    report = ingest.run("walk", config=_memory_config(), launcher=links.Link(links.NONE),
-                        then=lambda args: None)
-    assert report is not None
+    _index(_memory_config())
 
     root = (tmp_path / "notes").resolve()
     (root / "plans").mkdir(parents=True)
@@ -195,7 +205,7 @@ def _calls(registry, asks):
 
 
 ASKS = [
-    ("search_memory", {"words": "widget deploy"}),
+    *([("search_memory", {"words": "widget deploy"})] if MEMORY else []),
     ("list_sessions", {}),
     ("read_session", {"session": SESSION, "turns": 10}),
     ("list_notes", {"folder": "plans"}),
@@ -232,14 +242,15 @@ def test_each_read_tool_answers_through_the_door_redacted_and_unchanged_by_the_s
     # answer as the app gets it, invisible characters planted in both sources included.
     assert scrubbed == []
 
-    hits = got["search_memory"]["structuredContent"]["hits"]
-    assert hits and {h["session"] for h in hits} == {SESSION}
-    assert {h["writer"] for h in hits} <= {"person", "model"}
-    # the planted path and loopback address come back cut, as read_session cuts them
-    found = _shown(got["search_memory"])
-    assert "Logged to deploy-log.md, live at local" in found, found
-    assert "Read(widget.py)" in found
-    assert world not in found and "/docs/" not in found and "localhost" not in found
+    if MEMORY:
+        hits = got["search_memory"]["structuredContent"]["hits"]
+        assert hits and {h["session"] for h in hits} == {SESSION}
+        assert {h["writer"] for h in hits} <= {"person", "model"}
+        # the planted path and loopback address come back cut, as read_session cuts them
+        found = _shown(got["search_memory"])
+        assert "Logged to deploy-log.md, live at local" in found, found
+        assert "Read(widget.py)" in found
+        assert world not in found and "/docs/" not in found and "localhost" not in found
 
     sessions = got["list_sessions"]["structuredContent"]["sessions"]
     [mine] = [s for s in sessions if s["session"] == SESSION]
@@ -278,7 +289,8 @@ def test_each_call_log_row_carries_its_tools_fields_and_nothing_the_log_refuses(
         assert row["refusal"] is None, (name, row)
         assert row["provider"] in TOOLS and name in TOOLS[row["provider"]]
     assert calls["read_note"]["note"] == "plans/rollout.md"
-    assert calls["search_memory"]["words"] == 2 and calls["search_memory"]["hits"] >= 1
+    if MEMORY:
+        assert calls["search_memory"]["words"] == 2 and calls["search_memory"]["hits"] >= 1
     assert calls["read_session"]["harness"] == "claude"
     for row in rows:
         assert refused_field(row) is None, row
@@ -326,15 +338,15 @@ def test_shapes_a_squeeze_or_a_join_would_make_come_back_redacted(world, scrubbe
     child.title(TITLE)
     child.user("look into it", origin="human")
     t.write()
-    assert ingest.run("walk", config=_memory_config(), launcher=links.Link(links.NONE),
-                      then=lambda args: None) is not None
+    _index(_memory_config())
 
-    _, got, _ = _calls(_registry(), [("search_memory", {"words": "turbine"})])
-    found = got["search_memory"]
-    assert not found["isError"], found
-    [hit] = found["structuredContent"]["hits"]
-    assert hit["session"] == SESSION_KEYED and "turbine" in hit["snippet"]
-    assert KEYED not in _shown(found) and "[REDACTED:" in hit["snippet"]
+    if MEMORY:
+        _, got, _ = _calls(_registry(), [("search_memory", {"words": "turbine"})])
+        found = got["search_memory"]
+        assert not found["isError"], found
+        [hit] = found["structuredContent"]["hits"]
+        assert hit["session"] == SESSION_KEYED and "turbine" in hit["snippet"]
+        assert KEYED not in _shown(found) and "[REDACTED:" in hit["snippet"]
 
     _, got, _ = _calls(_registry(), [
         ("read_session", {"session": SESSION_KEYED, "turns": 10})])
@@ -354,7 +366,8 @@ def test_shapes_a_squeeze_or_a_join_would_make_come_back_redacted(world, scrubbe
 
 def test_a_nested_subagent_s_hit_opens_through_read_session(world):
     """An OpenCode subagent's subagent: search_memory names its hit by the main session
-    and the grandchild's id, and read_session opens that pair."""
+    and the grandchild's id, and read_session opens that pair (on Windows, the pair the
+    test made)."""
     store = os.path.split(sessions_api.root("opencode"))    # the database file itself
     db = sessions_api.testing.OpenCodeDb(store[0], name=store[1])
     main = db.session(work_dir=f"{world}/work/proj-c")
@@ -365,17 +378,15 @@ def test_a_nested_subagent_s_hit_opens_through_read_session(world):
     grandchild.user("check the lighthouse")
     grandchild.assistant().text("The lighthouse beacon is lit.")
     db.write()
-    config = {**_memory_config(), "harnesses": ["opencode"],
-              "index.include_subagents": True}
-    assert ingest.run("walk", config=config, launcher=links.Link(links.NONE),
-                      then=lambda args: None) is not None
+    _index({**_memory_config(), "harnesses": ["opencode"], "index.include_subagents": True})
 
-    _, got, _ = _calls(_registry(), [
-        ("search_memory", {"words": "lighthouse beacon", "subagents": True})])
-    hits = got["search_memory"]["structuredContent"]["hits"]
-    assert hits, got["search_memory"]
-    pairs = {(h["session"], h["agent"]) for h in hits}
-    assert pairs == {(main.id, grandchild.id)}
+    if MEMORY:
+        _, got, _ = _calls(_registry(), [
+            ("search_memory", {"words": "lighthouse beacon", "subagents": True})])
+        hits = got["search_memory"]["structuredContent"]["hits"]
+        assert hits, got["search_memory"]
+        pairs = {(h["session"], h["agent"]) for h in hits}
+        assert pairs == {(main.id, grandchild.id)}
 
     _, got, _ = _calls(_registry(), [
         ("read_session", {"session": main.id, "agent": grandchild.id,
