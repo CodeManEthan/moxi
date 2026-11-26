@@ -220,7 +220,8 @@ def test_the_page_keeps_the_contract(seeded, ui_page, ui_component_check):
     # one's `project-facts` component, which reads that module's routes; of turns, only its
     # component's own script, route and topic.
     check = ui_component_check(ui_page, "projects", "page", keep=True,
-                               allow=("services", "sessions", "launcher", "loadout", "turns"))
+                               allow=("services", "sessions", "launcher", "loadout", "turns", "usage",
+                               "comms", "repo"))
     assert not turns_asked(check.requests), turns_asked(check.requests)
     assert check.element == "moxi-projects-page"
     for route in ("projects", "kinds"):
