@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (unreleased)
 
 - A `project-facts` component for the Projects page: `a git hook broke at <time>` on
   the row of a project whose repo has a broken hook, and the opened project's `Git

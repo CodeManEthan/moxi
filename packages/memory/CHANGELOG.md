@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A recall fork's plain-read test reads the shell text through turns' shell reader
+  (`read_shell`) in place of a splitter of its own, after the same character filter. It
+  now refuses a comment (`grep x #c`), which it allowed; everything else it allowed or
+  refused, it still does. memory asks for moxi-turns 0.2.8 or later.
 - With the secrets release whose credentials set finds `sk-` keys and real URL
   passwords, new rows are stored with those redacted. Rows indexed before it keep them
   until `moxi memory reindex` rebuilds the index.

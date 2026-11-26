@@ -26,7 +26,7 @@ ui = ["moxi-ui>=0.2.8,<0.3"]
 # with personal-data's validators the chat redaction the connector's tools need.
 secrets = ["moxi-secrets[personal-data]>=0.1,<0.2"]
 # turns enforces the transcript-read guard sessions declares.
-turns = ["moxi-turns>=0.2,<0.3"]
+turns = ["moxi-turns>=0.2.8,<0.3"]
 # projects' read API at interface 2: which project holds each folder, for the facts
 # sessions gives the Projects page. sessions reaches it only through
 # moxi.modules.load("projects", interface=2).

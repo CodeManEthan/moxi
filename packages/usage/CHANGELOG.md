@@ -6,6 +6,10 @@
   row, the opened project's `Cost` row (today, 7 days, 30 days) linking to Usage, and
   each folder in no project with its 7-day cost. Usage takes the address
   `project/<key>`, which sets the Project filter to that project.
+- The worker ceiling's allowlist reads shell text through turns' shell reader
+  (`read_shell`) in place of a lexer of its own. It refuses and allows the same commands
+  with the same reasons; `lex` keeps its signature, `AND` and `Refused`. The `turns`
+  extra asks for moxi-turns 0.2.8 or later.
 - Where the launcher module is installed, the page reads its `/api/running` (and follows
   its `running` topic) and matches each session to a running launch by harness and
   session id. A matched session with no typed name is named by the launch, its where

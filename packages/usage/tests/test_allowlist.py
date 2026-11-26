@@ -267,6 +267,16 @@ def table(p):
         ("cat a source file", "cat %s/hooks/x.py" % r, 'cat is not a wrap-up command'),
         ("bash -c", "bash -c 'git status --short'", 'bash is not a wrap-up command'),
         ("empty command", "   ", 'no command'),
+        # One row per kind of text the shell reader doesn't read: each is refused here
+        # before anything would need it read.
+        ("a value run as a command", "k=kill; $k 211", "control operator ';'"),
+        ("escapes a program processes", "printf 'kill 211\\n' | sh", "control operator '|'"),
+        ("a string run as code", "eval 'kill 211'", 'eval is not a wrap-up command'),
+        ("cmd's control words", "cmd /c start /b taskkill /PID 211", 'cmd is not a wrap-up command'),
+        ("an option no table names", "env -S 'kill 211'", 'env is not a wrap-up command'),
+        ("a program no table names", "ssh host kill 211", 'ssh is not a wrap-up command'),
+        ("text from outside the command", "cat pids.txt | sh", "control operator '|'"),
+        ("$(( read as arithmetic", "echo $((true); (kill 211))", "'$' outside single quotes"),
     ]:
         ok, reason = bash(cmd)
         check("bash refused: %s (reason: %s)" % (label, why), (ok, why in reason), (False, True), reason)
