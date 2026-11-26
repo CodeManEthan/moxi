@@ -418,12 +418,15 @@ class Headless:
         """Resume the agent's session headless with `text` as its prompt."""
         from moxi_turns import Refused
 
+        from . import recall_fence
+
         if self.session is None:
             return self._gone("the recall has no headless session")
         try:
             launcher = self._api()
             rid = self._mint()
-            result = launcher.continue_headless(self.session, text, request_id=rid)
+            result = launcher.continue_headless(self.session, text, request_id=rid,
+                                                by=recall_fence.ACTOR)
         except Exception as exc:  # noqa: BLE001 - a resume the launcher refused is lost
             return _Known(Refused(f"denied: the launcher: {exc}"))
         return self._started(result, rid, round_timeout_s)

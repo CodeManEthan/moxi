@@ -85,6 +85,8 @@ VERSION_S = 10.0
 PROBE_END_S = 5.0
 #: The longest a probe runs, and so how long another child waits for it, in seconds.
 PROBE_MAX_S = VERSION_S + PROBE_S + PROBE_END_S
+#: Who a chat recall's launches and resumes are launched by.
+ACTOR = "memory"
 #: The probe's brief.
 PROBE_PROMPT = "Reply with the single word OK."
 
@@ -164,7 +166,7 @@ def request(launcher: Any, spec: Spec, *, output: Sequence[str] = JSON_OUTPUT) -
     kept = {*typed, "extra_flags"}
     left_out = tuple(name for name in launcher.settable_rows(HARNESS) if name not in kept)
     fields = dict(typed=typed, extra=extra, left_out=left_out, cwd=spec.cwd,
-                  request_id=spec.request_id, session_id=spec.session_id, actor="memory",
+                  request_id=spec.request_id, session_id=spec.session_id, actor=ACTOR,
                   off_posture=True)
     if spec.recall_id:
         from .recall_start import SUBCONSCIOUS_FORK_ENV
@@ -482,7 +484,7 @@ def _older(version: str, floor: str) -> bool:
     return parts(version) < parts(floor)
 
 
-__all__ = ["BUDGET_USD", "CHAT_DIR", "END_TOOL", "FENCE", "FENCE_LOCK", "FENCE_MIN_VERSION",
+__all__ = ["ACTOR", "BUDGET_USD", "CHAT_DIR", "END_TOOL", "FENCE", "FENCE_LOCK", "FENCE_MIN_VERSION",
            "FENCE_RECORD", "FLAGS", "HARMLESS_TOOLS", "HARNESS", "JSON_OUTPUT", "MCP", "NO_HARNESS", "NO_MCP",
            "NO_OUTCOME", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
            "PROBE_END_S", "PROBE_MAX_S", "PROBE_S", "READ_TOOLS", "TARGET", "TOOLS", "WEB_TOOLS", "Binary", "Outcome",

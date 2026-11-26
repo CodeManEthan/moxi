@@ -1,12 +1,13 @@
 """A headless launch continued and ended by its caller (interface 4).
 
-    continue_headless(session_id, text) -> LaunchResult   # a headless resume
+    continue_headless(session_id, text, by=None) -> LaunchResult   # a headless resume
     end_headless(request_id) -> Ended                      # end its whole process tree
 
 **A headless resume** launches the headless row that holds `session_id` again, resumed,
 with `text` as its prompt: a replay of the stored row (`api.ReplayRequest`, no preset
 and no `[defaults]` read), so it keeps the row's values and the stamps its request gave
-(`STAMPS`, kept in its values), under a request id of its own. A resume keeps the session
+(`STAMPS`, kept in its values), under a request id of its own, launched by `by` (the
+caller's identity when None, as a launch with no actor). A resume keeps the session
 id, so every round of a session continued this way names one transcript. It is refused,
 with nothing written, when no launch holds the id (`not-launched`), the launch was not
 headless (`not-headless`), or the session is still running or starting (`live`: the
@@ -78,11 +79,11 @@ def _store(env: Mapping[str, str] | None):
 
 
 def continue_headless(session_id: str, text: str, *, request_id: str | None = None,
-                      env: Mapping[str, str] | None = None,
+                      by: str | None = None, env: Mapping[str, str] | None = None,
                       launch: Callable[..., object] | None = None):
-    """Resume the headless session `session_id` with `text` as its prompt; returns the
-    launch's `api.LaunchResult`. Raises a refusal with nothing written. `launch` stands
-    in for `api.launch`."""
+    """Resume the headless session `session_id` with `text` as its prompt, launched by
+    `by` (the caller's identity when None); returns the launch's `api.LaunchResult`.
+    Raises a refusal with nothing written. `launch` stands in for `api.launch`."""
     from . import api, target
 
     caller = dict(os.environ if env is None else env)
@@ -98,7 +99,8 @@ def continue_headless(session_id: str, text: str, *, request_id: str | None = No
     request = api.ReplayRequest(row, resume_of=row.request_id,
                                 request_id=request_id or str(uuid.uuid4()),
                                 session_id=row.newest_session_id or row.session_id,
-                                actor=first.actor(caller), brief=text, stamps=stamps)
+                                actor=by or first.actor(caller), brief=text,
+                                stamps=stamps)
     try:
         return (launch or api.launch)(request, env=env)
     except store.SessionLive as exc:

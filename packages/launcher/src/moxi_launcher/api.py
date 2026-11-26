@@ -14,7 +14,7 @@
     fork(session_id) -> LaunchResult        # interface 3: fork a session, live or not
     exit_session(session_id) -> Result      # interface 3: exit a quiet launched session
     slots_here() -> bool                    # interface 3: whether tmux slots run here
-    continue_headless(session_id, text)     # interface 4: a headless resume
+    continue_headless(session_id, text, by=None)  # interface 4: a headless resume
     run_log(request_id) -> Path             # interface 4: a launch's run log
     end_headless(request_id) -> Ended       # interface 4: end a headless launch's tree
 
@@ -1126,12 +1126,15 @@ NotHeadless = headless.NotHeadless
 
 
 def continue_headless(session_id: str, text: str, *, request_id: str | None = None,
+                      by: str | None = None,
                       env: Mapping[str, str] | None = None) -> LaunchResult:
     """Interface 4: resume the headless session `session_id` with `text` as its prompt,
     replaying its launch's stored values and the stamps its request gave, under
-    `request_id` (minted when None), the resume's idempotency key. Raises a refusal with
+    `request_id` (minted when None), the resume's idempotency key, launched by `by` (as a
+    `LaunchRequest`'s `actor`; the caller's identity when None). Raises a refusal with
     nothing written: `not-launched`, `not-headless`, or `live` while the session runs."""
-    return headless.continue_headless(session_id, text, request_id=request_id, env=env)
+    return headless.continue_headless(session_id, text, request_id=request_id, by=by,
+                                      env=env)
 
 
 def run_log(request_id: str, env: Mapping[str, str] | None = None) -> Path:

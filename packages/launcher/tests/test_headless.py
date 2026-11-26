@@ -21,8 +21,6 @@ from moxi_launcher.api import LaunchRequest
 
 SID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 FORK_ENV = "MOXI_MEMORY_SUBCONSCIOUS_FORK"
-POSIX = pytest.mark.skipif(sys.platform == "win32",
-                           reason="the process tree is started by a POSIX shell script")
 
 
 @pytest.fixture(autouse=True)
@@ -153,6 +151,20 @@ def test_a_headless_resume_keeps_the_values_and_stamps(work, harness, spawned,
     assert spawned[-1]["env"][FORK_ENV] == "recall-1"
 
 
+def test_a_headless_resume_is_launched_by_whom_its_caller_names(work, harness, spawned,
+                                                                  monkeypatch):
+    from moxi_launcher import first
+
+    api.launch(request(work))
+    assert row("r1").actor == "memory"
+    api.continue_headless(SID, "go on", request_id="r2", by="memory")
+    assert row("r2").actor == "memory"
+    # Left out, the resume is the caller's, as before.
+    monkeypatch.setattr(first, "actor", lambda env=None: "the-caller")
+    api.continue_headless(SID, "and on", request_id="r3")
+    assert row("r3").actor == "the-caller"
+
+
 def test_a_headless_resume_retried_with_its_request_id_starts_nothing(work, harness,
                                                                      spawned):
     api.launch(request(work))
@@ -225,7 +237,6 @@ def _gone(pid: int) -> bool:
     return found is None or not proc.alive(found)
 
 
-@POSIX
 def test_end_headless_ends_the_launch_and_its_grandchild(work, harness, tmp_path,
                                                          monkeypatch):
     pids = _tree(monkeypatch, tmp_path)
@@ -238,7 +249,6 @@ def test_end_headless_ends_the_launch_and_its_grandchild(work, harness, tmp_path
     assert api.end_headless("r1").outcome == headless.GONE
 
 
-@POSIX
 def test_end_headless_leaves_a_pid_whose_start_time_no_longer_matches(
         work, harness, tmp_path, monkeypatch):
     pids = _tree(monkeypatch, tmp_path)

@@ -38,6 +38,7 @@ class FakeLauncher:
         self.plans: list[dict] = []
         self.launched: list[tuple[str, object]] = []
         self.ended: list[str] = []
+        self.by: list[str | None] = []
         self.procs: dict[str, subprocess.Popen] = {}
 
     def plan(self, **plan):
@@ -60,8 +61,9 @@ class FakeLauncher:
         self.launched.append(("launch", req))
         return self._start(req.request_id)
 
-    def continue_headless(self, session_id, text, *, request_id=None, env=None):
+    def continue_headless(self, session_id, text, *, request_id=None, by=None, env=None):
         self.launched.append(("continue", (session_id, text, request_id)))
+        self.by.append(by)
         return self._start(request_id)
 
     def end_headless(self, request_id, *, env=None):
@@ -139,6 +141,7 @@ def test_a_later_round_is_a_headless_resume_of_the_same_session(launcher):
     assert (kind, session, text, rid) == ("continue", SID, "keep digging",
                                           second.request_id)
     assert second.request_id != first.request_id
+    assert launcher.by == ["memory"]                # the first round's actor, not the user
 
 
 @pytest.mark.parametrize("plan", [
