@@ -34,6 +34,12 @@ def test_no_question_for_a_root_in_no_git_repo(tmp_path):
     assert link.questions(fields(tmp_path / "not-yet", mint="dir")) is None
 
 
+def test_a_no_for_push_approval_outside_a_git_repo_returns_none(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert link.answer(project(plain), "push_approval", "no") is None
+
+
 def test_a_root_in_a_repo_or_one_create_makes_a_repo_gets_both_questions(repo, tmp_path):
     put = by_key(link.questions(fields(repo / "src")))
     assert list(put) == ["clean_history", "push_approval", "approval_branches"]

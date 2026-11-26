@@ -117,8 +117,10 @@ def answer(project, key, value):
             return f"{root} already keeps a clean history"
         return clean.enable(project.root)[0]
     if key == APPROVAL:
+        if value != YES:
+            return None
         root = flag.resolve(project.root)
-        if value == YES and flag.is_left_out(root):
+        if flag.is_left_out(root):
             return _left_out("push approval", root, "approval enable {} --branch PATTERN")
         return None
     if key == BRANCHES:
