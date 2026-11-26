@@ -191,12 +191,13 @@ def test_a_recall_answer_gives_no_row_and_other_task_notices_do(capsys):
         t.user(text, origin="task-notification")
     t.write()
     run()
-    assert set(writers()) == {AGENT, SHELL}
+    assert writers().keys() == {AGENT, SHELL}
     code, out, _ = memory(capsys, "search", "platypus", "--json")
     assert code == 0
-    assert not any("recalled" in h["snippet"] for h in json.loads(out)["hits"])
+    snippets = [h["snippet"] for h in json.loads(out)["hits"]]
+    assert len(snippets) == 2 and "recalled" not in " ".join(snippets)
     run("rebuild")
-    assert set(writers()) == {AGENT, SHELL}
+    assert writers().keys() == {AGENT, SHELL}
 
 
 def test_a_message_of_several_notices_loses_only_the_recall_answers():
@@ -206,7 +207,7 @@ def test_a_message_of_several_notices_loses_only_the_recall_answers():
     t.user(f"[a preface]\n{RECALL}", origin="task-notification")
     t.write()
     run()
-    assert set(writers()) == {f"[a preface]\n{AGENT}\n\n{SHELL}"}
+    assert writers().keys() == {f"[a preface]\n{AGENT}\n\n{SHELL}"}
 
 
 def test_a_fork_id_the_log_gains_after_the_runs_read_is_still_found():
