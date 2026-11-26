@@ -353,7 +353,9 @@ is the launch's when the session was launched, else its comms name, as the point
 it. It refuses and writes nothing when the session has no key (`no-seat`: pass `--key`),
 when nothing waits and no FILE is named (`nothing-waiting`), and when FILE is not a file,
 is named for another key (`another-key`), or lies outside this session's handoff folder
-(`another-folder`). With `--key KEY` it takes KEY's waiting handoff, read in the folder of
+(`another-folder`). A session the launcher didn't start reads the handoff folder of the
+folder it started in, where turns knows it, so a later `cd` doesn't move it; else this
+folder's. The pointer quotes a path that needs it. With `--key KEY` it takes KEY's waiting handoff, read in the folder of
 KEY's newest launch, or a FILE named for KEY wherever it lies.
 
 `moxi launcher handoffs` lists this session's handoffs, in its own folder. With `--key KEY`

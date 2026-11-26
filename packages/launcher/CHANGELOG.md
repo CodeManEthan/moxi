@@ -12,7 +12,10 @@
 - New `moxi launcher handoff take [FILE] [--key KEY] [--json]` records a handoff as taken:
   this session's waiting one with no FILE. It refuses, writing nothing, with no key, with
   nothing waiting, and for a FILE that is missing, named for another key, or outside the
-  session's handoff folder unless `--key` names its key.
+  session's handoff folder unless `--key` names its key. A session the launcher didn't
+  start reads the handoff folder of the folder it started in, where turns knows it,
+  so a `cd` after the start doesn't refuse the pointer's own command. The pointer's
+  command quotes a path that needs it.
 - The launch log moves to schema version 5: the `picks` table is rebuilt so a pick may be
   `taken`, keeping every row.
 - The launch defaults, `[defaults]` of `presets.toml`, are a table `moxi config` shows and

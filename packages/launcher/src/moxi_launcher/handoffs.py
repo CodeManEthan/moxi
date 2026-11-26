@@ -330,8 +330,10 @@ def pointer(handoff: Handoff) -> str:
 
 
 def take_command(path: str | Path) -> str:
-    """The command that takes the handoff at `path`."""
-    return f"moxi launcher handoff take {path}"
+    """The command that takes the handoff at `path`, the path quoted where it needs it."""
+    from .cli import command_line
+
+    return command_line(["moxi", "launcher", "handoff", "take", os.fspath(path)])
 
 
 def keyed(where: str | Path) -> list[tuple[str, Handoff]]:
@@ -446,6 +448,29 @@ def current(env: Mapping[str, str] | None = None, *, cwd: str | Path | None = No
     return Current(key, handoff_dir(cwd if cwd is not None else Path.cwd(), create=create), None)
 
 
+def start_dir() -> str | None:
+    """The folder the session this process runs in started in, where turns knows it:
+    the `cwd` of the live endpoint above this process. None without turns, without such
+    an endpoint, or when it can't be asked. A by-hand session's start lines read the
+    handoff folder of that folder, and so does `take`, so a later `cd` doesn't move it."""
+    from .first import turns_api
+
+    turns = turns_api(quiet=True)
+    if turns is None:
+        return None
+    try:
+        session = turns.find(pid=os.getpid())
+    except Exception:  # noqa: BLE001 - an unread start folder falls back to this one
+        return None
+    if session is None:
+        return None
+    try:
+        found = session.info.get("cwd")
+    finally:
+        session.close()
+    return found if isinstance(found, str) and found else None
+
+
 # -- taking a handoff --------------------------------------------------------------------
 
 
@@ -465,7 +490,8 @@ def take(file: str | Path | None = None, *, key: str | None = None,
     handoff of the key, and return what was taken.
 
     `key` names the key; without it the key and folder are the caller's (`current`, with
-    `env` this process's by default and `cwd` this directory). `env` is read for the
+    `env` this process's by default and `cwd` the session's start folder where turns
+    knows it, else this directory). `env` is read for the
     session's launch stamp and comms name only; the launch log and the folders are this
     process's. Raises `TakeRefused`,
     writing nothing, when there is no key, when `file` is not a file, is named for
@@ -486,7 +512,8 @@ def take(file: str | Path | None = None, *, key: str | None = None,
         named = True
     else:
         try:
-            here = current(env, cwd=cwd, create=False)
+            here = current(env, cwd=cwd if cwd is not None else start_dir(),
+                           create=False)
         except NoKey:
             raise TakeRefused("no-seat", "this session has no seat",
                               "pass --key") from None

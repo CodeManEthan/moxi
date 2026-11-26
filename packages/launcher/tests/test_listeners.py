@@ -797,7 +797,7 @@ def test_a_claude_session_gets_no_codex_instructions(conn, endpoint):
 
 def pointer(path, date):
     return (f"Handoff waiting: {path} ({date}). Read it before other work, then run: "
-            f"moxi launcher handoff take {path}")
+            f"{handoffs.take_command(path)}")
 
 
 def handoff(key, date="2026-10-29", count=1, handoff_dir=None):

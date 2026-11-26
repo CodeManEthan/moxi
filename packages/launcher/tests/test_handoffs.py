@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import stat
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from moxi import modules
 from moxi.paths import Layout
 
 from moxi_launcher import handoffs, store
+from moxi_launcher.cli import command_line
 
 CLAUDE_ID = "5f0c3a1e-7f43-4c8e-9e0a-1d2b3c4d5e6f"
 
@@ -121,7 +123,14 @@ def test_the_pointer_names_the_path_and_date_and_how_to_take_it(tmp_path):
     found = handoffs.parse(path, "lead")
     assert handoffs.pointer(found) == (
         f"Handoff waiting: {path} (2026-10-30). Read it before other work, then run: "
-        f"moxi launcher handoff take {path}")
+        f"{command_line(['moxi', 'launcher', 'handoff', 'take', str(path)])}")
+
+
+def test_the_take_command_quotes_a_path_with_a_space(tmp_path):
+    path = tmp_path / "my notes" / "2026-10-30-lead.md"
+    line = handoffs.take_command(path)
+    assert line == command_line(["moxi", "launcher", "handoff", "take", str(path)])
+    assert line != f"moxi launcher handoff take {path}"
 
 
 # -- other seats' handoffs -----------------------------------------------------------------
@@ -478,3 +487,49 @@ def test_take_with_a_key_and_no_file_takes_that_keys_waiting_handoff(seat):
     with pytest.raises(handoffs.TakeRefused) as refused:
         handoffs.take(key="no/key", env={})
     assert refused.value.code == "bad-key"
+
+
+def test_start_dir_is_the_cwd_turns_knows_for_this_session(monkeypatch):
+    import sys
+    import types
+
+    from moxi_launcher import first
+
+    closed = []
+
+    class Found:
+        info = {"cwd": "/started/here"}
+
+        def close(self):
+            closed.append(True)
+
+    fake = types.ModuleType("fake_turns_for_start")
+    fake.find = lambda *, pid: Found() if pid == os.getpid() else None
+    monkeypatch.setitem(sys.modules, "fake_turns_for_start", fake)
+    monkeypatch.setenv(first.TURNS_ENV, "fake_turns_for_start")
+    assert handoffs.start_dir() == "/started/here" and closed == [True]
+    fake.find = lambda *, pid: None
+    assert handoffs.start_dir() is None
+
+    def broken(*, pid):
+        raise OSError("no runtime dir")
+    fake.find = broken
+    assert handoffs.start_dir() is None
+
+
+def test_a_by_hand_take_reads_the_start_folders_handoffs(monkeypatch):
+    asked = []
+    own = handoffs.own_handoffs_dir()
+
+    def handoff_dir(cwd, **kw):
+        asked.append(str(cwd))
+        return own
+    monkeypatch.setattr(handoffs, "comms_name_env", lambda: "TEST_COMMS_NAME")
+    monkeypatch.setattr(handoffs, "handoff_dir", handoff_dir)
+    monkeypatch.setattr(handoffs, "start_dir", lambda: "/started/here")
+    path = write(own, "2026-10-29-lead.md")
+    taken = handoffs.take(path, env={"TEST_COMMS_NAME": "lead"})
+    assert taken.path == path and asked == ["/started/here"]
+    monkeypatch.setattr(handoffs, "start_dir", lambda: None)
+    handoffs.take(path, env={"TEST_COMMS_NAME": "lead"})
+    assert asked[-1] == str(Path.cwd())
