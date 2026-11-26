@@ -265,4 +265,5 @@ def head(text: str) -> str:
 __all__ = ["DIR_NAME", "LOG", "LOCKS", "OPEN", "SENDING", "BACK", "LOST", "DISCARDED", "OFF",
            "LINE_STATES", "DISCARDABLE", "PROMPT", "ASKED", "HEAD_CHARS", "LINE_FIELDS", "is_safe",
            "subconscious_dir", "log_path", "session_lock", "read_lines", "logged_sessions",
-           "all_lines", "fork_ids", "message_ids", "find_line", "put_line", "note_off", "sent_lines", "head"]
+           "all_lines", "fork_ids", "message_ids", "find_line", "put_line", "note_off",
+           "sent_lines", "head"]

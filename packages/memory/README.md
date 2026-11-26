@@ -340,9 +340,10 @@ reindexes by itself.
 
 Not indexed: system and developer messages; other messages the harness says it added
 itself, or flags as meta (sessions' writer `harness`), and compaction summaries; the
-subconscious's recall answers (below); reasoning; this module's own start line and reminder; markers, requests and
-rate-limit readings; whole tool results; subagent tool results; and Codex threads that
-Codex imported from another harness, whose original is that harness's transcript.
+subconscious's recall answers (below); reasoning; this module's own start line and
+reminder; markers, requests and rate-limit readings; whole tool results; subagent tool
+results; and Codex threads that Codex imported from another harness, whose original is
+that harness's transcript.
 
 A message whose harness doesn't say who submitted it is kept. So a prompt sent through
 Claude Code's SDK or `codex exec`, a command line typed at the prompt (`/clear`), and most

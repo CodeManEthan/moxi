@@ -15,7 +15,8 @@ module only decides which of them count and what text each row holds.
 - each tool call, as its summary line and its input.
 
 A message the harness composed (writer `harness`), a compaction summary and a thought
-stay out, and so do the subconscious's recall answers (below). Each tier 1 row records its writer, from sessions' `writer(record)`:
+stay out, and so do the subconscious's recall answers (below). Each tier 1 row records
+its writer, from sessions' `writer(record)`:
 `person`, `model` (a tool call's too), `unknown`, one of `DELIVERED_WRITERS`, or the
 kind of a message sessions doesn't mark injected.
 
