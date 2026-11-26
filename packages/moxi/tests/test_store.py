@@ -529,6 +529,7 @@ def test_a_step_that_commits_itself_is_an_error(tmp_path):
     conn = store.connect(tmp_path / "s.db")
     with pytest.raises(store.StoreError, match="step 1 ended its own transaction"):
         store.migrate(conn, [lambda c: c.execute("COMMIT")])
+    assert pragma(conn, "user_version") == 0
     conn.close()
 
 
