@@ -205,15 +205,16 @@ class Live:
 
     agents: int | None = 0
     draft: bool = False
-    #: The prompt box as read: `draft` or `empty` (`BOX_STATES`), None when it was not
-    #: read (it could not be, or the harness has no box to read).
-    box: str | None = None
     #: Of `agents`, the background shells (Codex's terminals), which a command with
     #: `stop_shells` leaves out of its agent check. Claude's list holds none.
     shells: int = 0
     #: With `agents` None because the shells alone could not be listed: the count with
     #: the shells left out, which a command with `stop_shells` reads. None otherwise.
     without_shells: int | None = None
+    #: The prompt box as read: `draft` or `empty` (`BOX_STATES`), None when it was not
+    #: read (it could not be, or the harness has no box to read). Last, so a positional
+    #: `Live(agents, draft, shells)` keeps its meaning.
+    box: str | None = None
 
     @classmethod
     def of(cls, agents: Agents, *, draft: bool = False) -> Live:
@@ -222,8 +223,9 @@ class Live:
         is not complete."""
         count = agents.busy()
         if count is None:
-            return cls(None, draft)
-        return cls(count, draft, count - (agents.busy(include_shells=False) or 0))
+            return cls(None, draft=draft)
+        return cls(count, draft=draft,
+                   shells=count - (agents.busy(include_shells=False) or 0))
 
     def busy(self, *, include_shells: bool = True) -> bool:
         """Whether a live subagent keeps the session busy; an unreadable list does. With

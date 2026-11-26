@@ -212,6 +212,11 @@ is null but for a `fork`'s. turns never acts on a
   answer within the bound, `failed` when its read failed (the line to the harness closed,
   or it answered with an error or with something that could not be read); null when it
   answered.
+- An endpoint of an older turns sends none of `ended_at`, `box` and `live_error`, and
+  `moxi_turns` reads each as null. They are added result fields a caller of this version
+  can ignore, so the version stays 2 (see "Versions"). From such an endpoint a null
+  `live_error` does not say the live part answered: `draft` true with `agents` null is
+  still unreadable.
 
 The live part of the facts (`draft`, `agents`, `box`) is read from the harness within a
 bound: 1 s on Claude Code, 2 s on Codex and OpenCode. Past the bound it reads unreadable:
