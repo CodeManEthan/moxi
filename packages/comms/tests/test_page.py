@@ -200,7 +200,8 @@ def test_the_page_declares_its_reads_and_acts():
     assert not any(r["confirmed"] for r in routes.values())
     assert not routes["/api/mail"]["query"] and not routes["/api/mail"]["stream"]
     assert routes["/api/events"]["stream"] and list(routes["/api/events"]["topics"]) == ["roster"]
-    assert exported["assets"] == ["build-stamp.txt", "mail.js", "page.js", "roster.js"]
+    assert exported["assets"] == ["build-stamp.txt", "mail.js", "page.js", "project-facts.js",
+                                  "roster.js"]
     assert exported["budget"] == {"rss": "120M", "fds": 64}
     assert page.PAGE.idle_s == 300 and page.PAGE.health is None
 
