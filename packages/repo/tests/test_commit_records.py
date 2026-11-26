@@ -69,6 +69,16 @@ def clock(monkeypatch):
     return now
 
 
+def clock_words(at: float, now: float) -> str:
+    """`at` as a record written at `now` says it: the local clock time, after its day
+    (`Nov 25 23:57`) when that is not `now`'s, so a test holds at any hour."""
+    when = time.localtime(at)
+    hour = time.strftime("%H:%M", when)
+    if time.strftime("%Y-%m-%d", when) == time.strftime("%Y-%m-%d", time.localtime(now)):
+        return hour
+    return f"{time.strftime('%b', when)} {when.tm_mday} {hour}"
+
+
 # -- the commit key ---------------------------------------------------------------------------
 
 def test_a_refusal_writes_one_record_that_counts_its_passes_and_a_good_pass_clears(demo):
@@ -243,14 +253,15 @@ def test_the_listing_carries_the_index_busy_run_and_turns_stale_at_the_committer
     lock.write_text("", encoding="utf-8")
     try:
         for n in range(1, committer.STALE_INDEX_PASSES + 1):
+            last = clock[0]
             assert moxi_repo.commit(spec(repo)).status == "index-busy"
             item = listed(repo)
             assert (item["index_busy_since"], item["index_busy_passes"]) == (start, n)
             assert item["index_stale"] is (n == committer.STALE_INDEX_PASSES)
             clock[0] += 60
-        # The stale lock's record says when in a clock time.
+        # The stale lock's record, written at the last pass, says when in a clock time.
         held = text(commit_key(repo))
-        assert held.endswith(f"in a row, since {time.strftime('%H:%M', time.localtime(start))}")
+        assert held.endswith(f"in a row, since {clock_words(start, last)}")
     finally:
         lock.unlink()
     assert moxi_repo.commit(spec(repo)).status == "committed"
