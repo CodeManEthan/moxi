@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- credentials gains `sk-api-key`: `sk-` and 16 or more letters, digits, `_` or `-`,
+  anywhere in text, with entropy above 2.5. It finds short keys, hex keys and
+  OpenRouter's `sk-or-v1-` that no vendor rule knows. OpenSSH's `sk-ecdsa-...` and
+  `sk-ssh-...` type names are allowed. Callers that judge with credentials (notes,
+  publishing) now refuse such keys.
+- `url-credential` allows a placeholder only as the whole password (letters and
+  underscores holding `pass`, `changeme` or `xxx`, optionally bracketed) or one holding
+  `${`. A real password that merely contains one of those words is now a hit.
+- Text stored redacted before this release gets these rules only when redacted again.
 - `chat_redact(text, between=...)`: a caller's own change to the text (a read tool
   cutting local paths) runs after the strip and before the second redaction, so the last
   redaction judges the text exactly as sent and a change that glues a word onto a secret

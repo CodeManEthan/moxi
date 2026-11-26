@@ -31,6 +31,17 @@ def last(rig):
     return rig.record.history(rig.names_channel)[-1]
 
 
+def adapter_dies(s):
+    """`s`'s adapter ends while its session runs: its daemon connection closes, then its
+    claim socket, and its claim file stays. The connection's reader marks the file
+    offline on a thread of its own; the socket closes only once that write has landed,
+    so it can't land while the test lists the claim files. A listing taken during the
+    file's replace can miss it (it does on btrfs), and the file reads as gone."""
+    s.client.close()
+    assert wait_for(lambda: (s.record() or {}).get("state") == "offline")
+    s.holder.close(remove_file=False)
+
+
 def test_a_send_inside_the_session_is_stamped_as_the_claim(rig, world):
     s = world.real("planner")
     code, out = rig.cli(["send", "--posture", "none", "--new-name", "nobody", "hello"], env=as_claim(s))
@@ -122,8 +133,7 @@ def test_a_dead_adapter_is_refused_while_nobody_holds_the_name(rig, world):
 
     s = world.real("planner")
     token = s.holder.token
-    s.client.close()
-    s.holder.close(remove_file=False)               # the shim died; Claude lives on
+    adapter_dies(s)                                 # the shim died; Claude lives on
     assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
     answer = claimhold.dead_adapter_answer(s.socket)
     assert answer is not None and token not in str(answer) and "token" not in answer
@@ -154,8 +164,7 @@ def test_a_dead_adapter_no_new_one_can_replace_says_mail_has_stopped(rig, world)
     assert "mail has stopped" not in prompt(), "a live adapter is not named"
     assert checks.adapter_rows() == []
 
-    s.client.close()
-    s.holder.close(remove_file=False)               # the adapter died; Claude lives on
+    adapter_dies(s)                                 # the adapter died; Claude lives on
     assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
     said = " ".join(prompt().split())
     assert said.startswith(f"comms: mail has stopped for {PLANNER}.")
@@ -281,8 +290,7 @@ def test_a_dead_adapters_file_admits_only_a_process_inside_its_session(rig, worl
         s = Session(DEFAULT_PROC, "planner",  root=root_of(other.pid, TREE))
         world.sessions.append(s)
         s.bind()
-        s.client.close()
-        s.holder.close(remove_file=False)
+        adapter_dies(s)
         assert wait_for(lambda: PLANNER not in rig.daemon.bindings)
         code, out = rig.cli(["send", "--posture", "none", "nobody", "hello"], env=as_claim(s))
         assert code == 3 and "comms adapter is gone" in out

@@ -5,12 +5,14 @@
 
 import type { Session } from "./feed.ts";
 import type { Clock } from "./rows-model.ts";
-import { dayTime, dayWord, harnessName, isBusy, LOCAL, MAY_HOLD_DRAFT, sinceOf, timeWord } from "./rows-model.ts";
+import { dayTime, dayWord, DRAFT_NOT_SENT, harnessName, isBusy, LOCAL, sinceOf, timeWord } from "./rows-model.ts";
 
 /** What the `Agents` line says when the list is not complete, or not read at all. */
 export const NOT_KNOWN = "not known · the list could not be read whole, so some may still run";
 /** The `Prompt box` line when the box was read empty. */
 export const EMPTY_BOX = "empty";
+/** The `Prompt box` line when the box was not read. */
+export const BOX_NOT_KNOWN = "not known · it could not be read, so it may hold a draft";
 /** The dim label at the left of each opened line, and the act that copies the id. */
 export const LABELS = { now: "Now", agents: "Agents", promptBox: "Prompt box", session: "Session",
                         details: "Details" } as const;
@@ -85,11 +87,12 @@ export function agentsLines(session: Session): AgentsLines | null {
   return { entries, notKnown: session.agents.complete ? null : NOT_KNOWN };
 }
 
-/** `Prompt box`, only where turns reads the box: `empty` when `draft` is false, `may hold
- * a draft` when it is true, whatever `agents` says. */
+/** `Prompt box`, only where turns reads the box: `draft not sent` when it read a draft,
+ * `empty` when it read none, and `not known` when the box was not read (`draft` null). */
 export function promptBoxLine(session: Session): string | null {
   if (!session.has_box || session.facts === null) return null;
-  return session.facts.draft ? MAY_HOLD_DRAFT : EMPTY_BOX;
+  const draft = session.facts.draft;
+  return draft === true ? DRAFT_NOT_SENT : draft === false ? EMPTY_BOX : BOX_NOT_KNOWN;
 }
 
 /** `Session`: the harness, `started <day> <time>`, the folder in `~` form. */

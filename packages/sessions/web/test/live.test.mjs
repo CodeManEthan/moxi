@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import test from "node:test";
 
 import {
-  agentsLines, busyWords, EMPTY_BOX, LABELS, liveOpened, liveRead, liveRow, LIST_NOT_WHOLE, MAY_HOLD_DRAFT, NOT_KNOWN,
-  nowLine, pairsOf, parseLive, problemsOf, promptBoxLine, TROUBLE_LEAD, UNREAD_LEAD, unreadRow,
+  agentsLines, BOX_NOT_KNOWN, busyWords, DRAFT_NOT_SENT, EMPTY_BOX, LABELS, LIST_NOT_WHOLE, LIVE_READ_FAILED, liveOpened,
+  liveRead, liveRow, NO_ANSWER_IN_TIME, NOT_KNOWN, nowLine, pairsOf, parseLive, problemsOf, promptBoxLine, TROUBLE_LEAD,
+  UNREAD_LEAD, unreadRow,
 } from "../src/live.ts";
 import { listView, NO_FILTERS, queryOf, refresh } from "../src/list.ts";
 import { runningRead } from "../src/running.ts";
@@ -15,14 +16,16 @@ const clock = (epoch) => new Date(epoch * 1000).toISOString().slice(11, 16);
 // One session as turns' `/api/sessions` sends it (its declared shape, every field).
 const facts = (fields = {}) => ({
   session_id: "s1", turn_number: 9, turn_open: true, turn_started_at: at("18:34"), agents: 0, draft: false, stale: false,
-  ready: { source: "startup", session_id: "s1", at: at("12:45") }, at: at("19:09"), ...fields,
+  ready: { source: "startup", session_id: "s1", at: at("12:45") }, at: at("19:09"), ended_at: null, live_error: null,
+  ...fields,
 });
 const agent = (id, kind, state = "running", fields = {}) =>
   ({ id, kind, state, final: null, description: null, parent_id: null, ...fields });
 const session = (key, fields = {}) => ({
   key, harness: "claude", pid: 4242, session_id: "s1", cwd: "/work/atlas-api", started: at("12:45"),
   capabilities: ["agents"], endpoint_version: "1.0", mod_version: "1.0", trouble: null, facts: facts(),
-  agents: { entries: [], complete: true }, read_error: null, ended_at: null, has_box: true, unread_since: null, ...fields,
+  agents: { entries: [], complete: true }, read_error: null, ended_at: null, has_box: true, unread_since: null, typed_name: null,
+  ...fields,
 });
 const list = (sessions) => ({ listed: true, detail: null, home: "/home/you", reach: null, sessions });
 const one = (fields) => parseLive(list([session("claude-1", fields)])).sessions[0];
@@ -102,6 +105,11 @@ test("trouble is one dim line in turns' words, each problem in turns' order", ()
   assert.equal(both.words, "working");
   assert.equal(both.trouble, `${TROUBLE_LEAD}: Codex load verification did not finish within 30 s · `
                              + `${UNREAD_LEAD}: ${LIST_NOT_WHOLE}`);
+  // Why the live part did not read, as its facts say.
+  for (const [liveError, reason] of [["timeout", NO_ANSWER_IN_TIME], ["failed", LIVE_READ_FAILED], [null, LIST_NOT_WHOLE]]) {
+    assert.equal(liveRow(one({ facts: facts({ agents: null, live_error: liveError }), agents: null })).trouble,
+                 `${UNREAD_LEAD}: ${reason}`, String(liveError));
+  }
   // A watch that is down while the reads answer is no problem.
   assert.equal(liveRow(one({ read_error: "the watch closed", unread_since: null })).trouble, null);
   assert.deepEqual(unreadRow("turns' page server answered 502"),
@@ -126,7 +134,10 @@ test("the opened row: Now, Agents and Prompt box, each only with its fact", () =
   assert.equal(agentsLines(one({})), null);
   assert.deepEqual(agentsLines(one({ agents: null })), { entries: [], notKnown: NOT_KNOWN });
   assert.equal(agentsLines(one({ agents: null, capabilities: [] })), null);
-  assert.equal(promptBoxLine(one({ facts: facts({ draft: true }) })), MAY_HOLD_DRAFT);
+  assert.equal(promptBoxLine(one({ facts: facts({ draft: true }) })), DRAFT_NOT_SENT);
+  // A box that was not read is not known, never empty.
+  assert.equal(promptBoxLine(one({ facts: facts({ draft: null }) })), BOX_NOT_KNOWN);
+  assert.equal(promptBoxLine(one({ facts: facts({ draft: "yes" }) })), BOX_NOT_KNOWN);
   assert.equal(promptBoxLine(one({ has_box: false, facts: facts({ draft: true }) })), null);
   assert.deepEqual(LABELS, { now: "Now", agents: "Agents", promptBox: "Prompt box" });
 });
@@ -137,9 +148,9 @@ test("the words and rules are turns' own, where its source sits beside sessions'
   const feed = new URL("../../../turns/web/src/feed.ts", import.meta.url);
   if (!existsSync(rows) || !existsSync(opened) || !existsSync(feed)) return;
   const turns = { ...await import(rows.href), ...await import(opened.href), ...await import(feed.href) };
-  for (const name of ["TROUBLE_LEAD", "UNREAD_LEAD", "LIST_NOT_WHOLE", "MAY_HOLD_DRAFT", "NOT_KNOWN", "EMPTY_BOX"]) {
-    assert.equal({ TROUBLE_LEAD, UNREAD_LEAD, LIST_NOT_WHOLE, MAY_HOLD_DRAFT, NOT_KNOWN, EMPTY_BOX }[name], turns[name], name);
-  }
+  const ours = { TROUBLE_LEAD, UNREAD_LEAD, LIST_NOT_WHOLE, NO_ANSWER_IN_TIME, LIVE_READ_FAILED, DRAFT_NOT_SENT, NOT_KNOWN,
+                 EMPTY_BOX, BOX_NOT_KNOWN };
+  for (const name of Object.keys(ours)) assert.equal(ours[name], turns[name], name);
   for (const key of Object.keys(LABELS)) assert.equal(LABELS[key], turns.LABELS[key], key);
   for (const status of [0, 200, 502]) assert.equal(liveRead({ status, data: null }).failure, turns.failureWhy(status));
   const utc = { time: clock, seconds: clock, day: (epoch) => new Date(epoch * 1000).toISOString().slice(0, 10) };
@@ -151,12 +162,14 @@ test("the words and rules are turns' own, where its source sits beside sessions'
     session("f", { agents: null, facts: facts({ agents: 3 }) }), session("g", { facts: facts({ draft: true }) }),
     session("h", { trouble: "it broke", read_error: "no answer", unread_since: at("19:00"), facts: facts({ agents: null }) }),
     session("i", { read_error: "the watch closed" }), session("j", { agents: null, capabilities: [] }),
+    session("k", { facts: facts({ draft: null }) }), session("l", { has_box: false, facts: facts({ draft: null }) }),
+    session("m", { agents: null, facts: facts({ agents: null, live_error: "timeout" }) }),
+    session("n", { agents: null, facts: facts({ agents: null, live_error: "failed" }) }),
   ];
-  const ours = parseLive(list(raws)).sessions;
-  ours.forEach((mine, index) => {
+  parseLive(list(raws)).sessions.forEach((mine, index) => {
     const theirs = raws[index];
     assert.deepEqual(problemsOf(mine), turns.problemsOf(theirs), mine.key);
-    assert.deepEqual(busyWords(mine), turns.newsOf(theirs).map((news) => news.text).filter((text) => text !== MAY_HOLD_DRAFT),
+    assert.deepEqual(busyWords(mine), turns.newsOf(theirs).map((news) => news.text).filter((text) => text !== DRAFT_NOT_SENT),
                      mine.key);
     assert.equal(liveRow(mine).words?.startsWith("working") ?? false, turns.stateOf(theirs) === "working", mine.key);
     assert.equal(nowLine(mine, clock), turns.nowLine(theirs, "2026-11-08", utc), mine.key);

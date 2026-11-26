@@ -565,6 +565,17 @@ this range.` in the chart's place. A piece is drawn once its read has answered: 
 first answers, `Reading…` stands where the page will be, and inside an opened row or
 section a read still out shows `Reading…` in its place.
 
+Where the launcher module is installed, the page also reads the launcher's
+`/api/running` when it opens and when its tab is shown again, and follows the launcher's
+`running` topic. A session one of those running launches holds (the same harness and
+session id) is shown, where no name was typed for it, by the launch's name as the
+launcher gives it (`builder-1`), with its folder or project beside it. Where it runs
+leads that: `slot 4 · atlas-api`, `terminal · kestrel-web`. Opened, its harness, model
+and start line also gives the effort it was launched with (`claude · <model> · high ·
+started today 12:45`), where the launch set one. A session that no running launch holds,
+an ended one among them, reads as before. Without the launcher, or while its read fails,
+none of this shows, nothing stands in its place, and no line at the foot names it.
+
 Its addresses, after `/m/usage/`:
 
 | address | opens |

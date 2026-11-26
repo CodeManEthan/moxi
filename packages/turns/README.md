@@ -120,6 +120,14 @@ its order. Claude Code's `Write` and `Edit` and OpenCode's `write` and `edit` gi
 and an update with `*** Move to:` gives `moved-from` and `moved-to`. The path is as the
 call names it, not joined with its working directory, and any other call gives none.
 
+A judge that reads a shell command reads it with `read_shell(text, dialect="sh")`
+(`"powershell"` and `"cmd"` too), which gives its commands, words, redirects and
+substitutions as the shell would read them and runs nothing (a word's `fields` are the
+words bash splits an unquoted `${x:-default}` into), with `command_word_index`
+for the word that names what a command runs and `shell_scripts` for the text it hands
+another shell. What needs evaluating to know what runs (a variable, `eval`, `printf`'s
+escapes, a script file) is not read; each guard decides that itself.
+
 A guard runs at the call step, before a tool call runs, unless it says `step = "ask"`:
 then it runs when Claude Code is about to ask you to approve a call, and it can refuse
 that ask (Claude Code denies the call and the agent reads why) but never approve one.
@@ -190,20 +198,22 @@ the panel.
   comes first. A session with no first read yet isn't drawn until it has one.
 - **A row.** Line one is the session's name, a dim `where`, and at the right when it
   came into its state (`since 09:40`, with a day word when it isn't today); a problem
-  row says its state there too (`idle since 09:40`). The name is the working directory's
-  last segment and when the session started (`parser · started today 08:20`); a session
-  with no directory is `Claude Code session` or its harness's name. Line two is what is
-  busy: `1 subagent busy` and `1 teammate busy` with the entry's description,
-  `<n> shells running`, `may hold a draft` for a Claude Code session whose prompt box may
-  hold text. A problem row says its lead and reason instead (`Its link to Moxi has
-  trouble`, `Moxi can't read its live state`, then why). A row with nothing to say is one
-  line.
+  row says its state there too (`idle since 09:40`). An idle session's time is when its
+  last turn ended, as its endpoint keeps it, so a session found already idle has one too.
+  The name is the one typed for the session in Claude Code (`--name` at start, or
+  `/rename`), else the working directory's last segment and when the session started
+  (`parser · started today 08:20`); a session with no directory is `Claude Code session`
+  or its harness's name. Line two is what is busy: `1 subagent busy` and `1 teammate
+  busy` with the entry's description, `<n> shells running`, `draft not sent` for a Claude
+  Code session with text in its prompt box. A problem row says its lead and reason
+  instead (`Its link to Moxi has trouble`, `Moxi can't read its live state`, then why,
+  such as `the session did not answer in time`). A row with nothing to say is one line.
 - **The opened row.** `Open` opens one row at a time and writes `session/<key>` to the
   address, so a link opens that row and Back leaves the page; the address survives a
   `/clear`. The opened row adds a line each for `Now` (`working on turn 4 since 09:40`),
   `Agents` (each subagent, teammate and shell with its state, busy ones in the text
-  colour, and `not known` when the list could not be read whole), `Prompt box` (`empty`
-  or `may hold a draft`), `Session` (harness, start, working directory) and `Details`
+  colour, and `not known` when the list could not be read whole), `Prompt box` (`draft
+  not sent`, `empty`, or `not known` when the box could not be read), `Session` (harness, start, working directory) and `Details`
   (process id, ready time and source, turns' version and the runner's), and `Copy id`,
   which copies the session id.
 - **The reach line.** Under the list, one dim line says which sessions show here and
@@ -230,6 +240,31 @@ the panel.
 - **Reading.** The list follows the shell's push channel as sessions start, turn and end,
   is read again when the tab is shown, and is redrawn once a minute for its day words.
   A Claude Code run with no window (headless) spawns no endpoint and is not listed.
+
+### The sessions route
+
+`/m/turns/api/sessions` is what the panel draws: `listed`, `reach`, and one entry per
+session. Besides its harness, ids, folder and state, an entry carries:
+
+- `typed_name`: the name typed for a Claude Code session (`--name`, or `/rename` in this
+  or another process of the same session), read from Claude Code's own record of the
+  process in its config folder (`CLAUDE_CONFIG_DIR`, else `.claude` in the home folder) as
+  the page server's environment places it; null when there is none, the record is of
+  another session, or the name was not typed (made from the folder, written by the model,
+  changed to tell it from another session's, or set by a hook). It is marked `redact`.
+- `ended_at`: while no turn is open, when the last turn ended: the endpoint's own time
+  (`facts.ended_at`), else the time the page server's watch saw it end; null otherwise.
+- `facts.draft`: true for a draft in the prompt box, false for an empty box, null when the
+  box was not read.
+- `facts.live_error`: why the live part did not read, `timeout` (the session did not
+  answer in time) or `failed` (the session gave no answer Moxi could use: the line to it
+  closed, or it answered with an error or with something that could not be read); null
+  when it did.
+- `read_error`: null while every read answers; with one failed, one sentence for the kind
+  of failure: `the session did not answer in time`, `Moxi can't reach it`, `its link
+  closed during the read`, `the session is ending`, `it speaks another version of turns`,
+  `it refused the read`, `its answer could not be read`, or `the read failed`. While only
+  the watch is down it says the session is read on a timer.
 
 ### On the Projects page
 

@@ -42,8 +42,9 @@ def post(sock_path: str, path: str, body: dict, timeout: float = 5.0) -> tuple[i
 
 class FakeRunner:
     """Reads the endpoint's lines from `stream` (a binary file); answers `live` lines
-    itself from `agents` and `draft` unless `answer_live` is off, and `agents` lines from
-    `agent_list` (`$.agent.list()` as the engine gives it; None: unreadable)."""
+    itself from `agents` and `draft` unless `answer_live` is off (or with `live_answer`
+    when set), and `agents` lines from `agent_list` (`$.agent.list()` as the engine gives
+    it; None: unreadable)."""
 
     def __init__(self, stream):
         self.stream = stream
@@ -53,6 +54,8 @@ class FakeRunner:
         self.draft = False
         self.agent_list: list | None = []
         self.answer_live = True
+        #: The body a `live` line is answered with, in place of `agents` and `draft`.
+        self.live_answer: dict | None = None
         #: Every `guards` line's table, in order; the hello's table is in `first`.
         self.tables: queue.Queue = queue.Queue()
         self._seq = itertools.count(1)
@@ -85,9 +88,11 @@ class FakeRunner:
                 continue
             if line.get("op") == leg.LINE_LIVE:
                 if self.answer_live:
+                    body = self.live_answer
+                    if body is None:
+                        body = {"agents": self.agents, "draft": self.draft}
                     threading.Thread(target=self.post, args=(leg.PATH_LIVE, {
-                        "ask": line["ask"], "agents": self.agents, "draft": self.draft}),
-                        daemon=True).start()
+                        "ask": line["ask"], **body}), daemon=True).start()
                 continue
             self.lines.put(line)
 

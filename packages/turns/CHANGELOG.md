@@ -2,6 +2,27 @@
 
 ## 0.2.8 (unreleased)
 
+- The guard API gains a shell reader, exported from `moxi_turns`: `read_shell(text,
+  dialect="sh")` reads `sh`, `powershell` or `cmd` command text (`DIALECTS`) without
+  running it, as a `ShellText` of `ShellCommand`s (words, redirects, and the operator
+  that ended each, `ended_by`) and `ShellMark`s, everything a strict guard may refuse, in
+  text order, each of a kind in `MARK_KINDS`. A `ShellWord` keeps each substitution's text in `subs`, with a NUL in its
+  `text`, and in `fields` the words bash makes of it when a `${...}` default or alternate
+  outside double quotes (`-`, `:-`, `+`, `:+`, `=`, `:=`) is used and split at its
+  blanks; a `ShellRedirect` keeps its operator, fd and target, and a heredoc's `body` and,
+  when its delimiter is unquoted, the substitutions in it. `command_word_index` finds the
+  word that names what a command runs, past assignments, reserved words and the wrappers
+  `sudo`, `doas`, `env`, `nohup`, `builtin`, `exec`, `command`, `nice`, `timeout`,
+  `setsid` and `stdbuf` with the options each takes. `shell_scripts` gives the text a
+  command hands a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`, `ash`, `pwsh`,
+  `powershell`, `cmd`) to run, as a `ShellScript`: its `-c`, `-Command` or `/c` argument,
+  a heredoc or here-string on it, or literal text piped into it from `echo` or `cat` (its
+  `source`, one of `SCRIPT_SOURCES`), with the indexes of the command's words it was made
+  from (`word_indexes`). A shell is named by its command word's last part across `/` and
+  `\`, with `.exe` dropped, in any case. A POSIX
+  shell's option cluster is all flags, except that each `o` or `O` in it takes the next
+  word (`bash -co pipefail 'cmd'`). What needs
+  evaluating to know what runs is not read. The reader never raises.
 - A `project-facts` component for the Projects page. It reads turns' own `/api/sessions`
   and `sessions` topic, and reports, by session claim, whether each session turns can read
   is in a turn (`live`, `{in_turn, state}`), so the page can mark a running line
@@ -51,6 +72,20 @@
   its own text as the prompt where the note is gone; the first turn's `turn.ended` then
   does not name it. A steer a request carried ends with its turn as before. The runner is version 0.3.1, so
   `moxi install turns` updates an install at user scope.
+- The panel names a Claude Code session by the name typed for it (`--name` or `/rename`),
+  read from Claude Code's own record of the process, ahead of a launch's name and the
+  folder. The sessions route sends it as `typed_name`.
+- The endpoint keeps when the session's last turn ended and sends it in the facts
+  (`Facts.ended_at`), so a session the panel finds already idle says since when.
+- The facts say whether the prompt box was read: `Facts.box` is `draft`, `empty`, or None
+  when it was not read, and the route's `facts.draft` is null then. The panel says
+  `draft not sent` for a draft and `not known` for a box it could not read, which it no
+  longer shows as a draft. The runner sends the box (version 0.3.3), so `moxi install
+  turns` updates an install at user scope.
+- Why a read failed: `Facts.live_error` is `timeout` or `failed` when the live part did
+  not read, and `TurnsError.why` names the kind of each failed read (`client.WHYS`). The
+  panel gives one reason per kind, such as `the session did not answer in time`, in
+  place of one sentence for all.
 
 ## 0.2.7
 

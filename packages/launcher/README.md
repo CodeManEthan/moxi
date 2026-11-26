@@ -304,7 +304,8 @@ process and whose process runs, newest first, at most `limit` (200), as a `Runni
 plain values: `request_id`, `harness`, `session_id` (the id the launch was last known by,
 None when it never learned one), `target`, `slot`, `project_key`, `cwd`, `name` (the
 launch's name, else its comms name, else its folder and start time), `identity`,
-`created_at` and `live`. With `live_only=False` it keeps the launches whose process has
+`created_at`, `live`, and `model` and `effort` (the values its row records, None where
+the launch set none). With `live_only=False` it keeps the launches whose process has
 ended, with `live` false. It reads the launch log and the process table and nothing else:
 it asks no other module, starts no process, and writes nothing but an older log's schema
 update. With no launch log it gives none; a log held past `timeout_s` (1 second) raises
@@ -949,6 +950,13 @@ launcher's page. On the phone the list is always open and shows each session's n
 where it runs and its cache, with no time, no message and no `Open`. The row reads
 `GET /api/running` and follows the stream's topic `running`; that route is the one the
 phone's gateway reaches, and it sends no path: a launch's folder goes by its name alone.
+Each entry also carries `model` and `effort`, the values the launch was made with as the
+command line spells them, each null where the launch set none; neither is marked, so the
+phone gets them as the desk does. `next_keep_alive_at` says when keep-warm's next nudge
+is due for a session it covers (`covered`): the moment its window opens, 900 seconds
+before `cache.until`, written as `until` is (`2026-11-26T14:32:07Z`). A time already
+past means the nudge goes at the timer's next ask, within about two minutes. It is null
+whenever keep-warm would not nudge the session, and not marked.
 
 **Keep warm on the row.** Opened at the desk, a session that waits with nothing keeping
 it warm (one of those that come first) has `Keep warm` before `Open` when a press would

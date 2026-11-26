@@ -2,9 +2,9 @@
 
 `allowed(tool, tool_input, cwd, *, handoff_roots, work_roots, commands, home)` answers
 `(True, "")` for a call that wraps the work up and `(False, reason)` for anything else,
-the reason short and naming the rule that refused it. It is pure: standard library only,
-no subprocess, no file read or write; its only contact with the filesystem is
-`os.path.realpath` on the paths it judges. The ceiling (`moxi_usage.ceiling`) asks it for
+the reason short and naming the rule that refused it. It reaches turns at use, for its
+shell reader, and runs no subprocess and reads or writes no file; its only contact with
+the filesystem is `os.path.realpath` on the paths it judges. The ceiling (`moxi_usage.ceiling`) asks it for
 every call of an agent whose hard marker has latched, after its own return-tool check,
 so the return tools are not handled here; the stop (`moxi_usage.stop`) asks it for every
 call of a main session whose stop has latched.
@@ -58,11 +58,12 @@ that lexical form). If any reading falls outside, the call is refused. `cd` and 
 pathspecs read `..` lexically, while `git -C` and the file tools follow links, so a path
 must pass both readings.
 
-**The lexer.** The shell text goes through a quote-aware lexer that refuses every control
-operator but the one `&&` after `cd <dir>`, every redirection, `$` and backticks outside
-single quotes, newlines outside quotes, and the expansion characters (glob, brace,
-subshell, and a tilde other than a leading `~/`). This limits work; it is not a security
-boundary: the hooks `git commit` runs still run.
+**The lexer.** The shell text is read by turns' shell reader (`read_shell`), and `lex`
+refuses every control operator but the one `&&` after `cd <dir>`, every redirection, `$`
+and backticks outside single quotes, newlines outside quotes, and the expansion
+characters (glob, brace, subshell, and a tilde other than a leading `~/`). Without turns
+every `Bash` call is refused. This limits work; it is not a security boundary: the hooks
+`git commit` runs still run.
 """
 
 from __future__ import annotations
@@ -315,82 +316,78 @@ def _patch(text: object, cwd: object, roots: object) -> None:
 def lex(text: str, home: str) -> list:
     """Shell text as words and `AND` tokens, refusing everything else the allowlist does.
 
-    Single quotes are literal (newlines, `$` and backticks allowed inside). Double quotes
-    allow newlines and the usual backslash escapes, but no `$` or backtick. Outside quotes
-    only spaces and tabs part words and `&&` is the only operator. A word that starts with
-    an unquoted `~/` is expanded with `home`, as the shell does. Raises `Refused`.
+    turns' shell reader (`read_shell`) reads the text; every mark it gives refuses the
+    call, the first in the text giving the reason, but the one kind allowed: `&&`. So
+    single quotes are literal (newlines, `$` and backticks allowed inside), double quotes
+    allow newlines and the usual backslash escapes but no `$` or backtick, and outside
+    quotes only spaces and tabs part words. An unclosed quote refuses after every other
+    mark, as it stops reading only at the end. A word that starts with an unquoted `~/` is
+    expanded with `home`, as the shell does. Raises `Refused`, also when turns can't be
+    loaded.
     """
+    read = _turns().read_shell(text)
+    unclosed = None
+    for mark in read.marks:
+        pair = text[mark.position:mark.position + 2]
+        if mark.kind == "operator" and pair == "&&":
+            continue
+        if mark.kind == "unclosed":
+            unclosed = unclosed or mark
+            continue
+        raise Refused(_reason(mark.kind, text[mark.position], pair))
+    if unclosed is not None:
+        c = text[unclosed.position]
+        raise Refused(_UNCLOSED.get(c) or _UNQUOTED_REFUSED.get(c, "unterminated quote"))
     tokens: list = []
-    word: list[str] | None = None        # None between words, else its characters so far
-    i, n = 0, len(text)
-    while i < n:
-        c = text[i]
-        if c == "'":
-            j = text.find("'", i + 1)
-            if j < 0:
-                raise Refused("unterminated single quote")
-            word = (word or []) + list(text[i + 1:j])
-            i = j + 1
-            continue
-        if c == '"':
-            buf: list[str] = []
-            i += 1
-            while True:
-                if i >= n:
-                    raise Refused("unterminated double quote")
-                d = text[i]
-                if d == '"':
-                    i += 1
-                    break
-                if d == "$":
-                    raise Refused("'$' outside single quotes")
-                if d == "`":
-                    raise Refused("backtick outside single quotes")
-                if d == "\\" and i + 1 < n and text[i + 1] in '"\\\n':
-                    if text[i + 1] != "\n":      # a backslash-newline joins lines: dropped
-                        buf.append(text[i + 1])
-                    i += 2
-                    continue
-                buf.append(d)
-                i += 1
-            word = (word or []) + buf
-            continue
-        if c in " \t":
-            if word is not None:
-                tokens.append("".join(word))
-                word = None
-            i += 1
-            continue
-        if c == "\n":
-            raise Refused("newline outside quotes")
-        if c == "&":
-            if text[i:i + 2] == "&>":
-                raise Refused("redirection")
-            if text[i:i + 2] != "&&":
-                raise Refused("control operator '&'")
-            if word is not None:
-                tokens.append("".join(word))
-                word = None
+    for k, command in enumerate(read.commands):
+        if k:
             tokens.append(AND)
-            i += 2
-            continue
-        if c in _UNQUOTED_REFUSED:
-            raise Refused(_UNQUOTED_REFUSED[c])
-        if ord(c) < 32 or c == "\x7f":
-            raise Refused("control character outside quotes")
-        if c == "#" and word is None:
-            raise Refused("comment '#'")
-        if c == "~":
-            if word is not None or text[i + 1:i + 2] != "/":
-                raise Refused("tilde other than a leading '~/'")
-            word = list(home)
-            i += 1
-            continue
-        word = (word or []) + [c]
-        i += 1
-    if word is not None:
-        tokens.append("".join(word))
+        for w in command.words:
+            if text.startswith("~/", w.position):
+                tokens.append(home + w.text[1:])
+            else:
+                tokens.append(w.text)
     return tokens
+
+
+#: The reason an unclosed quote gives, by its opening character.
+_UNCLOSED = {"'": "unterminated single quote", '"': "unterminated double quote"}
+#: The reason each kind of mark gives that the character at it doesn't decide.
+_MARK_REASONS = {
+    "redirect": "redirection",
+    "heredoc": "redirection",
+    "dollar": "'$' outside single quotes",
+    "ansi-c": "'$' outside single quotes",
+    "backtick": "backtick outside single quotes",
+    "backslash": "backslash outside quotes",
+    "tilde": "tilde other than a leading '~/'",
+    "comment": "comment '#'",
+    "control": "control character outside quotes",
+}
+
+
+def _reason(kind: str, c: str, pair: str) -> str:
+    """The reason a mark of `kind` gives, `c` the character at it and `pair` the two
+    characters from it."""
+    if kind == "operator":
+        if c == "\n":
+            return "newline outside quotes"
+        if c == "&":
+            return "control operator '&'"
+        return _UNQUOTED_REFUSED.get(c, f"control operator {pair!r}")
+    if kind in ("glob", "brace", "arithmetic"):
+        return _UNQUOTED_REFUSED.get(c, f"{kind} {c!r}")
+    return _MARK_REASONS.get(kind, kind)
+
+
+def _turns():
+    """turns' API, reached at use: usage installs turns only as an extra."""
+    from moxi import modules
+
+    found = modules.load("turns")
+    if not found.ok or found.api is None:
+        raise Refused(f"the shell reader is off: turns is {found.state}")
+    return found.api
 
 
 def _resolve_dir(d: str, cwd: str, work_roots: object, *, logical: bool,
