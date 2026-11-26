@@ -292,6 +292,30 @@ def test_the_command_has_the_gates_stdio(demo):
     assert done.stdout == "out\n" and done.stderr == "err\n"
 
 
+@pytest.mark.parametrize(("ttys", "shared"), [((), False), ((1,), True), ((0, 2), True)])
+def test_the_gate_shares_a_console_it_has(monkeypatch, ttys, shared):
+    monkeypatch.setattr(os, "isatty", lambda fd: fd in ttys)
+    assert run._has_console() is shared
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows creation flags")
+@pytest.mark.parametrize("console", [True, False])
+def test_a_command_opens_no_window_unless_the_gate_has_a_console(demo, monkeypatch,
+                                                                  tmp_path, console):
+    flags, real_popen, command = [], subprocess.Popen, str(tmp_path / "x.exe")
+
+    def refused(argv, *more, **options):
+        if list(argv)[:1] != [command]:   # platform's own `ver`, say
+            return real_popen(argv, *more, **options)
+        flags.append(options["creationflags"])
+        raise OSError("not started here")
+
+    monkeypatch.setattr(run, "_has_console", lambda: console)
+    monkeypatch.setattr(subprocess, "Popen", refused)
+    assert run.main(["--record", "demo/snapshot", "--", command]) == 127
+    assert bool(flags[0] & subprocess.CREATE_NO_WINDOW) is not console
+
+
 @POSIX
 def test_a_command_ended_by_a_signal_is_128_plus_its_number(demo):
     code = run.main(["--record", "demo/snapshot", "--",

@@ -334,10 +334,10 @@ class Uninstaller:
                     say(f"moxi uninstall: {exc}", err=True)
                     self.failed.append("package")
                     return
-                with install.moxi_moved_aside(env):
+                with install._moxi_moved_aside(env):
                     code = install.run(argv, extra_env)
         else:
-            with install.moxi_moved_aside(env):
+            with install._moxi_moved_aside(env):
                 code = install.run(uninstall_command(dist))
         if code != 0:
             say(f"moxi uninstall: removing {dist} failed (exit {code})", err=True)
@@ -407,9 +407,9 @@ def _remove_store(module: str, label: str, path: Path, kind: str, what: str) -> 
 
     try:
         if os.path.islink(path) or _is_junction(path):
-            pointed = os.readlink(path)
-            if pointed.startswith("\\\\?\\"):   # a junction's target, as Windows keeps it
-                pointed = pointed[4:]
+            from .paths import link_target
+
+            pointed = link_target(path)
             try:
                 os.unlink(path)
             except (IsADirectoryError, PermissionError):

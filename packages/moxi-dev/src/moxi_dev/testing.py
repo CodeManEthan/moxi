@@ -2616,7 +2616,9 @@ def console_script(script_dir: str | os.PathLike[str], name: str,
     the launcher runs Python as a child, so the stand-in reads its launcher's pid and
     answers that. `__file__` in that code is the stand-in's own path on every system
     (on Windows Python reads the code from a zip inside the `.exe`), so a stand-in can
-    keep its files beside itself.
+    keep its files beside itself. On every system the code runs after a few lines of the
+    stand-in's own, so it can't begin with `from __future__ import ...` (a SyntaxError)
+    and a string it begins with is no module docstring.
     """
     if WINDOWS:
         path = Path(script_dir, f"{name}.exe")

@@ -122,8 +122,8 @@ def test_an_agent_goes_to_the_agents_dir_as_one_file(home, tmp_path):
     items = [Item(agent, "claude", "reviewer.md", kind="agent"),
              Item(agent, "codex", "reviewer.md", kind="agent")]
     place.apply(place.plan("loadout", items))
-    assert os.readlink(home / ".claude" / "agents" / "reviewer.md") == str(agent)
-    assert os.readlink(home / ".codex" / "agents" / "reviewer.md") == str(agent)
+    assert link_text(home / ".claude" / "agents" / "reviewer.md") == str(agent)
+    assert link_text(home / ".codex" / "agents" / "reviewer.md") == str(agent)
     entry = ledger()["loadout"]["placed"][str(home / ".claude" / "agents" / "reviewer.md")]
     assert entry["kind"] == "agent" and entry["harness"] == "claude"
 
@@ -147,7 +147,7 @@ def test_codex_home_moves_codexs_agents_dir_and_not_its_skills(home, tmp_path,
     items = [Item(agent, "codex", "reviewer.md", kind="agent"),
              Item(skill(), "codex", "comms-send")]
     place.apply(place.plan("loadout", items))
-    assert os.readlink(tmp_path / "cx" / "agents" / "reviewer.md") == str(agent)
+    assert link_text(tmp_path / "cx" / "agents" / "reviewer.md") == str(agent)
     assert is_link(home / ".agents" / "skills" / "comms-send")
     assert not os.path.lexists(home / ".codex")
 
@@ -786,14 +786,14 @@ def test_a_missing_source_is_refused_and_its_placement_left(home, skill, form):
     items = [Item(gone, "claude", "gone"), Item(kept, "claude", "kept")]
     place.apply(place.plan("comms", items, form=form))
     target = home / ".claude" / "skills" / "gone"
-    before = os.readlink(target) if form == "link" else (target / "SKILL.md").read_text()
+    before = link_text(target) if form == "link" else (target / "SKILL.md").read_text()
     shutil.rmtree(gone)
     steps = place.plan("comms", items, form=form)
     assert [(s.action, s.cause) for s in steps] == [("refuse", "source"), ("keep", None)]
     assert steps[0].reason == f"source missing: {gone}"
     said, say = lines()
     place.apply(steps, say=say)
-    after = os.readlink(target) if form == "link" else (target / "SKILL.md").read_text()
+    after = link_text(target) if form == "link" else (target / "SKILL.md").read_text()
     assert os.path.lexists(target) and after == before
     assert str(target) in ledger()["comms"]["placed"]
     assert {p.name: p.state for p in place.status("comms")} == {"gone": "stale",
@@ -859,7 +859,7 @@ def test_a_held_items_links_are_relative_and_survive_the_project_moving(tmp_path
     item = Item(src, "claude", "tidy", dest=dest, held=True, root=root)
     one(place.plan("loadout", [item]), "add")
     place.apply(place.plan("loadout", [item]))
-    assert os.readlink(dest) == os.path.join("..", "..", "skills", "tidy")
+    assert link_text(dest) == os.path.join("..", "..", "skills", "tidy")
     one(place.plan("loadout", [item]), "keep")
     moved = tmp_path / "elsewhere" / "proj"
     shutil.copytree(root, moved, symlinks=True)
@@ -902,7 +902,7 @@ def test_a_held_item_with_copy_places_copies_marked_held(project):
     need_symlinks()
     set_core("skills.form", "link")
     place.apply(place.plan("loadout", [item]))
-    assert os.readlink(dest) == os.path.join("..", "..", "skills", "tidy")
+    assert link_text(dest) == os.path.join("..", "..", "skills", "tidy")
 
 
 def test_held_refusals(tmp_path, project, skill):

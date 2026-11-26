@@ -142,8 +142,9 @@ def test_two_spellings_of_one_dir_give_one_tag_and_one_value(tmp_path, monkeypat
     monkeypatch.chdir(tmp_path / "homes")
     spellings = [str(real), "real", "./real/../real", "~/homes/real", str(link)]
     want = os.path.realpath(real)
-    seen = {(_home.home_tag({"MOXI_HOME": s, "HOME": str(tmp_path)}),
-             _home.unit_env("comms", {"MOXI_HOME": s, "HOME": str(tmp_path)})["MOXI_HOME"])
+    env = {"HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
+    seen = {(_home.home_tag({"MOXI_HOME": s, **env}),
+             _home.unit_env("comms", {"MOXI_HOME": s, **env})["MOXI_HOME"])
             for s in spellings}
     assert seen == {(tag_of(real), want)}
 

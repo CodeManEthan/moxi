@@ -828,7 +828,7 @@ def test_the_settle_child_places_skills_and_a_listener_adopts_them_under_the_cla
     assert box.events(key="raised") == []
     assert box.value("listener", "adopted") == box.targets
     src = box.site.root / "moxi_demo" / "skills" / "moxi-demo-send"
-    assert all(os.readlink(t) == str(src) for t in box.targets)
+    assert all(moxi.paths.link_target(t) == str(src) for t in box.targets)
     assert box.place.status("demo") == []
     assert sorted(str(p.path) for p in box.place.status("loadout")) == box.targets
 

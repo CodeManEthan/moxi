@@ -321,6 +321,29 @@ def test_a_watched_child_is_in_its_job_before_it_runs(tmp_path, slow_job):
             os.kill(grandchild.pid, signal.SIGTERM)
 
 
+@ON_WINDOWS
+def test_a_watched_child_whose_job_cant_be_made_is_killed_not_left_suspended(tmp_path,
+                                                                             monkeypatch):
+    from moxi import _win
+
+    started = []
+    real_popen = subprocess.Popen
+
+    def recorded(*args, **kwargs):
+        child = real_popen(*args, **kwargs)
+        started.append(child)
+        return child
+
+    def no_job(*_args, **_kwargs):
+        raise OSError("no job here")
+
+    monkeypatch.setattr(subprocess, "Popen", recorded)
+    monkeypatch.setattr(_win, "Job", no_job)
+    with pytest.raises(OSError, match="no job here"):
+        proc.spawn([PY, "-c", "import time; time.sleep(60)"], lifeline="watch")
+    assert len(started) == 1 and started[0].returncode is not None
+
+
 def test_a_tree_that_ends_on_sigterm_does_not_wait_out_the_grace(tmp_path, monkeypatch):
     monkeypatch.setattr(proc, "KILL_GRACE", 5)
     start = time.monotonic()

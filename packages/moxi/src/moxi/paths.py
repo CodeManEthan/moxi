@@ -63,6 +63,10 @@ name may stand first.
 the process (its docstring says how); Moxi's code reads the system, its release and
 machine and the host name through it.
 
+`link_target(path)` is the target a link or junction holds, spelled as this system spells
+a path (on Windows without the `\\\\?\\` prefix and with `\\` for `/`). Moxi's code reads
+a link's target through it wherever it compares one.
+
 This module is imported on hook paths, so it imports nothing heavy at module level.
 """
 
@@ -373,6 +377,39 @@ def uname():
         finally:
             platform._wmi_query = query
     return answer
+
+
+# -- links --------------------------------------------------------------------------------
+
+def link_target(path: str | os.PathLike) -> str:
+    """The target the symbolic link or junction at `path` holds, spelled as this system
+    spells a path: what `os.readlink` reads, and on Linux and macOS exactly that.
+
+    On Windows `os.readlink` gives an absolute target in the form the system keeps it,
+    `\\\\?\\C:\\...` (`\\\\?\\UNC\\server\\share\\...` for a share), and a target written
+    with `/` keeps its `/`. Here each `/` reads as `\\`, and the prefix is dropped from a
+    drive or share path (a share as `\\\\server\\share\\...`), so the text compares equal
+    to the path the link was made from. A long form that names no drive or share (a
+    volume's `\\\\?\\Volume{...}`) is kept as it is. A relative target stays relative.
+    Raises what `os.readlink` raises: `OSError` where `path` is no link.
+    """
+    text = os.readlink(os.fspath(path))
+    if not _WINDOWS:
+        return text
+    return _windows_spelling(text)
+
+
+def _windows_spelling(text: str) -> str:
+    """`text`, a link's target as Windows keeps it, as `link_target` spells it."""
+    text = text.replace("/", "\\")
+    if not text.startswith("\\\\?\\"):
+        return text
+    rest = text[4:]
+    if rest[:4].upper() == "UNC\\":
+        return "\\\\" + rest[4:]
+    if rest[:1].isalpha() and rest[1:3] == ":\\":
+        return rest
+    return text
 
 
 # -- sockets and this environment's programs --------------------------------------------

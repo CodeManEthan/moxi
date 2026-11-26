@@ -267,12 +267,11 @@ def link_dir(link: Path, target: Path) -> None:
 
 
 def link_text(path: Path) -> str:
-    """What the link at `path` says, as `os.readlink` reads it, less the `\\\\?\\` a
-    junction's target starts with on Windows."""
-    import os
+    """What the link at `path` says, as the system spells a path (`moxi.paths.link_target`):
+    on Windows without the `\\\\?\\` its target is kept with."""
+    from moxi.paths import link_target
 
-    text = os.readlink(path)
-    return text[4:] if text.startswith("\\\\?\\") else text
+    return link_target(path)
 
 
 def is_link(path: Path) -> bool:

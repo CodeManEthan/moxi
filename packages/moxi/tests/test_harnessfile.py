@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import WINDOWS
+from conftest import WINDOWS, link_text
 from moxi import harnessfile
 from moxi.harnessfile import Doc, Refused
 from moxi_dev.testing import need_symlinks
@@ -164,7 +164,7 @@ def test_a_link_is_written_through_and_stays_a_link(harness_dir, backups, tmp_pa
     doc = Doc(link, "json")
     doc.data["b"] = 2
     assert harnessfile.write(doc, backups, 5) is None
-    assert link.is_symlink() and os.readlink(link) == str(real)
+    assert link.is_symlink() and link_text(link) == str(real)
     assert json.loads(real.read_text()) == {"a": 1, "b": 2}
     assert sorted(p.name for p in harness_dir.iterdir()) == ["settings.json"]
 

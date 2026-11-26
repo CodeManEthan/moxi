@@ -209,7 +209,7 @@ def parent(argv: list[str]) -> int:
                 install.PLAIN, Path(sys.prefix), sys.executable)
             install.run = lambda argv, env=None: note("parent", ran=argv) or 0
             # The environment is the suite's own: nothing of it is moved aside.
-            install.moxi_moved_aside = lambda env: contextlib.nullcontext([])
+            install._moxi_moved_aside = lambda env: contextlib.nullcontext([])
             uninstall.run_teardown = (
                 lambda python, module: run_settle(python, module, teardown=True))
             args = uninstall._parser("moxi uninstall").parse_args([names[0]])

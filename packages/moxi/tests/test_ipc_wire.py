@@ -11,6 +11,7 @@ import textwrap
 import pytest
 
 import moxi.ipc as ipc
+from conftest import link_dir
 from moxi import paths
 from moxi.ipc import _wire as wire
 
@@ -538,11 +539,9 @@ def test_a_windows_address_under_a_given_env_is_the_one_that_env_serves(windows_
     assert given == ipc.address("comms", "daemon")
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="on Windows a symbolic link needs a "
-                    "privilege the test's user may not have")
 def test_two_spellings_of_one_home_share_its_pipe(windows_names, tmp_path, monkeypatch):
     (tmp_path / "rt").mkdir()
-    (tmp_path / "link").symlink_to(tmp_path / "rt")
+    link_dir(tmp_path / "link", tmp_path / "rt")   # a junction on Windows
     first = ipc.address("comms", "daemon")
     for spelling in (tmp_path / "link", f"{tmp_path / 'rt'}/", tmp_path / "x" / ".." / "rt"):
         monkeypatch.setenv("MOXI_COMMS_RUNTIME_DIR", str(spelling))

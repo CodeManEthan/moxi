@@ -740,7 +740,10 @@ def _append_held(fd: int, line: bytes) -> None:
     """Write `line` at the end of `fd`'s file on Windows, holding the byte at
     `APPEND_LOCK_OFFSET` meanwhile. The C runtime's append there is a seek to the end and
     then a write, so without the byte two writers could land at one offset and one line
-    would overwrite the other. The byte goes when the write is done, or with the handle."""
+    would overwrite the other. The byte goes when the write is done, or with the handle.
+    Only another holder of the byte (`EACCES`, `EDEADLOCK`) is waited out; any other error
+    is raised."""
+    import errno
     import msvcrt
 
     os.lseek(fd, APPEND_LOCK_OFFSET, os.SEEK_SET)
@@ -748,7 +751,9 @@ def _append_held(fd: int, line: bytes) -> None:
         try:
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
             break
-        except OSError:
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EDEADLOCK):
+                raise
             time.sleep(_APPEND_POLL_S)
     try:
         os.write(fd, line)

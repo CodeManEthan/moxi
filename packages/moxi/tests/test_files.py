@@ -1422,3 +1422,37 @@ def test_collapse_refuses_a_negative_bound():
         files.Collapse(after=-1)
     with pytest.raises(ValueError):
         files.Collapse(hourly_past=-1)
+
+
+@WINDOWS
+def test_an_append_whose_lock_fails_for_another_cause_raises_and_does_not_wait(tmp_path,
+                                                                               monkeypatch):
+    import errno
+    import msvcrt
+
+    def broken(fd, mode, nbytes):
+        raise OSError(errno.EBADF, "a bad handle")
+
+    monkeypatch.setattr(msvcrt, "locking", broken)
+    start = time.monotonic()
+    with pytest.raises(OSError) as caught:
+        files.append_record(tmp_path / "log.jsonl", {"a": 1})
+    assert caught.value.errno == errno.EBADF and time.monotonic() - start < 5
+
+
+@WINDOWS
+def test_an_append_waits_out_another_holder_of_the_byte(tmp_path, monkeypatch):
+    import errno
+    import msvcrt
+
+    real, busy = msvcrt.locking, [3]
+
+    def held_a_while(fd, mode, nbytes):
+        if mode == msvcrt.LK_NBLCK and busy[0]:
+            busy[0] -= 1
+            raise OSError(errno.EACCES, "held")
+        return real(fd, mode, nbytes)
+
+    monkeypatch.setattr(msvcrt, "locking", held_a_while)
+    files.append_record(tmp_path / "log.jsonl", {"a": 1})
+    assert files.read_records(tmp_path / "log.jsonl") == [{"a": 1}] and busy == [0]

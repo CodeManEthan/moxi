@@ -839,7 +839,7 @@ def test_the_moxi_executables_are_moved_aside_with_a_copy_left_in_place(
     own, on_path = env.prefix / "Scripts" / "moxi.exe", tmp_path / "bin" / "moxi.exe"
     left = on_path.with_name("moxi.exe.old-0000")
     left.write_bytes(b"an earlier run's")
-    with install.moxi_moved_aside(env) as moved:
+    with install._moxi_moved_aside(env) as moved:
         assert sorted(p.parent for p in moved) == sorted([own.parent, on_path.parent])
         for aside, path, data in zip(moved, (own, on_path), (b"own", b"on path"),
                                      strict=True):
@@ -855,7 +855,7 @@ def test_a_plain_env_moves_its_own_moxi_aside(tmp_path, monkeypatch):
     monkeypatch.setattr(install, "_WINDOWS", True)
     (tmp_path / "Scripts").mkdir()
     (tmp_path / "Scripts" / "moxi.exe").write_bytes(b"own")
-    with install.moxi_moved_aside(install.InstallEnv(install.PLAIN, tmp_path, "py")) as moved:
+    with install._moxi_moved_aside(install.InstallEnv(install.PLAIN, tmp_path, "py")) as moved:
         assert [p.parent.name for p in moved] == ["Scripts"]
     assert [p.name for p in (tmp_path / "Scripts").iterdir()] == ["moxi.exe"]
 
@@ -863,7 +863,7 @@ def test_a_plain_env_moves_its_own_moxi_aside(tmp_path, monkeypatch):
 def test_nothing_is_moved_aside_off_windows(tmp_path, monkeypatch):
     monkeypatch.setattr(install, "_WINDOWS", False)
     env = _tool_env(tmp_path)
-    with install.moxi_moved_aside(env) as moved:
+    with install._moxi_moved_aside(env) as moved:
         assert moved == []
     assert sorted(p.name for p in (tmp_path / "bin").iterdir()) == ["moxi.exe"]
 
@@ -890,14 +890,14 @@ def test_a_running_moxi_is_moved_aside_so_its_name_can_be_removed(tmp_path):
                 break
             assert time.monotonic() < deadline, "the stand-in never ran"
             time.sleep(0.05)
-        with install.moxi_moved_aside(env) as moved:
+        with install._moxi_moved_aside(env) as moved:
             path.unlink()
             path.write_bytes(b"a new moxi")
         assert moved[0].exists(), "the running one stays until it exits"
     finally:
         running.kill()
         running.wait()
-    with install.moxi_moved_aside(env):
+    with install._moxi_moved_aside(env):
         pass
     assert [p.name for p in scripts.iterdir()] == ["moxi.exe"]
     assert path.read_bytes() == b"a new moxi"
@@ -922,7 +922,7 @@ def test_a_moxi_whose_zip_this_process_has_read_is_moved_aside(tmp_path, monkeyp
     list(importlib.metadata.distributions())
     with pytest.raises(PermissionError):
         path.rename(path.with_name("moxi.exe.held"))
-    with install.moxi_moved_aside(install.InstallEnv(install.PLAIN, tmp_path, "py")) as moved:
+    with install._moxi_moved_aside(install.InstallEnv(install.PLAIN, tmp_path, "py")) as moved:
         assert [p.parent for p in moved] == [scripts]
         path.unlink()
     assert list(scripts.iterdir()) == []

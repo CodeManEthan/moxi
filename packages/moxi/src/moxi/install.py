@@ -20,7 +20,7 @@
    depending module's version range applies. `--from` gives requirements with a direct
    URL (`moxi-turns @ git+...`), for before PyPI holds the modules: give one for each Moxi
    distribution the module needs that the environment lacks. On Windows the executables
-   the running `moxi` can be are moved aside for the command's run (`moxi_moved_aside`),
+   the running `moxi` can be are moved aside for the command's run (`_moxi_moved_aside`),
    since Windows refuses to remove or write over a running one.
 3. Run the settle step of each module the step installed, in a fresh process
    (`moxi._settle`): the move of its data out of an old host folder, its `SETUP`, and its
@@ -446,7 +446,7 @@ def _quote(arg: str) -> str:
 
 
 #: Put between a `moxi` executable's name and a hex part when it is moved aside on Windows.
-ASIDE_MARK = ".old-"
+_ASIDE_MARK = ".old-"
 _WINDOWS = sys.platform == "win32"
 
 
@@ -464,7 +464,7 @@ def _moxi_executables(env: InstallEnv) -> list[Path]:
 
 
 @contextmanager
-def moxi_moved_aside(env: InstallEnv) -> Iterator[list[Path]]:
+def _moxi_moved_aside(env: InstallEnv) -> Iterator[list[Path]]:
     """On Windows, while the install or uninstall command runs: each executable a running
     `moxi` can be is renamed to `<name>.old-<hex>` and a copy put back in its place.
     Yields the renamed files.
@@ -495,14 +495,14 @@ def moxi_moved_aside(env: InstallEnv) -> Iterator[list[Path]]:
     gc.collect()
 
     for path in _moxi_executables(env):
-        for left in path.parent.glob(f"{path.name}{ASIDE_MARK}*"):
+        for left in path.parent.glob(f"{path.name}{_ASIDE_MARK}*"):
             try:
                 left.unlink()
             except OSError:
                 pass
         if not path.is_file():
             continue
-        aside = path.with_name(f"{path.name}{ASIDE_MARK}{secrets.token_hex(4)}")
+        aside = path.with_name(f"{path.name}{_ASIDE_MARK}{secrets.token_hex(4)}")
         try:
             path.rename(aside)
         except OSError:
@@ -827,7 +827,7 @@ class Installer:
             with tempfile.TemporaryDirectory(prefix="moxi-install-") as scratch:
                 argv, extra_env, _ = tool_command(env.receipt, env.prefix, reqs, uv,
                                                   Path(scratch))
-                with moxi_moved_aside(env):
+                with _moxi_moved_aside(env):
                     code = run(argv, extra_env)
         else:
             sourced = []
@@ -836,7 +836,7 @@ class Installer:
                 sourced.append(source.merged(req) if source else req)
             reqs = sourced
             argv = _plain_command(reqs)
-            with moxi_moved_aside(env):
+            with _moxi_moved_aside(env):
                 code = run(argv)
         if code != 0:
             print(f"moxi install: the install failed (exit {code}); nothing was set up.",

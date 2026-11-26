@@ -15,8 +15,9 @@ The first form runs `ARGV` behind a switch. In order:
    value that is not a bool, or a segment of the key that holds a non-table where a
    table is needed: one run line, result `unreadable`, exit 3, so the supervisor marks the
    run failed. Without `--if` (a run-time timer with no switch) this step is skipped.
-3. The command runs with the gate's stdin, stdout and stderr. One that cannot start
-   gives the run line `not-started` and exit 127.
+3. The command runs with the gate's stdin, stdout and stderr (on Windows a gate with a
+   console shares it with the command; one with none starts the command with no window).
+   One that cannot start gives the run line `not-started` and exit 127.
 4. One run line goes to `STATE/<module>/runs.jsonl` through `moxi.files.append_record`
    (a 1 MB cap and one rolled generation): `{"unit": "notes/snapshot", "at": "<UTC
    start>", "seconds": 1.42, "result": "ran" | "off" | "unreadable" | "not-started",
@@ -417,7 +418,8 @@ def _once(args: Args, stopper: _Stopper) -> tuple[int, float]:
     if _WINDOWS:
         from .proc import _CREATE_SUSPENDED
 
-        options["creationflags"] = subprocess.CREATE_NO_WINDOW | _CREATE_SUSPENDED
+        options["creationflags"] = _CREATE_SUSPENDED | (
+            0 if log is None and _has_console() else subprocess.CREATE_NO_WINDOW)
         if log is None:
             options.update(_given_stdio())
     try:
@@ -452,11 +454,25 @@ def _once(args: Args, stopper: _Stopper) -> tuple[int, float]:
     return code, lasted
 
 
+def _has_console() -> bool:
+    """Windows: whether the gate's stdin, stdout or stderr is a console. The command then
+    shares the gate's console, as a command run by hand in a terminal does; otherwise it
+    starts with `CREATE_NO_WINDOW`, so a timer's run opens no window."""
+    for fd in (0, 1, 2):
+        try:
+            if os.isatty(fd):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _given_stdio() -> dict[str, int]:
     """Windows: the gate's own stdin, stdout and stderr that are a file or a pipe, to give
     the command by name. A command started with `CREATE_NO_WINDOW` gets a console of its
     own, so without them it reads and writes that hidden console, not the gate's. A
-    console or a closed descriptor is left out, and the command keeps its own there."""
+    console or a closed descriptor is left out: a command that shares the gate's console
+    (`_has_console`) reaches it through its own handles."""
     given = {}
     for name, fd in (("stdin", 0), ("stdout", 1), ("stderr", 2)):
         try:

@@ -395,12 +395,14 @@ def _spawn_watched(argv: Argv, *, env, cwd, stdout, stderr) -> subprocess.Popen:
         proc = subprocess.Popen(_argv(argv), stdout=stdout, stderr=stderr,
                                 env=_lifeline_env(env, None), cwd=cwd,
                                 creationflags=_CREATE_SUSPENDED)
-        job = _win.Job(kill_on_close=True)
+        job = None
         try:
+            job = _win.Job(kill_on_close=True)
             _join_job(proc, job)
         except BaseException:
-            job.close()
-            proc.kill()
+            if job is not None:
+                job.close()
+            proc.kill()   # suspended, or out of a job: it never runs unwatched
             proc.wait()
             raise
         proc.lifeline = job

@@ -890,3 +890,52 @@ def test_importing_paths_loads_nothing_it_defers():
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
                          check=True).stdout
     assert out.strip() == ""
+
+
+# -- a link's target ----------------------------------------------------------------------
+
+@pytest.mark.parametrize(("kept", "spelled"), [
+    ("\\\\?\\C:\\Users\\you\\dotfiles\\CLAUDE.md", "C:\\Users\\you\\dotfiles\\CLAUDE.md"),
+    ("\\\\?\\UNC\\server\\share\\notes", "\\\\server\\share\\notes"),
+    ("C:/Users/you/skills/tidy", "C:\\Users\\you\\skills\\tidy"),
+    ("../../skills/tidy", "..\\..\\skills\\tidy"),
+    ("\\\\?\\Volume{0b1c}\\notes", "\\\\?\\Volume{0b1c}\\notes"),
+])
+def test_a_link_target_on_windows_is_spelled_as_windows_spells_a_path(monkeypatch, kept,
+                                                                     spelled):
+    monkeypatch.setattr(paths, "_WINDOWS", True)
+    monkeypatch.setattr(os, "readlink", lambda path: kept)
+    assert paths.link_target("link") == spelled
+
+
+@POSIX
+def test_a_link_target_elsewhere_is_what_readlink_reads(tmp_path):
+    (tmp_path / "link").symlink_to("../a/b")
+    assert paths.link_target(tmp_path / "link") == "../a/b"
+
+
+def test_a_links_target_reads_as_the_path_it_was_made_from(tmp_path):
+    from moxi_dev.testing import need_symlinks
+
+    need_symlinks()
+    target = tmp_path / "dotfiles" / "CLAUDE.md"
+    target.parent.mkdir()
+    target.write_text("# rules\n")
+    (tmp_path / "abs").symlink_to(target)
+    (tmp_path / "rel").symlink_to(os.path.join("dotfiles", "CLAUDE.md"))
+    assert paths.link_target(tmp_path / "abs") == str(target)
+    assert paths.link_target(tmp_path / "rel") == os.path.join("dotfiles", "CLAUDE.md")
+
+
+@WINDOWS
+def test_a_junctions_target_reads_as_the_path_it_was_made_from(tmp_path):
+    import _winapi
+
+    (tmp_path / "skills").mkdir()
+    _winapi.CreateJunction(str(tmp_path / "skills"), str(tmp_path / "joined"))
+    assert paths.link_target(tmp_path / "joined") == str(tmp_path / "skills")
+
+
+def test_a_path_that_is_no_link_raises():
+    with pytest.raises(OSError):
+        paths.link_target(__file__)

@@ -15,6 +15,7 @@ import types
 
 import pytest
 
+from conftest import link_text
 from moxi import place
 from moxi.place import Item
 from test_place import ledger, one, set_core, skill  # noqa: F401
@@ -81,7 +82,7 @@ def test_a_held_dir_links_relative_when_symlinks_are_allowed(project):
     assert (step.form, step.note) == ("link", None)
     place.apply([step])
     assert os.path.islink(dest) and not os.path.isjunction(dest)
-    assert os.readlink(dest) == os.path.join("..", "..", "skills", "tidy")
+    assert link_text(dest) == os.path.join("..", "..", "skills", "tidy")
     assert (dest / "SKILL.md").read_text() == "# send\n"
     one(place.plan("loadout", [item]), "keep")
     place.apply(place.plan("loadout", []))

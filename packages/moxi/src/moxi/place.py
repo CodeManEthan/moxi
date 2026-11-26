@@ -642,7 +642,7 @@ class _Planner:
         if made != form:
             return self._step(item, key, "update", None, f"{item.name}: now a {form}",
                               form=form, note=note)
-        if os.readlink(key) != _link_text(item, source, key) and made == "link":
+        if _link_said(key) != _link_text(item, source, key) and made == "link":
             return self._step(item, key, "update", None, f"{item.name}: the source moved",
                               form=form, note=note)
         if not _same(pointed, source):
@@ -778,12 +778,16 @@ def _is_link(path: str) -> bool:
     return os.path.islink(path) or _is_junction(path)
 
 
+def _link_said(path: str) -> str:
+    """The target the link or junction at `path` holds, as this system spells a path."""
+    from .paths import link_target
+
+    return link_target(path)
+
+
 def _link_points(path: str) -> str:
     """Where the link or junction at `path` points, as an absolute path."""
-    text = os.readlink(path)
-    if text.startswith("\\\\?\\"):
-        text = text[4:]
-    return os.path.normpath(os.path.join(os.path.dirname(path), text))
+    return os.path.normpath(os.path.join(os.path.dirname(path), _link_said(path)))
 
 
 def _same(a: str, b: str) -> bool:
@@ -793,10 +797,11 @@ def _same(a: str, b: str) -> bool:
 
 def _link_text(item: Item, source: str, key: str) -> str:
     """What a link of `item` at `key` says: relative for a held item, so it survives the
-    project tree moving; else the absolute source."""
+    project tree moving; else the absolute source. On Windows a `/` in it is spelled `\\`,
+    as `moxi.paths.link_target` reads a link back."""
     if item.held:
         return os.path.relpath(os.path.realpath(source), os.path.dirname(key))
-    return source
+    return source.replace("/", "\\") if _WINDOWS else source
 
 
 def _symlink_allowed(link_dir: str) -> bool:

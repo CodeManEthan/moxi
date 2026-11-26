@@ -2034,7 +2034,7 @@ def test_a_reinstall_keeps_placements_the_module_did_not_make_from_its_package(
         assert "removed skill comms-send" not in out and "proj-skill" not in out
         assert {k: owned(sk)["placed"][k] for k in keep} == before
         assert link_text(sk.claude("comms-send")) == str(other)
-        assert os.readlink(dest) == os.path.relpath(held, dest.parent)
+        assert link_text(dest) == os.path.relpath(held, dest.parent)
         sk.module()
     assert {str(p.path) for p in place.status("demo")} == keep
 

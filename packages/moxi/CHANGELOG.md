@@ -2,6 +2,20 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.paths.link_target(path)`: the target a link or junction holds, spelled as the
+  system spells a path. On Windows `os.readlink` gives an absolute target as
+  `\\?\C:\...`, so the placer read every one-file link it had made as "the source
+  moved" and replaced it on every run, wherever the account can make symlinks (Developer
+  Mode, an administrator, CI). The placer and `moxi uninstall` read a link's target
+  through it.
+- On Windows `moxi run` hands the command the gate's stdin, stdout and stderr when they
+  are a file or a pipe, and a gate run from a terminal shares its console with the
+  command. The command started with no window of its own, so it read and wrote a hidden
+  console, and a supervisor's log or a caller's pipe got nothing.
+- On Windows a watched `proc.spawn` whose Job Object can't be made kills the child it
+  started suspended and raises, where the child was left suspended for good.
+- On Windows `files.append_record` raises an error from the byte lock it holds while it
+  writes other than another holder's, where it retried it every 2 ms for ever.
 - On Windows `proc.run`, a watched `proc.spawn` and `moxi run` start the child suspended
   and let it run only once it is in its Job Object. It was put there just after it
   started, so a child that started a process of its own at once (Git for Windows'
@@ -50,8 +64,9 @@
   still do. A client and a server of different versions don't meet across this change.
 - `moxi.ipc.lock_path(address)` is public: the lock file a server holds while it serves
   `address`, beside a Unix socket, and for a Windows pipe in the module's runtime folder.
-- The start mark names a module run as `python -X <option> -m <module>` (or with `-W`)
-  `python -m <module>`, as it does without the option, where it named the script's file.
+- The start mark names a module run with an option before `-m` (`python -X <option> -m
+  <module>`, or `-W`) as `python -m <module>`, as it names one run without the option. It
+  named the script's file.
 - `moxi config` reaches a table a module keeps in a file of its own. A module names it in
   its announcement's new `CONFIG_TABLES` (`{name: "package.module:NAME"}`; `moxi modules
   --json` lists it as `config_tables`), and the hook it names lists the table's rows and
