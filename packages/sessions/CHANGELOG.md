@@ -6,7 +6,9 @@
   in place of a splitter of its own, and finds the scripts a command hands a shell with
   turns' `shell_scripts` in place of its own `-c` finder. It now reads a `$(...)` inside
   double quotes (`echo "$(cat <transcript>)"` is refused) and `$'...'` as the shell does,
-  so a command after one is no longer missed. It reads more scripts, each in its shell's
+  so a command after one is no longer missed. Each word bash makes of an unquoted `${...}`
+  default or alternate is judged as a word (`cat ${x:- <transcript> }` and
+  `cat ${x:-<transcript>}` are refused). It reads more scripts, each in its shell's
   language: a heredoc or here-string fed to a shell, literal text `echo` or `cat` pipes
   into one, `pwsh` and `powershell` scripts, `cmd /c` scripts, and `-c` after long
   options or with an option that takes a value (`bash --login -c`, `bash -co pipefail`).

@@ -173,6 +173,15 @@ def test_text_between_two_substitutions_that_starts_a_path_is_judged(home):
         assert not refused("Bash", {"command": command}, home), command
 
 
+def test_each_word_bash_splits_a_default_into_is_judged(home):
+    t = transcript(home)
+    for command in (f"cat ${{x:- {t} }}", f"cat ${{x:- {t} }}cmd", f"cat ${{x:-{t}}}",
+                    f"cat ${{y:+ a {t} }}", f"cat < ${{x:- {t} }}"):
+        assert refused("Bash", {"command": command}, home), command
+    for command in (f'cat "${{x:- {t} }}"', f"X=${{x:- {t} }} true"):
+        assert not refused("Bash", {"command": command}, home), command
+
+
 def test_a_quote_inside_a_value_s_double_quotes_ends_no_command(home):
     t = transcript(home)
     for command in (f"echo ${{x:-\"it's\"}}; cat {t}", f'echo ${{HOME:-"}}"}}; cat {t}'):

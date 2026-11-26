@@ -402,7 +402,9 @@ transcript root: Claude Code's Read, Grep and Glob, and a shell command on Claud
 Codex. turns' shell reader splits a shell command into simple commands, each judged on its
 own, and so are the commands of each substitution in it, a `$(...)` in double quotes or
 in an unquoted heredoc's body included; one is refused when one of its words, or the file
-one of its redirects names, is such a path. A script a command hands a shell is read the
+one of its redirects names, is such a path. Where bash splits an unquoted `${...}`
+default or alternate into words (`cat ${x:- <transcript> }`), each of them is judged as a
+word. A script a command hands a shell is read the
 same way, in that shell's language: a `-c` argument (`bash -lc`, `bash --login -c`,
 `bash -co pipefail`), a heredoc or here-string fed to a shell, literal text `echo` or
 `cat` pipes into one, and `pwsh -Command` and `cmd /c` scripts. The refusal points the

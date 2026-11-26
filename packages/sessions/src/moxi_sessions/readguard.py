@@ -16,7 +16,9 @@ the call run) or turns' `Deny(reason)`, whose reason names `moxi sessions read <
   double quotes included; one is refused when one of its words, or the file one of its
   redirects names, is such a path. A word is read as a path when it starts with `/`, `~`, `$HOME`
   or `${HOME}`, or holds a `/` (then it is joined to the working directory); a word
-  `--name=value` or `NAME=value` is read by its value too. Each script a command hands a
+  `--name=value` or `NAME=value` is read by its value too, and each word bash splits a
+  word into where a `${...}` default or alternate outside double quotes is used (turns'
+  `fields`: `cat ${x:- <path> }` names `<path>`) is judged as a word. Each script a command hands a
   shell, as turns' `shell_scripts` finds it (a `-c`, `-Command` or `/c` argument, or a
   heredoc, here-string or literal text piped into a shell), is read the same way in that
   shell's dialect, down to `DEPTH` scripts deep, and the words it was made from are not
@@ -353,8 +355,9 @@ def _values(word: str) -> Iterator[str]:
 
 def commands(text: object, dialect: str = "sh", depth: int = DEPTH) -> list[list[str]]:
     """The simple commands of a shell call's `text`, read in `dialect` by turns' shell
-    reader, each as its words with quotes taken off and then the word each of its
-    redirects names (so `wc -l < f` names `f`).
+    reader, each as its words with quotes taken off, then the word each of its
+    redirects names (so `wc -l < f` names `f`), then the words bash splits those into
+    where a `${...}` default is used (each word's `fields`).
 
     The commands of each substitution in a command, a word's, a redirect's or an unquoted
     heredoc's body's, follow it, read at the same `depth`: a substitution runs in the same
@@ -378,7 +381,11 @@ def commands(text: object, dialect: str = "sh", depth: int = DEPTH) -> list[list
         own = [script for script in scripts if script.command_index == index]
         taken = {i for script in own for i in script.word_indexes}
         words = [w.text for i, w in enumerate(command.words) if i not in taken]
-        words += [r.target.text for r in command.redirects if r.target is not None]
+        targets = [r.target for r in command.redirects if r.target is not None]
+        words += [target.text for target in targets]
+        words += [f for i, w in enumerate(command.words) if i not in taken
+                  for f in w.fields]
+        words += [f for target in targets for f in target.fields]
         if words:
             out.append(words)
         subs = [sub for w in command.words for sub in w.subs]
