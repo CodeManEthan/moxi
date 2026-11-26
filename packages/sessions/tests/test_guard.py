@@ -164,6 +164,15 @@ def test_text_after_a_substitution_that_starts_a_path_is_judged(home):
     assert not refused("Bash", {"command": "cat $(x)/work/project/notes.md"}, home)
 
 
+def test_text_between_two_substitutions_that_starts_a_path_is_judged(home):
+    t = transcript(home)
+    for command in (f"cat $(true){t}$(true)", f"cat x$(true){t}$(true)y",
+                    f"cat $(a)$(b){t}", f"y=$(a){t}$(b)"):
+        assert refused("Bash", {"command": command}, home), command
+    for command in ("cat $(x)/work/project/notes.md$(y)", "cat $(x)notes$(y)/work"):
+        assert not refused("Bash", {"command": command}, home), command
+
+
 def test_a_quote_inside_a_value_s_double_quotes_ends_no_command(home):
     t = transcript(home)
     for command in (f"echo ${{x:-\"it's\"}}; cat {t}", f'echo ${{HOME:-"}}"}}; cat {t}'):

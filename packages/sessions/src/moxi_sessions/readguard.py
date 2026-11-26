@@ -40,8 +40,8 @@ process, which is no tool call, so the guard never sees them.
 
 **A nudge, not a boundary.** A relative path after `cd`, a variable, a path built at run
 time, a heredoc's body fed to anything but a shell, or a script file gets past it. Of a word that holds a
-substitution, the text before its first one is judged, and the text after its last one
-when that starts with `/`, `~`, `$HOME` or `${HOME}`.
+substitution, the text before its first one is judged, and so is the text after each one,
+up to the next, when that starts with `/`, `~`, `$HOME` or `${HOME}`.
 
 **Fail open.** Every error is logged once per kind and the call is allowed; the guard's
 `on_error` is `allow` as well, so one fault never refuses every read everywhere. sessions'
@@ -85,7 +85,7 @@ DENY = (
 
 _GLOB = "*?["
 _HOME_PREFIXES = ("${HOME}", "$HOME", "~")
-#: How the text after a word's last substitution starts when it is judged as a path.
+#: How the text after one of a word's substitutions starts when it is judged as a path.
 _TAIL_STARTS = ("/", *_HOME_PREFIXES)
 _said: set[str] = set()
 _lock = _thread.allocate_lock()
@@ -335,17 +335,18 @@ def _pathlike(word: str) -> bool:
 
 def _values(word: str) -> Iterator[str]:
     """The word, and the value of a `--name=value` or `NAME=value` word; for each that
-    holds a substitution (a NUL), also the text after its last one when that starts like
-    an absolute path (`$(x)/<path>`, `$(x)$HOME/<path>`)."""
+    holds a substitution (a NUL), also the text after each one, up to the next, when that
+    starts like an absolute path (`$(x)/<path>`, `$(x)$HOME/<path>`,
+    `$(x)/<path>$(y)`)."""
     found = [word]
     name, eq, value = word.partition("=")
     if eq and value and "/" not in name:
         found.append(value)
     for each in found:
         yield each
-        tail = each.rpartition("\0")[2]
-        if tail != each and tail.startswith(_TAIL_STARTS):
-            yield tail
+        for piece in each.split("\0")[1:]:
+            if piece.startswith(_TAIL_STARTS):
+                yield piece
 
 
 # --- the shell --------------------------------------------------------------------------
