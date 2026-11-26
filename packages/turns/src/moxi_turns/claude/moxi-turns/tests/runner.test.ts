@@ -744,7 +744,15 @@ describe('the other lines', () => {
       { id: 'a', type: 'Explore', status: 'running' },
       { id: 'b', type: 'fork', status: 'waiting', parentId: 'a' },
       { id: 'c', type: 'teammate', status: 'idle', teammateId: 'ann@crew' },
-    ], draft: true })
+    ], draft: true, box: 'draft' })
+  })
+
+  test('live: an unreadable box is sent as a draft with box null, told apart from a draft', async ($: E, on) => {
+    const w = world(on)
+    await attached($, w)
+    w.promptFail = true
+    await w.line({ op: 'live', ask: 9 })
+    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 9, agents: [], draft: true, box: null })
   })
 
   test('live: an unreadable subagent list is sent as null, never 0', async ($: E, on) => {
@@ -752,7 +760,7 @@ describe('the other lines', () => {
     w.agentsFail = true
     await attached($, w)
     await w.line({ op: 'live', ask: 8 })
-    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 8, agents: null, draft: false })
+    expect(w.got.find(g => g.path === '/live')?.body).toEqual({ ask: 8, agents: null, draft: false, box: 'empty' })
   })
 
   test('agents: the list as the engine gives it, answered on /agents', async ($: E, on) => {

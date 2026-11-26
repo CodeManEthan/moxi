@@ -142,7 +142,7 @@ from .guards import ToolCall
 from .guards import seen as guards_seen
 from .guards.run import GuardRunner, prompts_of
 from .harness import CommandRequest, Delivery, Harness, Live
-from .results import (Agent, Agents, COMMAND_REFUSALS, LOST_DENIED, LOST_GONE, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
+from .results import (Agent, Agents, BOX_STATES, COMMAND_REFUSALS, LOST_DENIED, LOST_GONE, LOST_UNTIED, OUTCOMES, SHELL_UNLISTED, Failed,
                       LeftShell, Passed, Ran, Refused, Shells, StopFacts)
 
 log = logging.getLogger("moxi.turns.claude")
@@ -332,7 +332,10 @@ class ClaudeHarness(Harness):
             raise OSError(f"the runner's live answer is malformed: {answer!r}")
         if isinstance(agents, list):
             agents = self._judged(agents).busy()
-        return Live(agents=agents, draft=draft)
+        # `box`: `draft` or `empty` when the runner read the box, null when it could not.
+        # An older runner sends none, and its box reads as not read.
+        box = answer.get("box")
+        return Live(agents=agents, draft=draft, box=box if box in BOX_STATES else None)
 
     def agents(self) -> Agents:
         """The runner's `$.agent.list()`, read on this call; the states are mapped and the

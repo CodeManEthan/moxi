@@ -19,7 +19,7 @@ classifiers = [
 ]
 # repo runs the git hook pieces; secrets holds the pattern sets and lists they read.
 # packaging reads the versions and requirements a release is judged by.
-dependencies = ["moxi>=0.1.11,<0.2", "moxi-repo>=0.1.2,<0.2", "moxi-secrets>=0.1,<0.2",
+dependencies = ["moxi>=0.1.11,<0.2", "moxi-repo>=0.1.3,<0.2", "moxi-secrets>=0.1,<0.2",
                 "packaging"]
 
 [project.optional-dependencies]
