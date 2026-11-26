@@ -21,8 +21,8 @@ or the name template reaches it:
 What Claude Code's docs leave unconfirmed is probed on the machine (`ensure`), at the
 first chat recall after each change of the `claude` binary the launcher would start:
 `flags`, that this Claude Code takes every flag above together (`FENCE_MIN_VERSION` at
-least); `tools`, that the session's tools are exactly `fence_tools`; and `mcp`, that no
-MCP server is connected. The probe composes the recall's own request with the brief
+least); `tools`, that the session's tools are within `fence_tools` and include the read
+tools; and `mcp`, that no MCP server is connected. The probe composes the recall's own request with the brief
 `PROBE_PROMPT` and stream output that keeps no transcript, runs it detached in a session
 of its own, reads its output to the first `system/init` object, at most `PROBE_S`
 seconds, ends its process tree, and judges that object.
@@ -67,6 +67,9 @@ READ_TOOLS = ("Read", "Grep", "Glob")
 WEB_TOOLS = ("WebFetch", "WebSearch")
 #: The tool no flag can remove; it only ends the session.
 END_TOOL = "EndConversation"
+#: Claude Code's built-in tools a session may have beside the fence's own, each harmless:
+#: none reads, runs or writes anything. A session may lack any of them.
+HARMLESS_TOOLS = (END_TOOL,)
 #: The deny rule that removes every MCP tool from the session.
 NO_MCP = "mcp__*"
 #: The permission mode in which every call that would ask is denied.
@@ -109,8 +112,9 @@ def chat_dir(env: Mapping[str, str] | None = None) -> Path:
 
 
 def fence_tools(*, web: bool = False) -> frozenset[str]:
-    """The tools a chat recall's session has, exactly."""
-    return frozenset((*READ_TOOLS, END_TOOL, *(WEB_TOOLS if web else ())))
+    """The bound on a chat recall's session's tools: a session passes with any of these
+    and no other, as long as it has every one of `READ_TOOLS`."""
+    return frozenset((*READ_TOOLS, *HARMLESS_TOOLS, *(WEB_TOOLS if web else ())))
 
 
 def fence_flags(*, max_tools: int) -> tuple[str, ...]:
@@ -441,9 +445,9 @@ def judge(init: dict | None, text: str, *, exited: bool,
         why = "it exited" if exited else f"none came within {PROBE_S:.0f} s"
         return None, f"no system/init: {why}" + (f" ({last.strip()[:200]})" if last else "")
     tools = {str(t) for t in init.get("tools") or ()}
-    want = fence_tools(web=web)
-    if tools != want:
-        extra, missing = sorted(tools - want), sorted(want - tools)
+    bound = fence_tools(web=web)
+    extra, missing = sorted(tools - bound), sorted(set(READ_TOOLS) - tools)
+    if extra or missing:
         words = [f"extra {', '.join(extra)}"] if extra else []
         words += [f"missing {', '.join(missing)}"] if missing else []
         return TOOLS, "the session's tools are not the fence's: " + "; ".join(words)
@@ -516,7 +520,7 @@ def _quiet(call):
 
 
 __all__ = ["BUDGET_USD", "CHAT_DIR", "END_TOOL", "FENCE", "FENCE_LOCK", "FENCE_MIN_VERSION",
-           "FENCE_RECORD", "FLAGS", "HARNESS", "JSON_OUTPUT", "MCP", "NO_HARNESS", "NO_MCP",
+           "FENCE_RECORD", "FLAGS", "HARMLESS_TOOLS", "HARNESS", "JSON_OUTPUT", "MCP", "NO_HARNESS", "NO_MCP",
            "NO_OUTCOME", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
            "PROBE_S", "READ_TOOLS", "TARGET", "TOOLS", "WEB_TOOLS", "Binary", "Outcome",
            "Spec", "Verdict", "binary", "chat_dir", "end_tree", "ensure", "fence_flags",

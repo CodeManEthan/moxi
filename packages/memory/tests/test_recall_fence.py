@@ -136,12 +136,37 @@ def test_the_request_carries_every_fence_flag_and_nothing_of_the_defaults():
     assert "acceptEdits" not in words
 
 
-@pytest.mark.xfail(strict=True, reason="turns' launch additions add allow rules and "
-                   "plugin folders to every Claude launch without comms")
-def test_the_request_carries_no_allow_rule_without_the_web():
-    words = argv(spec())
+def moxi_additions() -> list[str]:
+    """The words Moxi's own launcher additions (turns') give a Claude launch without
+    comms here; none when turns can't give them."""
+    from moxi_launcher import compose
+
+    try:
+        return list(compose.launch_additions(cwd=str(fence.chat_dir()), env=os.environ,
+                                             session_id=SID).argv)
+    except Exception:  # noqa: BLE001 - turns not reachable: it adds nothing
+        return []
+
+
+def without(words: list[str], part: list[str]) -> list[str]:
+    """`words` with the run `part` taken out once, where it appears."""
+    for i in range(len(words) - len(part) + 1):
+        if part and words[i:i + len(part)] == part:
+            return words[:i] + words[i + len(part):]
+    return list(words)
+
+
+def test_no_allow_rule_or_plugin_comes_from_the_users_install_or_the_project():
+    presets = Layout("launcher").config_dir() / "presets.toml"
+    presets.parent.mkdir(parents=True, exist_ok=True)
+    presets.write_text('[defaults]\nallowed_tools = ["Bash(rm:*)"]\n', encoding="utf-8")
+    project = fence.chat_dir() / ".claude"
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "settings.json").write_text('{"permissions": {"allow": ["Bash"]}}')
+    words = without(argv(spec()), moxi_additions())
     assert not any(w.startswith("--allowedTools") for w in words)
     assert "--plugin-dir" not in words
+    assert not any("rm:*" in w for w in argv(spec()))
 
 
 def test_the_web_adds_its_two_tools_with_an_allow_rule_for_them():
@@ -150,6 +175,22 @@ def test_the_web_adds_its_two_tools_with_an_allow_rule_for_them():
     assert "WebFetch" in words and "WebSearch" in words
     assert fence.fence_tools(web=True) == {"Read", "Grep", "Glob", "EndConversation",
                                            "WebFetch", "WebSearch"}
+
+
+@pytest.mark.parametrize("tools,web,part", [
+    (["Read", "Grep", "Glob"], False, None),
+    (["Read", "Grep", "Glob", "EndConversation"], False, None),
+    (["Read", "Grep", "Glob", "WebFetch"], True, None),
+    (["Read", "Grep", "Glob", "WebFetch"], False, "tools"),
+    (["Read", "Grep"], False, "tools"),
+    (["Read", "Grep", "Glob", "Bash"], False, "tools"),
+])
+def test_the_tools_part_checks_a_bound_not_an_exact_set(tools, web, part):
+    got, detail = fence.judge({"tools": tools, "mcp_servers": []}, "", exited=False,
+                              web=web)
+    assert got == part
+    if part:
+        assert ("missing Glob" in detail) or ("extra " in detail)
 
 
 def test_every_other_settable_row_is_left_out():
@@ -178,8 +219,8 @@ def test_the_expected_init_passes_and_is_recorded_for_the_binary(claude):
 @POSIX
 @pytest.mark.parametrize("plan,part,named", [
     ({"init": {"tools": [*PASSING["tools"], "Bash"], "mcp_servers": []}}, "tools", "Bash"),
-    ({"init": {"tools": ["Read", "Grep", "Glob"], "mcp_servers": []}}, "tools",
-     "missing EndConversation"),
+    ({"init": {"tools": ["Read", "Grep", "EndConversation"], "mcp_servers": []}},
+     "tools", "missing Glob"),
     ({"init": {**PASSING, "mcp_servers": [{"name": "notes", "status": "connected"}]}},
      "mcp", "notes"),
     ({"stderr": "error: unknown option '--safe-mode'", "exit": 1}, "flags", "--safe-mode"),
