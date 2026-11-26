@@ -49,6 +49,32 @@ so and, when it has stopped or never ran, gives the command that starts it. The 
 says nothing it did not read: a fact that is missing is not drawn. The chip, one
 session's cache age, stays offered to other pages.
 
+Where the launcher module is installed, the page also reads launcher's `/api/running` and
+`/api/state` when it opens and when its tab is shown again, and at the desk follows
+launcher's topics `running` and `sessions`. A row that a running launch holds (the same
+harness and session id) is named by the launch where no name was typed for it, and where
+it runs leads its first line: `slot 4 · atlas-api`, `terminal · kestrel-web`. While its
+cache is warm, launcher's keep-warm case speaks for it: `kept warm while 1 agent works`
+when something keeps it warm; when it waits on other agents with nothing keeping it warm,
+`goes cold at <time>` and `waiting on 2 agents`, the row first among the warm ones and,
+at the desk, `Keep warm`, which posts the launch to launcher's `/api/keep-warm`. Opened, its
+`Session` line gives the effort it was launched with, and a `Keep warm` line says whether
+keep-warm is on and what it holds for. The times of launcher's next keep-alive are not
+drawn, as launcher serves none.
+
+Where the usage module is installed, the page reads usage's `/api/session` for each
+session with a clock time (again when its last request moves, when the tab is shown and
+every 60 seconds) and usage's `/api/prices` for those sessions' models. Line two then ends
+in what going cold costs, `about $0.57 to re-read if cold` (on a cold row, `… to re-read
+on its next turn`), and an opened row has an `If cold` line, the tokens its next turn
+re-reads and what that costs cold or warm, with a `Usage` link to the session on usage's
+page. The cost is the session's context times the model's cache-write price for the
+lifetime its record counts; where usage has no context, model or price for it, no cost is
+drawn.
+
+Without launcher or usage, or while one of their reads fails, that module's pieces are not
+drawn, nothing stands in their place, and the page reads as it does without them.
+
 Its settings are `claude.ttl_s`, `lifetime` (your own lifetime table rows),
 `watch.tick_s`, `segment.warn_before_s` and `timer.subscriber`; `moxi config cache` shows
 them.
