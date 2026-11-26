@@ -18008,6 +18008,7 @@ moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = self.system.system
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, group = self.system.systemctl("show", "--property=ControlGroup", "--value",	keep	show	show
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, group = system.systemctl("show", "--property=ControlGroup", "--value")	keep	show	show
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = system.systemctl("show", "--property=Version", "--value")	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = self.system.systemctl("show", "--property=ControlGroup",	keep	show	show
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	ended: set[int] = set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	self._done.set()	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_check_scope.py	assert any("pytest" in cmd for cmd, _, _ in in_repo.calls)	keep	any	any
