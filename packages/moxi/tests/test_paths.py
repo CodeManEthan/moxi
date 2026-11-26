@@ -356,6 +356,66 @@ def test_the_host_name_comes_without_the_socket_module():
     assert paths._host_name() == os.uname().nodename
 
 
+# -- platform's uname, without a WMI query ------------------------------------------------
+
+def wmi_recorder(monkeypatch):
+    """`platform` with its cached uname cleared and its WMI query replaced by one that
+    records each call and fails as a query that timed out does."""
+    import platform
+
+    asked = []
+
+    def query(*keys):
+        asked.append(keys)
+        raise OSError("timed out")
+
+    monkeypatch.setattr(platform, "_uname_cache", None)
+    monkeypatch.setattr(platform, "_wmi_query", query, raising=False)
+    return asked, query
+
+
+def test_uname_fills_platform_without_a_wmi_query_and_puts_the_query_back(monkeypatch):
+    import platform
+
+    asked, query = wmi_recorder(monkeypatch)
+    answer = paths.uname()
+    assert asked == [] and platform._wmi_query is query
+    assert platform._uname_cache is answer
+    assert [platform.system(), platform.node(), platform.release(), platform.version(),
+            platform.machine()] == list(answer[:5])
+    if sys.platform == "win32":
+        assert platform.processor() == answer.processor
+    assert asked == []
+
+
+def test_the_host_name_reads_platform_without_a_wmi_query(monkeypatch):
+    asked, _ = wmi_recorder(monkeypatch)
+    assert paths._host_name()
+    assert asked == []
+
+
+def test_a_requirement_marker_reads_platform_without_a_wmi_query(monkeypatch):
+    from moxi import cli
+    from moxi._vendor.packaging.requirements import Requirement
+
+    asked, _ = wmi_recorder(monkeypatch)
+    assert cli._applies(Requirement('x; platform_machine != "no such machine"'), "")
+    assert asked == []
+
+
+@WINDOWS
+def test_on_windows_platform_asks_wmi_through_the_name_uname_replaces(monkeypatch):
+    """The tests beside this one pass when no query is recorded, and they would pass as
+    well if `platform` stopped asking through `_wmi_query` but still made the query: `uname`
+    would then refuse nothing, and the query thread it exists to keep from starting would
+    start. Here a plain `platform.uname()` must ask through that name."""
+    import platform
+
+    asked, _ = wmi_recorder(monkeypatch)
+    platform.uname()
+    assert asked, "platform.uname() made no query through platform._wmi_query"
+
+
 # -- the runtime directory and sockets ----------------------------------------------------
 
 @POSIX

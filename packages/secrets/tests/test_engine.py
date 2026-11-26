@@ -177,6 +177,22 @@ def test_platform_facts_survive_a_libc_that_will_not_answer(monkeypatch):
         assert engine.re2_wheel_fits(facts) is False
 
 
+def test_platform_facts_ask_platform_no_wmi_query(monkeypatch):
+    import platform
+
+    asked = []
+
+    def query(*keys):
+        asked.append(keys)
+        raise OSError("timed out")
+
+    monkeypatch.setattr(platform, "_uname_cache", None)
+    monkeypatch.setattr(platform, "_wmi_query", query, raising=False)
+    facts = engine.platform_facts()
+    assert asked == []
+    assert (facts["system"], facts["machine"]) == (platform.system(), platform.machine())
+
+
 @pytest.mark.parametrize("fits", [True, False])
 def test_optional_names_re2_exactly_where_a_wheel_fits(monkeypatch, fits):
     import runpy

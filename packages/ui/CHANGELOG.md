@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The loopback server fills `platform` before uvicorn starts through the core's
+  `moxi.paths.uname`, the same WMI-free read, in place of its own copy of it.
 - For module authors: `moxi_ui.testing`'s phone bridge ends a connection on `cut` and
   `stop` on Windows too. A shutdown there doesn't end a read another thread is waiting
   in, so a connection whose browser side stayed open was never ended; its pumps now

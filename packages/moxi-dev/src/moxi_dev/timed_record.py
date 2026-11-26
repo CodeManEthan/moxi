@@ -57,6 +57,8 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
+from moxi import paths
+
 from . import durations
 
 FORMAT = 1
@@ -77,7 +79,9 @@ class RecordError(Exception):
 
 
 def default_machine() -> str:
-    """The short host name: `platform.node()` up to its first dot."""
+    """The short host name: `platform.node()` up to its first dot, filled through
+    `moxi.paths.uname`, which makes no WMI query on Windows."""
+    paths.uname()
     return platform.node().split(".", 1)[0] or "unknown"
 
 

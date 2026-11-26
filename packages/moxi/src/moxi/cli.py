@@ -294,6 +294,9 @@ def _applies(req, extra: str) -> bool:
     """True when `req` is installed here with extra `extra` asked for ("" for none)."""
     if req.marker is None:
         return not extra
+    from . import paths
+
+    paths.uname()  # the marker reads `platform`; this fills it without a WMI query
     try:
         return req.marker.evaluate({"extra": extra})
     except (ValueError, KeyError):

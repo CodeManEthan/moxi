@@ -339,6 +339,13 @@ first process watches that process (`watch_parent`) and, once it has ended by an
 (a SIGKILL, a TerminateProcess), ends every process under it, SIGTERM and then SIGKILL,
 then on Linux and macOS its own process group, then itself.
 
+WMI. On Windows, each pytest process of a run (under xdist the controller and every
+worker) refuses `platform`'s WMI query for its whole life (`_refuse_wmi`), so `platform`
+answers from its own fallback. xdist's workers read `platform.platform()` as they start
+and the junit report reads `platform.node()`; CPython 3.12 asks WMI there on a thread of
+its own, and a query that outlasts its wait leaves that thread to close a handle it reads
+from the caller's gone stack frame (`moxi.paths.uname` says more), which killed workers.
+
 A seam with two implementations: `Seam` parametrizes a fixture over every
 implementation for the contract suites and gives the rest the default one.
 """
@@ -1352,7 +1359,26 @@ def _quiet_ports(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(_plan, "answers", _nothing_answers)
 
 
+def _refuse_wmi() -> None:
+    """Have `platform` make no WMI query in this process from now on (module doc, WMI):
+    its query refuses, as it does where Python has no `_wmi`. `platform.platform()` and
+    `win32_ver()` ask again on every call, so `moxi.paths.uname`'s fill alone can't keep
+    them from it."""
+    if not WINDOWS:
+        return
+    import platform
+
+    if getattr(platform, "_wmi_query", None) is None:
+        return
+
+    def refused(*_args: object) -> object:
+        raise OSError("not supported: the test kit refuses WMI queries")
+
+    platform._wmi_query = refused
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    _refuse_wmi()
     for name, line in MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {line}")
     config.addinivalue_line("markers", f"{LIFTED}: set by the kit on a tier test this "

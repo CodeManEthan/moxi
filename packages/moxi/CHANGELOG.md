@@ -2,6 +2,13 @@
 
 ## 0.1.11 (unreleased)
 
+- `moxi.paths.uname()`: `platform.uname()`, read on Windows without a WMI query, and the
+  core's host name and its requirement markers read `platform` through it. CPython 3.12
+  asks WMI on a thread of its own and gives the query up after a fraction of a second,
+  as it does wherever WMI is slow to answer the account; the thread then closes whatever
+  handle it reads from the caller's gone stack frame, so a Moxi process on Windows could
+  die with an access violation or have a file, pipe or socket closed under it seconds
+  later. With the query refused, `platform` answers from its own fallback.
 - On Windows `moxi install` and `moxi uninstall` work in the environment the running
   `moxi` lives in. Windows refuses to remove or write over a running executable, and uv's
   re-run of the `moxi` tool removes and writes its executables again, so the install

@@ -69,6 +69,8 @@ from pathlib import Path
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from moxi import paths
+
 from . import check, temp, timed_record
 from .durations import fcntl, msvcrt
 from .testing import (DURATIONS_ENV, FINDING_ENV, IDLE_ENV, TIERS_ENV, TIMED_ENV,
@@ -212,6 +214,7 @@ def _cpu_model() -> str:
         for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
             if line.startswith("model name"):
                 return line.split(":", 1)[1].strip()
+    paths.uname()  # fills platform without a WMI query on Windows
     return platform.processor() or "unknown"
 
 
@@ -392,7 +395,7 @@ class _Run:
             return
         first = next((gate.get("first_sample") for gate in gates
                       if gate.get("first_sample") is not None), None)
-        entry = {"started": started, "system": platform.system(), "cpu_model": _cpu_model(),
+        entry = {"started": started, "system": paths.uname().system, "cpu_model": _cpu_model(),
                  "cpus": os.cpu_count(), "python": _venv_python_version(venv),
                  "gauge": result.gauge, "line": opts.line, "first_sample": first,
                  "waited_s": round(result.waited_s, 3),

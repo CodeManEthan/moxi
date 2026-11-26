@@ -33,9 +33,13 @@ _NON_ASCII = re.compile("[^\x00-\x7f]")
 # -- where a google-re2 wheel installs ------------------------------------------------------
 
 def platform_facts() -> dict:
-    """This interpreter's answers to the questions `re2_wheel_fits` asks."""
+    """This interpreter's answers to the questions `re2_wheel_fits` asks. The system and
+    machine are read through `moxi.paths.uname`, with no WMI query on Windows."""
     import sysconfig
 
+    from moxi import paths
+
+    system = paths.uname()
     try:
         libc = os.confstr("CS_GNU_LIBC_VERSION")
     except (AttributeError, ValueError, OSError):
@@ -45,8 +49,8 @@ def platform_facts() -> dict:
         "implementation": platform.python_implementation(),
         "version": sys.version_info[:2],
         "gil_disabled": bool(sysconfig.get_config_var("Py_GIL_DISABLED")),
-        "system": platform.system(),
-        "machine": platform.machine(),
+        "system": system.system,
+        "machine": system.machine,
         "bits": struct.calcsize("P") * 8,
         "libc": libc,
         "mac": platform.mac_ver()[0] if sys.platform == "darwin" else "",

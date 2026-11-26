@@ -60,6 +60,8 @@ import time  # noqa: E402
 from collections.abc import Awaitable, Callable, Iterable  # noqa: E402
 from typing import Any  # noqa: E402
 
+from moxi import paths  # noqa: E402
+
 # Only the names `moxi_ui.loopback.api` re-exports are public; the rest are the
 # package's own.
 __all__ = [
@@ -130,7 +132,7 @@ async def serve(app: Callable[..., Any], sockets: Iterable[Any], *,
 
     Before uvicorn starts, `platform`'s cached `uname()` is filled without a WMI query,
     which on Windows can leave a thread behind that later corrupts this process's memory
-    (`_uname_without_wmi`); `serve` may then run on any thread.
+    (`moxi.paths.uname`); `serve` may then run on any thread.
 
     Once `should_exit` is set, `serve` awaits `drain()` if given, then tells uvicorn to
     stop, and returns when it has. uvicorn's own shutdown waits up to 2 s for open
@@ -180,7 +182,7 @@ async def _serve(app: Callable[..., Any], sockets: Iterable[Any], *,
     )
     if head_limit is not None:
         options["h11_max_incomplete_event_size"] = head_limit
-    _uname_without_wmi()
+    paths.uname()  # uvicorn asks platform.system() for each socket
     server = _server_class()(uvicorn.Config(app, **options))
     if on_server is not None:
         on_server(server)
@@ -294,39 +296,6 @@ def _peer_uid(sock: Any) -> int | None:
     except (OSError, struct.error):
         return None
     return None
-
-
-_UNAME = threading.Lock()
-
-
-def _uname_without_wmi() -> None:
-    """Fill `platform`'s cached `uname()` without a WMI query.
-
-    uvicorn's startup asks `platform.system()` for each socket it is given. On Windows,
-    CPython 3.12 answers the first such call with a WMI query run on a thread of its own.
-    When the query outlasts its wait, as it does for a user WMI is slow to answer, the
-    query thread is left running with a pointer into the caller's stack frame, and it
-    writes there seconds later: the process dies with an access violation, or its memory
-    is quietly overwritten. With the query refused, `platform` takes its own fallback,
-    `sys.getwindowsversion()` and the `PROCESSOR_*` variables, and caches the answer for
-    the process. Elsewhere `uname()` is `os.uname()` and no query is made.
-    """
-    import platform
-
-    with _UNAME:
-        query = getattr(platform, "_wmi_query", None)
-        if query is None:
-            platform.uname()
-            return
-
-        def refused(*_args: Any) -> Any:
-            raise OSError("no WMI query before uvicorn starts")
-
-        platform._wmi_query = refused
-        try:
-            platform.uname()
-        finally:
-            platform._wmi_query = query
 
 
 def _server_class() -> type:

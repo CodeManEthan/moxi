@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- On Windows the engine's platform facts (for the `re2` wheel) are read through
+  `moxi.paths.uname`, which makes no WMI query: CPython 3.12's query, given up under
+  load, left a thread that later closed a handle the process held or crashed it.
 - `chat_redact(text, between=...)`: a caller's own change to the text (a read tool
   cutting local paths) runs after the strip and before the second redaction, so the last
   redaction judges the text exactly as sent and a change that glues a word onto a secret

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- On Windows every pytest process of a run refuses `platform`'s WMI query, and
+  `moxi-dev timed` reads the host, system and processor through `moxi.paths.uname`.
+  xdist's workers
+  read `platform.platform()` as they start and the junit report reads `platform.node()`;
+  CPython 3.12's query, given up after a fraction of a second where WMI is slow, leaves a
+  thread that later closes a handle it reads from a gone stack frame, so a worker died
+  with an access violation or "Bad file descriptor" seconds later.
 - On Windows, `moxi-dev check --only ruff` names a file with `/`, as its other steps
   do, and a `PATH` given to `--only` selects files whichever separator it is written
   with; before, Ruff's `\` paths matched no selection, so a selected run found nothing.

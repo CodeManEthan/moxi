@@ -641,3 +641,24 @@ def test_without_a_stacks_dir_and_a_time_to_come_nothing_is_armed(tmp_path, give
            for key, value in given.items()}
     assert testing.arm_stacks(env) is None
     assert not stacks_dir.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="platform asks WMI on Windows only")
+def test_a_test_process_makes_no_wmi_query_through_platform(monkeypatch):
+    """xdist's workers read `platform.platform()` as they start; on Windows that and
+    `win32_ver()` ask WMI on every call unless the kit refuses the query."""
+    import platform
+
+    import _wmi
+
+    asked = []
+
+    def query(text):
+        asked.append(text)
+        raise OSError("timed out")
+
+    monkeypatch.setattr(_wmi, "exec_query", query)
+    monkeypatch.setattr(platform, "_uname_cache", None)
+    monkeypatch.setattr(platform, "_platform_cache", {})
+    assert platform.platform() and platform.win32_ver()
+    assert asked == []

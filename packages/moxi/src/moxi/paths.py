@@ -59,6 +59,10 @@ a module that writes the path of its own entry point into a hook, a unit file or
 launcher's argv: neither is ever looked up on PATH, where another program of the same
 name may stand first.
 
+`uname()` is `platform.uname()`, read on Windows without the WMI query that can corrupt
+the process (its docstring says how); Moxi's code reads the system, its release and
+machine and the host name through it.
+
 This module is imported on hook paths, so it imports nothing heavy at module level.
 """
 
@@ -320,10 +324,55 @@ def _legacy_labels(prefix: str, env: Mapping[str, str]) -> list[str]:
 
 def _host_name() -> str:
     if _WINDOWS:
-        import platform
-
-        return platform.node()
+        return uname().node
     return os.uname().nodename
+
+
+# Held while `uname` has platform's WMI query replaced.
+_UNAME: list = []
+
+
+def uname():
+    """This system's `platform.uname()`, read without a WMI query.
+
+    On Windows, CPython 3.12's `platform` answers its first `uname()` (and so `system()`,
+    `node()`, `release()`, `version()`, `machine()` and `processor()`) with WMI queries,
+    each run on a thread of its own. A query that outlasts its wait, as one does where WMI
+    is slow to answer the account (an account without admin rights, a loaded machine), is
+    given up while its thread runs on, holding a pointer into the caller's stack frame.
+    When the thread ends it reads that frame, long reused or gone, and closes the handle
+    it finds there: the process faults, or a file, pipe or socket it holds is closed under
+    it. Here the query is refused while `uname()` and its processor are read, so
+    `platform` takes its own fallback (`sys.getwindowsversion()`, the `ver` command, the
+    `PROCESSOR_*` variables) and keeps the answer for the process: the six calls above
+    then make no query. `platform.win32_ver()` and `platform.platform()` still do. Moxi's
+    own code reads those six through this first.
+
+    Elsewhere it is `platform.uname()`, which makes no query.
+    """
+    import platform
+
+    if not _WINDOWS:
+        return platform.uname()
+    import threading
+
+    if not _UNAME:
+        _UNAME.append(threading.Lock())
+    with _UNAME[0]:
+        query = getattr(platform, "_wmi_query", None)
+        if query is None:
+            return platform.uname()
+
+        def refused(*_args):
+            raise OSError("no WMI query: moxi.paths.uname reads platform's fallback")
+
+        platform._wmi_query = refused
+        try:
+            answer = platform.uname()
+            _ = answer.processor  # worked out on its first read, so read it here
+        finally:
+            platform._wmi_query = query
+    return answer
 
 
 # -- sockets and this environment's programs --------------------------------------------
