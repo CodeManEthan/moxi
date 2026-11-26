@@ -213,7 +213,7 @@ def test_show_an_unknown_id_exits_3(fake, no_modules, capsys):
 # --- add --------------------------------------------------------------------------------
 
 def test_add_a_command(fake, capsys):
-    code, out, _ = run(capsys, "add", "web", "--health", "curl -fsS 'http://x/ok'", "--",
+    code, out, _ = run(capsys, "add", "web", "--health", 'curl -fsS "http://x/ok"', "--",
                        "python3", "-m", "http.server", "--bind", "127.0.0.1")
     assert code == 0, out
     row = store.get("web")
@@ -238,7 +238,9 @@ def test_add_a_timer_splits_at_and_days(fake, capsys):
     (["add", "web", "--unit", "x.service", "--enable", "--cwd", "/tmp"], "--cwd is for"),
     (["add", "web", "--unit", "x.service", "--enable", "--", PY], "-- ARGV is for"),
     (["add", "web", "--health", "", "--", PY], "--health is empty"),
-    (["add", "web", "--health", "'open", "--", PY], "--health"),
+    pytest.param(["add", "web", "--health", "'open", "--", PY], "--health",
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason=(
+                     "Windows' command-line rules read an open quote to the end"))),
     (["add", "web", "--enable", "--disable", "--", PY], "not allowed with"),
     (["frobnicate"], "invalid choice"),
 ])

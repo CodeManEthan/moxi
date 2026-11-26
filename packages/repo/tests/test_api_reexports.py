@@ -3,6 +3,7 @@ modules: each is the package's own object, and importing the API loads nothing m
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
 import subprocess
@@ -37,8 +38,16 @@ def _loaded(code: str) -> set[str]:
 
 
 def _not_stdlib(names: set[str]) -> set[str]:
+    """`names` outside the standard library, less what an interpreter loads at its start
+    (a `.pth` file's imports: pywin32's on Windows, for one)."""
     return {n for n in names if n.split(".")[0] not in sys.stdlib_module_names} - {
-        "__main__", "_virtualenv", "site", "sitecustomize", "usercustomize"}
+        "__main__", "_virtualenv", "site", "sitecustomize", "usercustomize"} - _at_start()
+
+
+@functools.cache
+def _at_start() -> frozenset[str]:
+    """What a bare interpreter has loaded before it runs any code."""
+    return frozenset(_loaded(""))
 
 
 @pytest.mark.parametrize("name", NAMES)

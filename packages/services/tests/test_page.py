@@ -691,7 +691,7 @@ def test_add_answers_202_and_its_status_has_the_rows_id_and_lines(fake):
 def test_add_takes_a_timers_schedule_and_the_other_fields(fake):
     found = ended(accepted(post("/api/add", {
         "name": "nightly", "kind": "timer", "command": f"{PY} -c pass", "at": ["03:00"],
-        "days": ["mon", "fri"], "cwd": "/", "health": f"{PY} -c 'print(1)'",
+        "days": ["mon", "fri"], "cwd": "/", "health": f'{PY} -c "print(1)"',
         "launches_session": True, "doc": "one line", "enable": True})))
     assert found["state"] == "done", found
     row = store.get("nightly")
@@ -729,7 +729,9 @@ def test_add_takes_a_command_or_a_unit(body):
     ({"name": "web", "kind": "daemon", "command": PY, "every": "5m"}, "schedule"),
     ({"name": "web", "kind": "timer", "command": PY}, "exactly one of"),
     ({"name": "web", "kind": "daemon", "command": PY, "cwd": "here"}, "cwd"),
-    ({"name": "web", "kind": "daemon", "command": "'unbalanced"}, "quotes"),
+    pytest.param({"name": "web", "kind": "daemon", "command": "'unbalanced"}, "quotes",
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason=(
+                     "Windows' command-line rules read an open quote to the end"))),
     ({"name": "web", "kind": "daemon", "unit": "backup.service", "cwd": "/"}, "cwd"),
 ])
 def test_add_refuses_fields_out_of_shape_before_any_job(body, says):

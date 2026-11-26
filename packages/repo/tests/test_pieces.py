@@ -68,7 +68,8 @@ def test_bad_declarations_name_the_key(value, says):
 def test_message_path_is_the_message_events_absolute_first_argument():
     ctx = HookContext("commit-msg", (".git/COMMIT_EDITMSG",))
     assert ctx.message_path == os.path.abspath(".git/COMMIT_EDITMSG")
-    assert HookContext("prepare-commit-msg", ("/m", "message")).message_path == "/m"
+    assert HookContext("prepare-commit-msg", ("/m", "message")).message_path == (
+        os.path.abspath("/m"))
     assert HookContext("commit-msg").message_path is None
     assert HookContext("pre-commit", ("x",)).message_path is None
     assert HookContext("post-merge", ("0",)).message_path is None
