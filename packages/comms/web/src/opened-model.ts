@@ -3,15 +3,15 @@
 // for the address the box writes to: the row's lead, or the address pressed. `Directs` and
 // `Directed by` gather the name's addresses. Each line is there only when its fact is:
 // `Session` comes with launcher's join (`launched-model.ts`), with the model and effort the
-// launch was started with, and launcher's cache read wins over comms' on the `Cache` line as
-// it does on the row; where launcher gives none, with sessions' header of the session
-// (`session-model.ts`).
+// launch was started with, and where launcher gives none, with sessions' header of the
+// session (`session-model.ts`). Launcher's cache read wins over comms' on the `Cache` line as
+// it does on the row, and a warm one ends in the next keep-alive where launcher gives one.
 // Every string here goes into the page as text.
 
 import type { AgentRow, Ask } from "./agents-model.ts";
 import type { RosterRow } from "./feed.ts";
 import type { Read } from "./frame-model.ts";
-import { SESSION_LABEL } from "./launched-model.ts";
+import { keepAliveWords, SESSION_LABEL } from "./launched-model.ts";
 import { namesWords } from "./mail-model.ts";
 import { byHim } from "./messages-model.ts";
 import type { Queue } from "./messages-model.ts";
@@ -138,7 +138,8 @@ export function openedAgent(facts: OpenedFacts): OpenedAgent {
     const est = theirs.estimated ? ", est." : "";
     const at = theirs.until !== null ? ` ${when(theirs.until)}` : "";
     const value = theirs.warm ? `warm${at !== "" ? ` until${at}` : ""}${est}` : `cold${at !== "" ? ` since${at}` : ""}`;
-    before.push({ key: "cache", label: CACHE_LABEL, value, tail: theirs.warm ? theirs.kept : COLD_TAIL, link: cacheLink });
+    const kept = [theirs.kept, keepAliveWords(theirs.next, facts.now, when)].filter((part) => part !== null).join(", ");
+    before.push({ key: "cache", label: CACHE_LABEL, value, tail: theirs.warm ? kept || null : COLD_TAIL, link: cacheLink });
   } else if (bound && cache !== null) {
     const warm = cache.kind === "warm" && cache.until > facts.now;
     before.push({ key: "cache", label: CACHE_LABEL, value: `${warm ? "warm until" : "cold since"} ${when(cache.until)}`,
