@@ -27,6 +27,7 @@ from moxi_dev.testing import console_script, timed_slack, toml_string
 from test_displaced import spelled_mv
 
 from moxi import modules
+from moxi.paths import link_target
 from moxi_loadout import cli, homes, install, ledger, page, pagehandlers, pagejob
 
 TOKEN = "T" * 43
@@ -814,8 +815,9 @@ def test_path_sections_name_the_project_their_root_is_in(site, lo, tmp_path, mon
     site.module("projects", API="'moxi_projects.api'", INTERFACES="frozenset({1, 2})",
                 files={"api.py": MAPPING_API})
     kit.manifest(lo, '[user]\nskills = ["review"]\n[project.alpha]\nskills = []\n'
-                     f'[project."{alpha}"]\nskills = []\n[project."{alpha / "web"}"]\n'
-                     f'skills = []\n[project."{other}"]\nskills = []\n')
+                     f'[project.{toml_string(alpha)}]\nskills = []\n'
+                     f'[project.{toml_string(alpha / "web")}]\n'
+                     f'skills = []\n[project.{toml_string(other)}]\nskills = []\n')
     want = [None, None, "alpha", "alpha", None]
     assert [s["project"] for s in read("/api/list")["sections"]] == want
     assert [s["project"] for s in read("/api/view")["sections"]] == want
@@ -827,7 +829,8 @@ def test_path_sections_map_to_no_project_with_an_older_projects(site, lo, tmp_pa
                                                                  monkeypatch):
     monkeypatch.setenv("FAKE_ALPHA_ROOT", str(tmp_path))
     site.module("projects", API="'moxi_projects.api'", files={"api.py": MAPPING_API})
-    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project."{tmp_path}"]\nskills = []\n')
+    kit.manifest(lo, f'[user]\nskills = ["review"]\n[project.{toml_string(tmp_path)}]\n'
+                     'skills = []\n')
     assert [s["project"] for s in read("/api/list")["sections"]] == [None, None]
 
 
@@ -1096,7 +1099,7 @@ def test_a_job_read_through_to_its_end_does_what_the_verb_does(
     assert "listed skill lint in user for every harness" in body["outcome"]["lines"]
     assert body["outcome"]["counts"] == {"ok": 2}     # lint for claude and codex
     if kit.DIR_FORM == "link":
-        assert os.readlink(kit.claude() / "lint") == str(lo / "skills" / "lint")
+        assert link_target(kit.claude() / "lint") == str(lo / "skills" / "lint")
     else:
         assert (kit.claude() / "lint" / "SKILL.md").read_bytes() == \
             (lo / "skills" / "lint" / "SKILL.md").read_bytes()

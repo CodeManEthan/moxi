@@ -372,12 +372,15 @@ def _placed_here(dest: Path, mine: set, source: Path, gen: Path) -> bool:
 
 
 def _chain(path) -> list[str]:
-    """The paths a link passes through on its way to a file, `path` itself excluded."""
+    """The paths a link passes through on its way to a file, `path` itself excluded, each
+    spelled as the system spells a path (`moxi.paths.link_target`)."""
+    from moxi.paths import link_target
+
     out, seen = [], set()
     here = os.path.abspath(path)
     while os.path.islink(here) and here not in seen and len(out) < 40:
         seen.add(here)
-        here = os.path.normpath(os.path.join(os.path.dirname(here), os.readlink(here)))
+        here = os.path.normpath(os.path.join(os.path.dirname(here), link_target(here)))
         out.append(here)
     return out
 

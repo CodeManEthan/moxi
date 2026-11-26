@@ -10,6 +10,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from moxi.paths import link_target
+
 #: The form the core's placer gives a skill's folder by default: a link, and on Windows,
 #: where a folder links only as a junction the `skills.form` setting asks for, a copy.
 DIR_FORM = "copy" if sys.platform == "win32" else "link"
@@ -51,8 +53,7 @@ def agent(path: Path, name: str, extra: str = "") -> Path:
 
 def _same_path(a: str | os.PathLike, b: str | os.PathLike) -> bool:
     def norm(p):
-        text = os.fspath(p)
-        return os.path.normcase(os.path.normpath(text.removeprefix("\\\\?\\")))
+        return os.path.normcase(os.path.normpath(os.fspath(p)))
     return norm(a) == norm(b)
 
 
@@ -64,7 +65,7 @@ def placed(path: Path, source: Path | str | None = None) -> bool:
 
     path = Path(path)
     if path.is_symlink():
-        return source is None or _same_path(os.readlink(path), source)
+        return source is None or _same_path(link_target(path), source)
     if sys.platform != "win32":
         return False
     if path.is_dir():
@@ -83,7 +84,7 @@ def placement_of(path: Path) -> str | bytes:
     from moxi import place
 
     path = Path(path)
-    return os.readlink(path) if path.is_symlink() else (path / place.MARK).read_bytes()
+    return link_target(path) if path.is_symlink() else (path / place.MARK).read_bytes()
 
 
 def unplace(path: Path) -> None:

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- On Windows, where the account can make symbolic links, loadout reads its own links again:
+  a link's target is read through `moxi.paths.link_target`, without the `\\?\` prefix
+  Windows reads one back with. A global file's link loadout made read as a user's, and a
+  link into a loadout folder that moved read as not loadout's.
 - On Windows the preview reads the files of a folder it compares. It took every file
   for one swapped since it was listed, so it read none: a folder listing's stat holds no
   device or file id there, and the preview compared those with the opened file's. Each

@@ -440,7 +440,7 @@ def test_moves_of_one_name_pair_with_their_own_targets(lo, tmp_path):
         assert (copy / "SKILL.md" if copy.is_dir() else copy).read_text().endswith(words)
         assert f" {section} && {MOVE} " in kept["back"]
     assert sorted(Path(k["copy"]).name for k in out.kept
-                  if "/claude/" in k["copy"]) == ["review", "review-2"]
+                  if "claude" in Path(k["copy"]).parts) == ["review", "review-2"]
 
 
 def test_global_remove_moves_an_edited_placed_copy_aside(lo, capsys):

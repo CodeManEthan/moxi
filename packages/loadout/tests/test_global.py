@@ -9,6 +9,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi.paths import link_target
 from moxi_dev.testing import toml_string
 
 from moxi_loadout import cli, displaced, harness, install
@@ -653,7 +654,7 @@ def test_a_user_link_reaching_a_re_pointed_placement_is_blocked(lo):
     out = install.install()
     assert out.code == 3, out.text()
     assert _rows(out, "blocked") == {"claude", "codex"}
-    assert os.readlink(codex) == str(claude)
+    assert link_target(codex) == str(claude)
     assert os.path.realpath(claude) == str(lo / "global.md")
     assert not _gen("claude").exists()
 

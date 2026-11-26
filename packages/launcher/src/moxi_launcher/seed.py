@@ -14,7 +14,9 @@ gets this far, so it writes nothing.
   Claude Code reads.
 - The write sets that one key and nothing else. The file is read and parsed, its
   modification time and size noted, and the new text made. Just before it is written, the
-  time and size are read again. Unchanged, the text goes to a temporary file in the same
+  time and size are read again, and the bytes too, since two writes in one step of the
+  system's clock (about 15 ms on Windows) share a time, and a write of the same size
+  would pass for no change. Unchanged, the text goes to a temporary file in the same
   folder with the original's file mode, renamed over the original (`moxi.files`).
   Changed (a running session wrote the file meanwhile), the temporary file is dropped and
   the read, change and check are done once more; changed again, nothing is written. This
@@ -162,17 +164,26 @@ def _stamp(path: Path) -> tuple[int, int]:
     return info.st_mtime_ns, info.st_size
 
 
+def _unchanged(path: Path, before: tuple[int, int], data: bytes) -> bool:
+    """Whether `path` still has the time, size and bytes it had when it was read."""
+    try:
+        return _stamp(path) == before and path.read_bytes() == data
+    except OSError:
+        return False
+
+
 def _write(path: Path, key: str, between: Callable[[Path], None] | None) -> str:
     """One read, change and check: the outcome word, or `_Refused` or `_Changed`."""
     try:
         before = _stamp(path)
         info = path.stat()
-        raw = path.read_text(encoding="utf-8")
+        data = path.read_bytes()
     except FileNotFoundError:
         raise _Refused("no such file") from None
     except OSError as exc:
         raise _Refused(f"unreadable: {type(exc).__name__}") from None
     try:
+        raw = data.decode("utf-8")
         doc = json.loads(raw)
     except ValueError:
         raise _Refused("not JSON") from None
@@ -192,11 +203,7 @@ def _write(path: Path, key: str, between: Callable[[Path], None] | None) -> str:
         text += "\n"
     if between is not None:
         between(path)
-    try:
-        now = _stamp(path)
-    except OSError:
-        now = None
-    if now != before:
+    if not _unchanged(path, before, data):
         raise _Changed()
     try:
         files.atomic_write(path, text.encode("utf-8"), mode=info.st_mode & 0o7777)

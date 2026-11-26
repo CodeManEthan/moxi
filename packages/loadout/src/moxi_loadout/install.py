@@ -654,6 +654,7 @@ def named_by(text: str, want) -> bool:
 def _moved(step, mine: set[str], old_source) -> bool:
     """Whether a refused occupant is a link loadout made from the folder an earlier
     install read, before the folder moved."""
+    from moxi.paths import link_target
     from moxi.place import target_key
 
     if not old_source or str(step.target) not in mine or step.occupant is None:
@@ -661,7 +662,7 @@ def _moved(step, mine: set[str], old_source) -> bool:
     path = os.fspath(step.occupant)
     if not os.path.islink(path):
         return False
-    pointed = os.path.normpath(os.path.join(os.path.dirname(path), os.readlink(path)))
+    pointed = os.path.normpath(os.path.join(os.path.dirname(path), link_target(path)))
     old = os.path.normpath(os.path.abspath(old_source))
     return target_key(pointed).startswith(old.rstrip(os.sep) + os.sep)
 

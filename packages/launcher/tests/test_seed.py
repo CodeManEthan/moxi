@@ -190,8 +190,6 @@ def test_a_file_changed_once_between_read_and_rename_is_read_again(tmp_path, env
         calls.append(p)
         if len(calls) == 1:
             doc = json.loads(p.read_text())
-            # A size of its own: the seed sees a change by time and size, and on Windows
-            # two writes at once can share a time.
             doc["numStartups"] = 4200
             p.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 
@@ -203,6 +201,29 @@ def test_a_file_changed_once_between_read_and_rename_is_read_again(tmp_path, env
     assert after["projects"][str(repo)] == {"hasTrustDialogAccepted": True}
 
 
+def test_a_same_size_write_in_the_same_clock_step_is_seen_as_a_change(tmp_path, env):
+    repo = git_repo(tmp_path / "repo")
+    path = write_config(config_of(env))
+    calls = []
+
+    def writer(p: Path):
+        # A write of the same size that leaves the time as it was: what two writes in one
+        # step of Windows' clock look like.
+        calls.append(p)
+        if len(calls) == 1:
+            info = p.stat()
+            text = p.read_text(encoding="utf-8").replace('"dark"', '"mist"')
+            p.write_text(text, encoding="utf-8")
+            os.utime(p, ns=(info.st_atime_ns, info.st_mtime_ns))
+            assert p.stat().st_size == info.st_size
+
+    got = seed.seed(repo, env, between=writer)
+    assert got.outcome == seed.SEEDED and len(calls) == 2
+    after = json.loads(path.read_text())
+    assert after["theme"] == "mist"
+    assert after["projects"][str(repo)] == {"hasTrustDialogAccepted": True}
+
+
 def test_a_file_changed_twice_is_not_written_and_keeps_the_other_writers_bytes(tmp_path,
                                                                                env):
     repo = git_repo(tmp_path / "repo")
@@ -210,7 +231,6 @@ def test_a_file_changed_twice_is_not_written_and_keeps_the_other_writers_bytes(t
     written = []
 
     def writer(p: Path):
-        # Each write a size of its own: on Windows two writes at once can share a time.
         text = json.dumps({**CONFIG, "numStartups": 500 * 10 ** len(written)},
                           indent=2) + "\n"
         p.write_text(text, encoding="utf-8")

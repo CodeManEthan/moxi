@@ -8,6 +8,7 @@ from pathlib import Path
 
 import loadout_kit as kit
 import pytest
+from moxi.paths import link_target
 from moxi_dev.testing import toml_string
 
 from moxi_loadout import install, ledger, planner
@@ -154,7 +155,7 @@ def test_a_held_item_is_kept_in_place_and_linked_relatively(lo, tmp_path):
     assert out.code == 0, out.text()
     assert held.is_dir() and not held.is_symlink()
     link = root / ".agents" / "skills" / "own"
-    assert os.readlink(link) == os.path.join("..", "..", ".claude", "skills", "own")
+    assert link_target(link) == os.path.join("..", "..", ".claude", "skills", "own")
     assert kit.placed(root / ".codex" / "agents" / "lead.toml")
     assert set(states(install.status()).values()) == {"ok"}
 
@@ -322,6 +323,39 @@ def test_a_moved_loadout_dir_updates_its_links(lo, tmp_path):
     kit.configure(moved)
     assert install.install().code == 0
     assert kit.placed(kit.claude() / "review", moved / "skills" / "review")
+
+
+def _windows_long_form(monkeypatch, link: Path, target: Path) -> None:
+    """`link` reads as a link to `target` in the form Windows reads one back, `\\\\?\\C:\\...`
+    (a plain file stands in for it, so the row runs where the account can't make one)."""
+    monkeypatch.setattr(os.path, "islink",
+                        lambda p: os.path.normcase(os.fspath(p)) == os.path.normcase(str(link)))
+    monkeypatch.setattr(os, "readlink", lambda p: "\\\\?\\" + str(target))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the long form is how Windows reads a link back")
+def test_a_link_into_the_moved_folder_reads_as_moved_in_windows_long_form(tmp_path,
+                                                                          monkeypatch):
+    from types import SimpleNamespace
+
+    old = tmp_path / "loadout"
+    link = tmp_path / "links" / "review"
+    link.parent.mkdir()
+    link.write_text("")
+    _windows_long_form(monkeypatch, link, old / "skills" / "review")
+    step = SimpleNamespace(target=link, occupant=link)
+    assert install._moved(step, {str(link)}, old)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the long form is how Windows reads a link back")
+def test_a_link_in_windows_long_form_chains_to_the_path_it_was_made_from(tmp_path,
+                                                                        monkeypatch):
+    target = tmp_path / "global.md"
+    target.write_text("x")
+    link = tmp_path / "CLAUDE.md"
+    link.write_text("")
+    _windows_long_form(monkeypatch, link, target)
+    assert planner._chain(link) == [str(target)]
 
 
 def test_entries_written_before_an_interrupt_are_recorded(lo, monkeypatch):
