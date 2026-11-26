@@ -62,7 +62,8 @@ The rule: no handler on the loop waits on the harness or on a blocking write.
   the harness and run beside the worker, on reader threads of their own (one per kind of
   read, never the threads open waits use). Each answers within the harness's live bound
   (`Harness.live_wait_s`): past it the live part reads unreadable (`draft` true, `agents`
-  null, an incomplete list), which refuses and never passes. A read still out is joined,
+  null, `box` null, an incomplete list), which refuses and never passes, and the facts'
+  `live_error` says `timeout`; a live read that failed says `failed`. A read still out is joined,
   not started again, so a stalled harness ties up one thread per kind, not one per call.
 """
 
@@ -252,25 +253,55 @@ class _Joined:
     def _run(self, future: concurrent.futures.Future) -> None:
         try:
             future.set_result(self._read())
+        except Exception as exc:  # noqa: BLE001 - kept as the read's outcome
+            future.set_result(_Failed(exc))
         except BaseException as exc:  # noqa: BLE001 - handed to the reader
             future.set_exception(exc)
 
     def wait(self, timeout: float) -> Any:
         """The read's result, or None when it is not done within `timeout` or failed."""
-        try:
-            return self.future().result(timeout=max(0.0, timeout))
-        except concurrent.futures.TimeoutError:
-            return None
-        except Exception:  # noqa: BLE001 - unreadable
-            return None
+        return self.read(timeout)[0]
 
     async def wait_async(self, timeout: float) -> Any:
         """`wait` on the loop: never blocks it."""
+        return (await self.read_async(timeout))[0]
+
+    def read(self, timeout: float) -> tuple[Any, str | None]:
+        """The read's result and None; or None and why there is none (`LIVE_ERRORS`):
+        `timeout` when it is not done within `timeout` or raised `TimeoutError`, `failed`
+        when it raised anything else or gave None."""
+        try:
+            value = self.future().result(timeout=max(0.0, timeout))
+        except concurrent.futures.TimeoutError:
+            return None, "timeout"
+        except Exception:  # noqa: BLE001 - unreadable
+            return None, "failed"
+        return _outcome(value)
+
+    async def read_async(self, timeout: float) -> tuple[Any, str | None]:
+        """`read` on the loop: never blocks it."""
         future = asyncio.wrap_future(self.future())
         done, _ = await asyncio.wait({future}, timeout=max(0.0, timeout))
-        if not done or future.cancelled() or future.exception() is not None:
-            return None
-        return future.result()
+        if not done or future.cancelled():
+            return None, "timeout"
+        if future.exception() is not None:
+            return None, "failed"
+        return _outcome(future.result())
+
+
+@dataclass(frozen=True)
+class _Failed:
+    """A `_Joined` read that raised `exc`."""
+
+    exc: Exception
+
+
+def _outcome(value: Any) -> tuple[Any, str | None]:
+    """A finished read's result and why it gave none: a read that raised `TimeoutError`
+    is `timeout`, one that raised anything else or gave None is `failed`."""
+    if isinstance(value, _Failed):
+        return None, "timeout" if isinstance(value.exc, TimeoutError) else "failed"
+    return value, None if value is not None else "failed"
 
 
 @dataclass
@@ -1145,16 +1176,16 @@ class Endpoint:
     def facts(self) -> Facts:
         """The ledger, the live facts, the ledger again: one observation, `stale` when the
         ledger moved between. The live read is bounded by the harness's live bound; past
-        it the live part reads unreadable."""
+        it the live part reads unreadable, and `live_error` says why."""
         first = self.reading()
-        live = self.read_live()
-        return self.facts_from(first, live)
+        live, why = self._live_read.read(self.harness.live_wait_s)
+        return self.facts_from(first, live, live_error=why)
 
     async def facts_async(self) -> Facts:
         """`facts` on the loop: the live read awaited within its bound, never blocking."""
         first = self.reading()
-        live = await self.live_async()
-        return self.facts_from(first, live)
+        live, why = await self.live_read_async()
+        return self.facts_from(first, live, live_error=why)
 
     def reading(self) -> Reading:
         with self._lock:
@@ -1164,24 +1195,34 @@ class Endpoint:
         """`read_live` on the loop, never blocking it."""
         return await self._live_read.wait_async(self.harness.live_wait_s)
 
+    async def live_read_async(self) -> tuple[Live | None, str | None]:
+        """`live_async` with why the live facts did not read (`LIVE_ERRORS`), None when
+        they did."""
+        return await self._live_read.read_async(self.harness.live_wait_s)
+
     def read_live(self) -> Live | None:
         """The live facts within the harness's live bound, or None (unreadable)."""
         return self._live_read.wait(self.harness.live_wait_s)
 
-    def facts_from(self, first: Reading, live: Live | None) -> Facts:
+    def facts_from(self, first: Reading, live: Live | None, *,
+                   live_error: str | None = None) -> Facts:
         with self._lock:
-            return self._facts(first, live)
+            return self._facts(first, live, live_error=live_error)
 
-    def _facts(self, first: Reading, live: Live | None) -> Facts:
+    def _facts(self, first: Reading, live: Live | None, *,
+               live_error: str | None = None) -> Facts:
         """Under the lock: the facts from a first reading taken before the live read, and
-        the ledger as it is now."""
+        the ledger as it is now. `live_error` is why `live` is None; without one a None
+        `live` reads `failed`."""
         second = self.ledger.read()
         return Facts(session_id=second.session_id, turn_number=second.turn_number,
                      turn_open=second.turn_open, turn=self._open_turn(),
                      agents=live.agents if live else None,
                      draft=live.draft if live else True,
                      at=time.time(), stale=first.version != second.version,
-                     ready=self._ready)
+                     ready=self._ready, ended_at=second.ended_at,
+                     box=live.box if live else None,
+                     live_error=None if live else (live_error or "failed"))
 
     def agents(self) -> Agents:
         """The session's subagents as the harness records them, within the harness's live
@@ -1208,14 +1249,15 @@ class Endpoint:
             return Agents((), complete=False, at=time.time())
         return agents
 
-    def watch(self, conn, first: Reading, live: Live | None) -> Facts | None:
+    def watch(self, conn, first: Reading, live: Live | None, *,
+              live_error: str | None = None) -> Facts | None:
         """A watch's second half, on the loop: under one hold of the lock, the facts as of
         now and `conn` among the watchers, so every notification after these facts reaches
         it and none before them does. None when the endpoint is ending."""
         with self._lock:
             if self._gone is not None or conn.closed:
                 return None
-            facts = self._facts(first, live)
+            facts = self._facts(first, live, live_error=live_error)
             self._watchers.append(conn)
             return facts
 
@@ -1575,12 +1617,14 @@ class Endpoint:
                 return "rate"
             return None
 
-    def _live(self) -> Live | None:
+    def _live(self) -> Live:
+        """The harness's live facts. A failure is logged and raised: the reader takes it
+        as unreadable, which refuses and never passes."""
         try:
             return self.harness.live()
-        except Exception as exc:  # noqa: BLE001 - an unreadable fact refuses, never passes
+        except Exception as exc:
             log.warning("reading the live facts failed: %s", exc)
-            return None
+            raise
 
     def _snapshot(self) -> tuple[Reading, Live | None, Reading]:
         """The ledger, the live facts (bounded), the ledger again: one observation, or two

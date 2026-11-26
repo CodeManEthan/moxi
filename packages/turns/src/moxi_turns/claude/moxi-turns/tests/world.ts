@@ -39,6 +39,8 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     agents: [] as Record<string, unknown>[],
     /** `$.agent.list()` throws: the list cannot be read. */
     agentsFail: false,
+    /** When set, prompt.read fails: the box can't be read. */
+    promptFail: false,
     box: '',
     gate: options.gate ?? true,
     spawned: [] as string[][],
@@ -140,7 +142,10 @@ export function world(on: On, options: { surfaces?: string[]; endpointJson?: str
     if (w.agentsFail) throw new Error('no list')
     return { value: w.agents as never }
   })
-  on('prompt.read', async () => ({ value: { text: w.box, cursor: w.box.length } }))
+  on('prompt.read', async () => {
+    if (w.promptFail) throw new Error('no box')
+    return { value: { text: w.box, cursor: w.box.length } }
+  })
   on('state.set', async ($, e, next) => {
     w.stateWrites.push({ key: (e as { key: string }).key, value: (e as { value: unknown }).value })
     return next(e)

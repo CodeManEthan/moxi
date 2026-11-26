@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  agentsLines, COPY_ID, detailsLine, EMPTY_BOX, LABELS, NOT_KNOWN, nowLine, openedOf, promptBoxLine, sessionLine,
-  tildeForm,
+  agentsLines, BOX_NOT_KNOWN, COPY_ID, detailsLine, EMPTY_BOX, LABELS, NOT_KNOWN, nowLine, openedOf, promptBoxLine,
+  sessionLine, tildeForm,
 } from "../src/opened-model.ts";
-import { MAY_HOLD_DRAFT } from "../src/rows-model.ts";
+import { DRAFT_NOT_SENT } from "../src/rows-model.ts";
 
 const UTC = {
   time: (at) => new Date(at * 1000).toISOString().slice(11, 16),
@@ -19,12 +19,12 @@ const ID = "aaaaaaaa-1111-4111-8111-111111111111";
 const facts = (extra) => ({ session_id: ID, turn_number: 4, turn_open: false, turn_started_at: null,
                             agents: 0, draft: false, stale: false,
                             ready: { source: "startup", session_id: ID, at: at("08:20") },
-                            at: at("19:00"), ...extra });
+                            at: at("19:00"), ended_at: null, live_error: null, ...extra });
 const session = (extra) => ({ key: "claude-n1", harness: "claude", pid: 4321, session_id: ID,
   cwd: "/home/u/work/kestrel-web", started: at("08:20"), capabilities: ["agents", "deliver"],
   endpoint_version: "0.2.4", mod_version: "0.1.0", trouble: null, facts: facts(),
   agents: { entries: [], complete: true }, read_error: null, ended_at: null, has_box: true,
-  unread_since: null, ...extra });
+  unread_since: null, typed_name: null, ...extra });
 const agent = (extra) => ({ id: "a1", kind: "subagent", state: "running", final: false,
                             description: null, parent_id: null, ...extra });
 
@@ -61,19 +61,20 @@ test("Agents: each entry with busy in the text colour, and not known when the li
                    { entries: [], notKnown: NOT_KNOWN });
 });
 
-test("Prompt box: empty or may hold a draft for each draft case, only where turns reads the box", () => {
+test("Prompt box: draft not sent, empty, or not known for each draft case, only where turns reads the box", () => {
   const cases = [
-    ["a draft", facts({ draft: true }), MAY_HOLD_DRAFT],
-    ["a box that throws", facts({ draft: true }), MAY_HOLD_DRAFT],
+    ["a draft", facts({ draft: true }), DRAFT_NOT_SENT],
+    ["a box that throws", facts({ draft: null }), BOX_NOT_KNOWN],
     ["agents_fail with the box empty", facts({ draft: false, agents: null }), EMPTY_BOX],
-    ["agents_fail with a draft", facts({ draft: true, agents: null }), MAY_HOLD_DRAFT],
-    ["live_fails", facts({ draft: true, agents: null }), MAY_HOLD_DRAFT],
+    ["agents_fail with a draft", facts({ draft: true, agents: null }), DRAFT_NOT_SENT],
+    ["live_fails", facts({ draft: null, agents: null, live_error: "failed" }), BOX_NOT_KNOWN],
   ];
   for (const [name, read, words] of cases) {
     assert.equal(promptBoxLine(session({ facts: read })), words, name);
     const opened = JSON.stringify(openedOf(session({ facts: read }), "/home/u", TODAY, UTC));
-    assert.doesNotMatch(opened, /box could not|not read|draft not sent/, name);
+    assert.doesNotMatch(opened, /"may hold a draft"/, name);
   }
+  assert.equal(BOX_NOT_KNOWN, "not known · it could not be read, so it may hold a draft");
   assert.equal(promptBoxLine(session({ has_box: false, facts: facts({ draft: true }) })), null);
   assert.equal(promptBoxLine(session({ facts: null })), null);
 });

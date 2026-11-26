@@ -17,6 +17,7 @@ import itertools
 import os
 import threading
 import time
+from dataclasses import replace
 
 from moxi_dev.testing import PROC_WAIT_S
 from moxi_turns.harness import CommandRequest, Delivery, Harness, Live
@@ -45,8 +46,10 @@ class FakeHarness(Harness):
         self.agents_complete = True
         self.agents_fail = False
         self.live_fails = False
-        #: The box read throws: `live()` answers `draft` true with the list read, as
-        #: Claude Code's runner does.
+        #: The live read takes this many seconds before it answers.
+        self.live_delay_s = 0.0
+        #: The box read throws: `live()` answers `draft` true and `box` None with the list
+        #: read, as Claude Code's runner does.
         self.box_fails = False
         self.submitted: list[Delivery] = []
         self.appended: list[Delivery] = []
@@ -68,14 +71,17 @@ class FakeHarness(Harness):
     # -- the core calls these ----------------------------------------------------------
 
     def live(self) -> Live:
+        if self.live_delay_s:
+            time.sleep(self.live_delay_s)
         if self.live_fails:
             raise OSError("the prompt box cannot be read")
         draft = self.box_fails or self.draft
+        box = None if self.box_fails else "draft" if draft else "empty"
         try:
             agents = self.agents()
-            return Live.of(agents, draft=draft)
+            return replace(Live.of(agents, draft=draft), box=box)
         except Exception:  # noqa: BLE001 - the box was read; the list is unknown
-            return Live(None, draft)
+            return Live(None, draft, box=box)
 
     def agents(self) -> Agents:
         if self.agents_fail:
