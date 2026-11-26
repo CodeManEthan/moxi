@@ -18108,6 +18108,33 @@ turns	packages/turns/tests/test_stale_agents.py	self.record = root / "s-1.jsonl"
 turns	packages/turns/tests/test_stale_agents.py	self.record.write_text("")	keep	record	record
 turns	packages/turns/tests/test_stale_agents.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 turns	packages/turns/tests/test_stale_agents.py	out = judge(listed, str(self.record), now=NOW, **kw)	keep	record	record
+turns	packages/turns/src/moxi_turns/client.py	WHYS = ("unreachable", "timeout", "closed", "gone", "version", "refused", "unreadable")	keep	closed	closed
+turns	packages/turns/src/moxi_turns/client.py	"""Why a connection failed with `exc`: `timeout` when its time ran out, else	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/client.py	`closed`."""	keep	closed	closed
+turns	packages/turns/src/moxi_turns/client.py	return "timeout" if isinstance(exc, TimeoutError) else "closed"	keep	closed	closed
+turns	packages/turns/src/moxi_turns/client.py	code=exc.code, data=exc.data, why="refused")	keep	refused	refused
+turns	packages/turns/src/moxi_turns/client.py	error = TurnsError("this Session is closed", why="closed")	keep	closed	closed
+turns	packages/turns/src/moxi_turns/endpoint.py	value = self.future().result(timeout=max(0.0, timeout))	keep	timeout	timeout
+turns	packages/turns/src/moxi_turns/page.py	"draft": lb.Out("bool", nullable=True),	keep	nullable	nullable
+turns	packages/turns/src/moxi_turns/page.py	"typed_name": lb.Out("string", mark="redact", nullable=True),	keep	nullable	nullable
+turns	packages/turns/src/moxi_turns/pagereader.py	"closed": "its link closed during the read",	keep	closed	closed
+turns	packages/turns/src/moxi_turns/pagereader.py	"refused": "it refused the read",	keep	refused	refused
+turns	packages/turns/src/moxi_turns/pagereader.py	if self._held.get(held.key) is not held or held.typed_name == name:	keep	_held	_held
+turns	packages/turns/tests/panel_kit.py	sessions_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/test_claude_record.py	sessions_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+turns	packages/turns/tests/test_claude_record.py	return {"CLAUDE_CONFIG_DIR": str(tmp_path / "claude"), "HOME": str(tmp_path / "home"),	keep	HOME	HOME
+turns	packages/turns/tests/test_client.py	assert caught.value.why == "refused"	keep	refused	refused
+turns	packages/turns/tests/test_client.py	assert client.WHYS == ("unreachable", "timeout", "closed", "gone", "version", "refused",	keep	closed	closed
+turns	packages/turns/tests/test_client.py	assert caught.value.why == "closed"	keep	closed	closed
+turns	packages/turns/tests/test_page.py	assert pagehandlers._reader_now._held[key].ended is None	keep	_held	_held
+turns	packages/turns/tests/test_page.py	pagehandlers._reader_now._held["claude-named"].dirty.set()	keep	_held	_held
+turns	packages/turns/tests/test_page.py	raise turns.TurnsError("the endpoint did not answer agents", why="closed")	keep	closed	closed
+turns	packages/turns/tests/test_page.py	assert pagereader.read_error({"agents": "gone", "facts": "refused"}) == (	keep	refused	refused
+turns	packages/turns/tests/test_page.py	assert pagereader.read_error({"agents": "unreadable", "watch": "closed"}) == (	keep	closed	closed
+turns	packages/turns/tests/test_page.py	("closed", "its link closed during the read"),	keep	closed	closed
+turns	packages/turns/tests/test_page.py	("refused", "it refused the read"),	keep	refused	refused
+turns	packages/turns/tests/test_page.py	assert set(pagereader.REASONS) == set(client.WHYS)	keep	set	set
+turns	packages/turns/tests/test_page.py	assert len(set(pagereader.REASONS.values())) == len(client.WHYS)	keep	set	set
 sessions	packages/sessions/tests/test_browser_address.py	pick(view, "folder", "atlas")	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_text(re.compile("^atlas"))	keep	folder	folder
 sessions	packages/sessions/tests/test_browser_address.py	expect(filter_button(view, "folder")).to_have_class("set")	keep	folder	folder
