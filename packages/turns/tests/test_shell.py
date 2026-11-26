@@ -482,6 +482,15 @@ def test_xargs_is_no_wrapper():
     ("bash --login --norc -e -c 'kill 211'", ("kill 211", "sh", 0, "argument")),
     ("/bin/sh -c 'kill 211'", ("kill 211", "sh", 0, "argument")),
     ("zsh -c x; dash -c y; ksh -c z", ("x", "sh", 0, "argument")),
+    ("mksh -c 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("ash -c 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("bash -eo pipefail -c 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("bash -co pipefail 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("bash -oOc pipefail extglob 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("bash +O extglob -c 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("bash -Zc 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("bash +c 'kill 211'", ("kill 211", "sh", 0, "argument")),
+    ("bash -c -x 'kill 211'", ("kill 211", "sh", 0, "argument")),
     ("sudo -u root bash -c 'kill 211'", ("kill 211", "sh", 0, "argument")),
     ("pwsh -NoProfile -Command Stop-Process -Id 211",
      ("Stop-Process -Id 211", "powershell", 0, "argument")),
@@ -541,7 +550,8 @@ def test_a_tab_stripped_heredoc_fed_to_a_shell_loses_each_line_s_tabs():
 
 @pytest.mark.parametrize("text", [
     "bash --frob -c 'kill 211'",            # an option the shell's row doesn't name
-    "bash -eo pipefail -c 'kill 211'",
+    "bash -1 -c 'kill 211'",                # a cluster of anything but letters
+    "bash -co pipefail",                    # `o` took the only word left
     "bash script.sh <<'EOF'\nkill 211\nEOF",  # a script file: the heredoc is its input
     "pwsh script.ps1",                      # pwsh's bare operand is -File
     "pwsh -File x.ps1",
@@ -565,6 +575,45 @@ def test_a_tab_stripped_heredoc_fed_to_a_shell_loses_each_line_s_tabs():
 ])
 def test_no_script_for_what_the_finder_does_not_read(text):
     assert scripts(text) == []
+
+
+def test_a_script_names_the_command_words_it_was_made_from():
+    def indexes(text, dialect="sh"):
+        shell = read_shell(text, dialect=dialect)
+        return [(s.word_indexes, [shell.commands[s.command_index].words[i].text
+                                  for i in s.word_indexes])
+                for s in shell_scripts(shell, dialect=dialect)]
+
+    assert indexes("bash -lc 'kill 211' x") == [((2,), ["kill 211"])]
+    assert indexes("FOO=1 sudo -u root bash -co pipefail 'kill 211'") == [
+        ((7,), ["kill 211"])]
+    assert indexes("pwsh -NoProfile -Command Stop-Process -Id 211") == [
+        ((3, 4, 5), ["Stop-Process", "-Id", "211"])]
+    assert indexes("& powershell Stop-Process 211", "powershell") == [
+        ((2, 3), ["Stop-Process", "211"])]
+    assert indexes("@cmd /q /c taskkill /PID 211", "cmd") == [
+        ((4, 5, 6), ["taskkill", "/PID", "211"])]
+    assert indexes("bash <<'EOF'\nkill 211\nEOF") == [((), [])]
+    assert indexes("echo kill 211 | bash -s") == [((), [])]
+    assert indexes("pwsh -Command - <<< 'Stop-Process 211'") == [((), [])]
+
+
+@pytest.mark.parametrize("text, dialect, script", [
+    ("& 'C:\\Program Files\\Git\\bin\\bash.exe' -c 'kill 211'", "powershell",
+     ("kill 211", "sh", 0, "argument")),
+    ("'C:/Program Files/Git/usr/bin/sh.EXE' -c 'kill 211'", "sh",
+     ("kill 211", "sh", 0, "argument")),
+    ("& 'C:\\Program Files\\PowerShell\\7\\PWSH.EXE' -Command Stop-Process 211",
+     "powershell", ("Stop-Process 211", "powershell", 0, "argument")),
+    ("'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\PowerShell.Exe' Stop-Process 211",
+     "sh", ("Stop-Process 211", "powershell", 0, "argument")),
+    ("C:/Windows/System32/Cmd.Exe /C taskkill /PID 211", "cmd",
+     ("taskkill /PID 211", "cmd", 0, "argument")),
+    ("PWSH -c 'Stop-Process 211'", "sh", ("Stop-Process 211", "powershell", 0, "argument")),
+])
+def test_a_shell_is_named_by_its_last_part_across_either_slash_without_exe(
+        text, dialect, script):
+    assert scripts(text, dialect) == [script]
 
 
 def test_a_shell_with_no_input_source_gives_none():

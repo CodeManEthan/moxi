@@ -11,7 +11,7 @@ what the reader doesn't read, and one that fails closed refuses it by a mark.
 
 **What is read.** One closed grammar per dialect (`DIALECTS`):
 
-- `sh` (text for `sh`, `bash`, `zsh`, `dash` and `ksh`). Words split at unquoted spaces
+- `sh` (text for `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh` and `ash`). Words split at unquoted spaces
   and tabs, and a backslash before a newline joins the lines. `'...'` is verbatim;
   `"..."` expands substitutions, and a backslash in it escapes only `$`, a backtick,
   `"`, `\\` and a newline; in `$'...'` the escapes `\\\\`, `\\'` and `\\"` are taken off
@@ -142,13 +142,15 @@ class ShellText:
 @dataclass(frozen=True)
 class ShellScript:
     """Text a command hands a shell to run: the text, the dialect to read it in, the index
-    of the command that runs it in the `ShellText` given to `shell_scripts`, and where the
-    text comes from (one of `SCRIPT_SOURCES`)."""
+    of the command that runs it in the `ShellText` given to `shell_scripts`, where the
+    text comes from (one of `SCRIPT_SOURCES`), and the indexes into that command's words
+    of the words the text was made from (none for a script that is the shell's input)."""
 
     text: str
     dialect: str
     command_index: int
     source: str
+    word_indexes: tuple[int, ...] = ()
 
 
 # --- the reader ------------------------------------------------------------------------
@@ -1372,8 +1374,7 @@ def _base(word: str) -> str:
 
 # --- scripts handed to a shell ------------------------------------------------------------
 
-_SH_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
-_SH_LETTERS = frozenset("abcefhiklmnprstuvxBCDEHPT")
+_SH_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "mksh", "ash"})
 _SH_LONG = frozenset({"--login", "--norc", "--noprofile", "--posix", "--noediting",
                       "--restricted", "--verbose"})
 _SH_LONG_VALUED = frozenset({"--rcfile", "--init-file"})
@@ -1394,8 +1395,10 @@ def shell_scripts(shell_text: ShellText, *, dialect: str = "sh") -> tuple[ShellS
     """Each piece of text a command of `shell_text` (read in `dialect`) hands a shell to
     run: a shell's script argument (`-c`, `-Command`, `/c`), or, for a shell that runs its
     input, a heredoc or here-string on its own command or the literal text piped into it.
-    One level: a caller reads each script with `read_shell` and asks again for deeper
-    ones."""
+    A command runs a shell when its command word's last part across `/` and `\\`, with
+    `.exe` dropped in any case, is one: `sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh` or
+    `ash` as written, and `pwsh`, `powershell` or `cmd` in any case. One level: a caller
+    reads each script with `read_shell` and asks again for deeper ones."""
     if dialect not in DIALECTS:
         raise ValueError(f"unknown dialect {dialect!r}; the dialects are {DIALECTS}")
     out: list[ShellScript] = []
@@ -1422,7 +1425,10 @@ def shell_scripts(shell_text: ShellText, *, dialect: str = "sh") -> tuple[ShellS
             if found is not None:
                 out.append(ShellScript(found[0], shell_dialect, index, found[1]))
             continue
-        out.append(ShellScript(got, shell_dialect, index, "argument"))
+        text = _joined([rest[i] for i in got])
+        if text is not None:
+            out.append(ShellScript(text, shell_dialect, index, "argument",
+                                   tuple(k + 1 + i for i in got)))
     return tuple(out)
 
 
@@ -1443,6 +1449,10 @@ def _joined(words) -> str | None:
 
 
 def _sh_argument(words) -> object:
+    """What a POSIX shell's arguments `words` give: the index of its `-c` script's word,
+    as a 1-tuple, `_INPUT`, or None. A cluster's letters are all flags, but `o` and `O`
+    each take the next word, as bash reads `-co pipefail 'cmd'`; `c` and `s` count after
+    `-` or `+`, as bash counts them."""
     k, n = 0, len(words)
     runs_argument = reads_input = False
     while k < n:
@@ -1453,29 +1463,29 @@ def _sh_argument(words) -> object:
         if word in _SH_LONG:
             k += 1
             continue
-        if word in _SH_LONG_VALUED or word in ("-o", "+o", "-O", "+O"):
+        if word in _SH_LONG_VALUED:
             k += 2
             continue
-        if len(word) > 1 and word[0] in "-+" and all(ch in _SH_LETTERS for ch in word[1:]):
-            if word[0] == "-":
-                runs_argument = runs_argument or "c" in word
-                reads_input = reads_input or "s" in word
-            k += 1
+        letters = word[1:]
+        if word[:1] in ("-", "+") and letters and all(
+                ch.isascii() and ch.isalpha() for ch in letters):
+            runs_argument = runs_argument or "c" in letters
+            reads_input = reads_input or "s" in letters
+            k += 1 + letters.count("o") + letters.count("O")
             continue
         if word[:1] in ("-", "+"):
             return None
         break
-    operands = words[k:]
     if runs_argument:
-        if not operands or operands[0]._kept_escape:
-            return None
-        return operands[0].text
-    if reads_input or not operands:
+        return (k,) if k < n else None
+    if reads_input or k >= n:
         return _INPUT
     return None
 
 
 def _ps_argument(words, *, bare_runs: bool) -> object:
+    """What PowerShell's arguments `words` give: the indexes of the words its script is
+    joined from, `_INPUT`, or None."""
     k, n = 0, len(words)
     while k < n:
         word = words[k].text.lower()
@@ -1486,24 +1496,24 @@ def _ps_argument(words, *, bare_runs: bool) -> object:
             k += 2
             continue
         if word == "-c" or (len(word) >= 4 and "-command".startswith(word)):
-            rest = words[k + 1:]
-            if rest and rest[0].text == "-":
+            if k + 1 < n and words[k + 1].text == "-":
                 return _INPUT
-            return _joined(rest) if rest else None
+            return tuple(range(k + 1, n)) or None
         if word == "-file":
             return _INPUT if k + 1 < n and words[k + 1].text == "-" else None
         if word in _PS_ENCODED or word.startswith("-"):
             return None
-        return _joined(words[k:]) if bare_runs else None
+        return tuple(range(k, n)) if bare_runs else None
     return _INPUT
 
 
 def _cmd_argument(words) -> object:
+    """What cmd's arguments `words` give: the indexes of the words its script is joined
+    from, `_INPUT`, or None."""
     for k, w in enumerate(words):
         word = w.text.lower()
         if word in _CMD_RUN:
-            rest = words[k + 1:]
-            return _joined(rest) if rest else None
+            return tuple(range(k + 1, len(words))) or None
         if word in _CMD_PLAIN or word[:3] in ("/e:", "/f:", "/v:", "/t:"):
             continue
         return None

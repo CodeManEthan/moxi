@@ -101,9 +101,10 @@ out of the harness. This package is turns' whole public API, the announcement's
                               # what a command runs, past assignments, reserved words and
                               # wrappers; None when it runs nothing the reader can name
     turns.shell_scripts(t, *, dialect="sh")   # (ShellScript(text, dialect, command_index,
-                              # source), ...): the text a command hands a shell to run,
-                              # from its argument, a heredoc, a here-string or a pipe
-                              # (SCRIPT_SOURCES)
+                              # source, word_indexes), ...): the text a command hands a
+                              # shell to run, from its argument, a heredoc, a here-string
+                              # or a pipe (SCRIPT_SOURCES), and the command's words it was
+                              # made from
 
 A request the endpoint never got reads as refused (`Refused("gone")`); one it got and
 did not answer in time has an unknown outcome, never a refusal (the `Delivery` above,

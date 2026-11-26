@@ -12,10 +12,14 @@
   word that names what a command runs, past assignments, reserved words and the wrappers
   `sudo`, `doas`, `env`, `nohup`, `builtin`, `exec`, `command`, `nice`, `timeout`,
   `setsid` and `stdbuf` with the options each takes. `shell_scripts` gives the text a
-  command hands a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`, `pwsh`, `powershell`, `cmd`)
-  to run, as a `ShellScript`: its `-c`, `-Command` or `/c` argument, a heredoc or
-  here-string on it, or literal text piped into it from `echo` or `cat` (its `source`,
-  one of `SCRIPT_SOURCES`). What needs
+  command hands a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`, `mksh`, `ash`, `pwsh`,
+  `powershell`, `cmd`) to run, as a `ShellScript`: its `-c`, `-Command` or `/c` argument,
+  a heredoc or here-string on it, or literal text piped into it from `echo` or `cat` (its
+  `source`, one of `SCRIPT_SOURCES`), with the indexes of the command's words it was made
+  from (`word_indexes`). A shell is named by its command word's last part across `/` and
+  `\`, with `.exe` dropped, and `pwsh`, `powershell` and `cmd` in any case. A POSIX
+  shell's option cluster is all flags, except that each `o` or `O` in it takes the next
+  word (`bash -co pipefail 'cmd'`). What needs
   evaluating to know what runs is not read. The reader never raises.
 - A `project-facts` component for the Projects page. It reads turns' own `/api/sessions`
   and `sessions` topic, and reports, by session claim, whether each session turns can read
