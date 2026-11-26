@@ -16,6 +16,7 @@ import string
 
 ALNUM = string.ascii_letters + string.digits
 URLSAFE = ALNUM + "-_"
+HEX = "0123456789abcdef"
 
 
 def rng(seed: int = 7) -> random.Random:
@@ -49,8 +50,7 @@ def jwt(r) -> str:
 
 
 def bws(r) -> str:
-    hexd = "0123456789abcdef"
-    uid = "-".join(chars(r, n, hexd) for n in (8, 4, 4, 4, 12))
+    uid = "-".join(chars(r, n, HEX) for n in (8, 4, 4, 4, 12))
     return "0" + "." + uid + "." + chars(r, 30) + ":" + chars(r, 24) + "=="
 
 
@@ -77,6 +77,11 @@ def telegram(r) -> str:
 
 def url_credential(r, user: str = "") -> str:
     return "https://" + user + ":" + chars(r, 16) + "@" + "db.example.test/x"
+
+
+def sk_key(r, n: int = 32, alphabet: str = ALNUM, kind: str = "") -> str:
+    """An `sk-` key: `kind` (`proj-`, `or-v1-`) and then `n` characters of `alphabet`."""
+    return "".join(("s", "k-", kind, chars(r, n, alphabet)))
 
 
 def password_assignment(r) -> str:
@@ -199,6 +204,7 @@ CREDENTIALS = (
     (google_client_secret, "google-oauth-client-secret"),
     (discord, "discord-bot-token"),
     (ntfy, "ntfy-access-token"),
+    (sk_key, "sk-api-key"),
 )
 
 

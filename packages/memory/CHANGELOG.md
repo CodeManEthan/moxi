@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- With the secrets release whose credentials set finds `sk-` keys and real URL
+  passwords, new rows are stored with those redacted. Rows indexed before it keep them
+  until `moxi memory reindex` rebuilds the index.
 - The subconscious, memory's second way to recall: in a session launched with it on (the
   launcher's `subconscious` row, which stamps `MOXI_MEMORY_SUBCONSCIOUS`, exported as
   `api.SUBCONSCIOUS_ENV`), a second agent searches past sessions and notes and sends the

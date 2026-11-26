@@ -488,7 +488,7 @@ def test_hits_are_sorted_and_a_pair_on_one_span_both_come_back(engine_name):
 def test_describe_counts_the_sets():
     info = {i.name: i for i in describe()}
     assert set(info) == set(SETS)
-    assert len(info["credentials"].rules) == 231 and len(info["broad"].rules) == 4
+    assert len(info["credentials"].rules) == 232 and len(info["broad"].rules) == 4
     assert info["credentials"].pin["tag"] == "v8.30.1"
     assert info["credentials"].dropped == ()
 

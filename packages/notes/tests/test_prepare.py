@@ -10,7 +10,7 @@ from moxi_repo.api import Change, PrepareContext, Prepared
 from moxi_notes import judge, prepare
 
 from gate_kit import (allow_line, break_private_names, notes_repo, private_names, sh,
-                      snapshot, token, tree, write)
+                      sk_key, snapshot, token, tree, write)
 from notes_kit import configure, git_env
 
 
@@ -36,6 +36,13 @@ def test_a_file_with_a_hit_is_dropped_with_its_rule_and_line(root):
     assert left(result) == {"plan.md": "dropped: credentials/github-pat line 2"}
     assert token() not in "".join(left(result).values())
     assert "clean.md" in tree(root) and "plan.md" not in tree(root)
+
+
+def test_an_sk_key_in_prose_is_a_credentials_hit(root):
+    write(root, "keys.md", "notes\nthe deepseek key is " + sk_key() + " for now\n")
+    result = snapshot(root)
+    assert left(result) == {"keys.md": "dropped: credentials/sk-api-key line 2"}
+    assert "keys.md" not in tree(root)
 
 
 def test_a_private_name_is_a_hit(root):

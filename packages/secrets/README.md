@@ -30,9 +30,13 @@ A caller always names the sets it wants. There is no default set.
   redacted copy, since whoever wrote that text may not be the one who reads the copy.
   The local list adds rules for
   Bitwarden access tokens, Google OAuth tokens and client secrets, bare Discord and
-  Telegram bot tokens, URL credentials, private key headers, ntfy tokens and
-  `Authorization: Bearer` values. gitleaks' decoding passes (base64, hex, percent-encoding)
-  aren't run in-process.
+  Telegram bot tokens, `sk-` keys of any vendor (16 or more characters after `sk-`,
+  entropy above 2.5, OpenSSH's security-key type names left out), URL credentials,
+  private key headers, ntfy tokens and `Authorization: Bearer` values. A URL password made
+  only of letters and underscores holding `pass`, `changeme` or `xxx`, optionally in
+  brackets, braces, `$` or `%`, counts as a placeholder; any digit or other symbol makes
+  it a hit. gitleaks' decoding passes (base64, hex, percent-encoding) aren't run
+  in-process.
 - **broad** finds more and pays for it in false positives. Pick it where a false positive
   is cheap. Its local rules: `credential-assignment` (a quoted value after a key named
   like a password or secret); `high-entropy-run` (a run of 40 or more letters, digits,
