@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- For module authors: `moxi_ui.testing`'s phone bridge ends a connection on `cut` and
+  `stop` on Windows too. A shutdown there doesn't end a read another thread is waiting
+  in, so a connection whose browser side stayed open was never ended; its pumps now
+  also look every 50 ms whether their sockets were ended.
 - On Windows, a loopback connection whose own deadline ran out while the server was
   still to prove itself could raise "no answer to /api/prove within 1.0 s" rather than
   `TimeoutError`, since a timer there can fire a clock step before its time. The bound

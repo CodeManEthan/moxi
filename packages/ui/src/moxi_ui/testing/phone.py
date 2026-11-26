@@ -47,10 +47,12 @@ import hashlib
 import http.client
 import json
 import os
+import select
 import socket
 import ssl
 import threading
 import time
+import weakref
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -69,6 +71,11 @@ HOLD_WAIT_S = 10.0
 PORT_TRIES = 3
 #: The largest request head the 502 answer reads.
 _HEAD_MAX = 64 * 1024
+#: Sockets `_shut` has ended. On Windows a shutdown doesn't end a read another thread is
+#: blocked in, so a pump looks here between waits.
+_ENDED: weakref.WeakSet[socket.socket] = weakref.WeakSet()
+#: The longest a pump waits for bytes before it looks whether its sockets were ended.
+_PUMP_LOOK_S = 0.05
 _BAD_GATEWAY = (b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\n"
                 b"Content-Length: 11\r\nConnection: close\r\n\r\nBad Gateway")
 #: The device each engine plays: Chromium a Pixel and WebKit an iPhone, with touch and the
@@ -344,7 +351,12 @@ def _pump(one: socket.socket, other: socket.socket) -> None:
     accepts while the other direction is still about to use it (`PhoneBridge.cut`)."""
     def copy(src: socket.socket, dst: socket.socket) -> None:
         try:
-            while data := src.recv(65536):
+            while src not in _ENDED and dst not in _ENDED:
+                if not _readable(src):
+                    continue
+                data = src.recv(65536)
+                if not data:
+                    break
                 dst.sendall(data)
         except (OSError, ValueError):
             pass
@@ -361,10 +373,20 @@ def _pump(one: socket.socket, other: socket.socket) -> None:
     _close(other)
 
 
+def _readable(sock: socket.socket) -> bool:
+    """Whether `sock` has bytes to read (or its end) within `_PUMP_LOOK_S`: TLS bytes
+    already decrypted count, which the plain socket's wait doesn't see."""
+    if isinstance(sock, ssl.SSLSocket) and sock.pending():
+        return True
+    return bool(select.select([sock], [], [], _PUMP_LOOK_S)[0])
+
+
 def _shut(sock: socket.socket) -> None:
     """End every read and write on `sock`, from any thread, without closing it. For a TLS
     socket this is the plain socket's shutdown: `SSLSocket.shutdown` would also drop the
-    TLS state a pump thread may be reading through."""
+    TLS state a pump thread may be reading through. On Windows a shutdown doesn't end a
+    read already waiting, so the socket is also marked ended for the pumps (`_ENDED`)."""
+    _ENDED.add(sock)
     try:
         socket.socket.shutdown(sock, socket.SHUT_RDWR)
     except (OSError, ValueError):
