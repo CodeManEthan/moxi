@@ -101,14 +101,14 @@ def test_the_tag_reaches_the_child_and_its_child(tmp_path):
     assert done.stdout.decode().split() == [tag, tag]
 
 
-def test_the_tag_replaces_one_the_environment_holds(tmp_path):
+def test_the_tag_replaces_one_the_env_holds(tmp_path):
     tag = a_tag()
     done = proc.run([PY, script(tmp_path, "tags.py", TAGS)], timeout_s=60, tag=tag,
                     env={**os.environ, proc.RUN_TAG_ENV: "an older one"})
     assert done.stdout.decode().split() == [tag, tag]
 
 
-def test_without_a_tag_the_environment_is_left_as_it_is(tmp_path):
+def test_without_a_tag_the_env_is_left_as_it_is(tmp_path):
     done = proc.run([PY, script(tmp_path, "tags.py", TAGS)], timeout_s=60,
                     env={**os.environ, proc.RUN_TAG_ENV: "kept"})
     assert done.stdout.decode().split() == ["kept", "kept"]

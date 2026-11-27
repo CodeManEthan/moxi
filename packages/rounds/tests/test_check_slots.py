@@ -342,7 +342,7 @@ def test_a_later_group_leader_under_the_pid_and_its_members_are_not_the_run(star
 
 
 @POSIX
-def test_an_environment_that_cant_be_read_counts_as_no_tag(started, monkeypatch):
+def test_an_env_that_cant_be_read_counts_as_no_tag(started, monkeypatch):
     tag = a_tag()
     one = started([PY, "-c", SLEEP], tag=tag)
     monkeypatch.setattr(proc, "process_env", lambda pid: None)
