@@ -667,6 +667,160 @@ def test_a_test_reaches_a_server_a_wider_fixture_serves(module_server):
         assert c.recv(64) == b"ping"
 
 
+# --- the run-level clear ---------------------------------------------------------------
+
+#: An agent's session as a harness and Moxi's modules stamp it, and what a run needs.
+SESSION_SOURCE = {
+    "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "s", "CLAUDE_PID": "1",
+    "CLAUDE_CONFIG_DIR": "/real/.claude", "CODEX_SANDBOX": "seatbelt",
+    "CODEX_HOME": "/real/.codex", "OPENCODE": "1", "OPENCODE_CONFIG_CONTENT": "{}",
+    "AI_AGENT": "claude-code", "GIT_EDITOR": "true", "COREPACK_ENABLE_AUTO_PIN": "0",
+    "NoDefaultCurrentDirectoryInExePath": "1",
+    "MOXI_COMMS_NAME": "agent", "MOXI_COMMS_SOCKET": "/run/s", "MOXI_NOTES_DIR": "/n",
+    "MOXI_DEV_SCOPE": "u", "MOXI_X_OTHER": "o", "MOXI_X_INPUT": "i",
+}
+#: What the clear keeps of it.
+RUN_SOURCE = {
+    "PATH": "/bin", "HOME": "/home/you", "LANG": "C.UTF-8", "OPENCLAW": "1",
+    "MOXI_TEST_WORKERS": "2", "MOXI_TEST_TEMP": "disk", "MOXI_STARTED_BY": "moxi-dev",
+    "MOXI_HOME": "/m", "MOXI_COMMS_HOME": "/m/comms", "MOXI_ANCHOR_HOME": "/home/you",
+    "MOXI_COMMS_STATE_HOME": "/m/s", "MOXI_COMMS_RUNTIME_DIR": "/run/m",
+}
+
+
+def test_the_clear_takes_the_session_and_keeps_what_the_run_needs(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    found = testing.cleared_names({**SESSION_SOURCE, **RUN_SOURCE}, ["MOXI_X_INPUT"])
+    assert sorted(found) == sorted(set(SESSION_SOURCE) - {"MOXI_X_INPUT"})
+
+
+def test_on_windows_the_clear_matches_names_without_case(monkeypatch):
+    monkeypatch.setattr(testing, "WINDOWS", True)
+    env = {"claudecode": "1", "GIT_editor": "true", "Codex_Home": "c",
+           "moxi_comms_name": "a", "moxi_test_workers": "2", "Moxi_Comms_Home": "/m",
+           "moxi_x_input": "i", "Path": "C:\\bin"}
+    assert sorted(testing.cleared_names(env, ["MOXI_X_INPUT"])) == sorted(
+        ["claudecode", "GIT_editor", "Codex_Home", "moxi_comms_name"])
+    monkeypatch.setattr(testing, "WINDOWS", False)
+    assert testing.cleared_names(env) == []
+
+
+def test_the_clear_has_a_prefix_for_each_harness_the_agent_test_knows():
+    from moxi.terminal import _walk
+
+    assert sorted(prefix.rstrip("_").lower() for prefix in testing.AGENT_ENV_PREFIXES) == (
+        sorted(_walk.HARNESSES))
+
+
+def test_a_plugin_s_inputs_are_its_declared_names():
+    class Plugin:
+        RUN_INPUT_ENV = ("MOXI_X_INPUT", 3)
+
+    class Broken:
+        def __getattr__(self, name):
+            raise RuntimeError(name)
+
+    module = type(sys)("plugin")
+    module.RUN_INPUT_ENV = ["MOXI_Y_INPUT"]
+    assert testing.run_inputs([Plugin(), module, Broken(), object()]) == {
+        "MOXI_X_INPUT", "MOXI_Y_INPUT"}
+
+
+def _workspace_plugins() -> list[object]:
+    """Every pytest plugin in the workspace's `src/` folders, imported: a file defining a
+    top-level `pytest_*` function."""
+    import ast
+    import importlib
+
+    root = Path(__file__).resolve().parents[3] / "packages"
+    if not root.is_dir():
+        pytest.skip("not run from the repository (an sdist has no workspace)")
+    found = []
+    for path in sorted(root.glob("*/src/**/*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if not any(isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and stmt.name.startswith("pytest_") for stmt in tree.body):
+            continue
+        parts = path.relative_to(root).parts[2:]        # under <package>/src/
+        dotted = ".".join(parts).removesuffix(".py").removesuffix(".__init__")
+        found.append(importlib.import_module(dotted))
+    return found
+
+
+def test_every_module_s_session_variables_are_cleared_and_no_plugin_keeps_one():
+    from moxi import modules
+
+    stamps = modules.session_env()
+    assert stamps, "the workspace installs Moxi modules that stamp a session; none found"
+    plugins = _workspace_plugins()
+    assert any(getattr(plugin, "RUN_INPUT_ENV", ()) for plugin in plugins)
+    inputs = testing.run_inputs(plugins)
+    for key in stamps:
+        name = key + "X" if key.endswith("_") else key
+        assert testing.cleared_names({name: "1"}, inputs) == [name], key
+        assert not any(one == key or (key.endswith("_") and one.startswith(key))
+                       for one in inputs), key
+
+
+RUN_PROBE = """\
+import json, os, subprocess, sys
+import pytest
+
+CLEARED = {cleared!r}
+KEPT = {kept!r}
+NAMES = "import json, os; print(json.dumps(sorted(os.environ)))"
+
+
+def names_of_a_child():
+    done = subprocess.run([sys.executable, "-c", NAMES], env=dict(os.environ),
+                          capture_output=True, text=True, check=True)
+    return set(json.loads(done.stdout))
+
+
+@pytest.fixture(scope="session")
+def run_env():
+    return dict(os.environ)
+
+
+@pytest.fixture(scope="module")
+def module_child():
+    return names_of_a_child()
+
+
+def test_the_run_and_its_children_hold_no_session_variable(run_env, module_child):
+    for seen in (set(run_env), module_child):
+        assert not seen & set(CLEARED), sorted(seen & set(CLEARED))
+        assert set(KEPT) <= seen, sorted(set(KEPT) - seen)
+"""
+
+INPUT_PLUGIN = """\
+import os
+
+RUN_INPUT_ENV = ("MOXI_X_INPUT",)
+
+
+def pytest_collection_finish(session):
+    print("at collection:", os.environ.get("MOXI_X_INPUT"), os.environ.get("MOXI_X_OTHER"))
+"""
+
+
+def test_a_run_clears_the_session_for_every_scope_and_child_and_keeps_its_inputs(
+        pytester, monkeypatch, tmp_path):
+    kept = {"MOXI_TEST_WORKERS": "2", "MOXI_STARTED_BY": "moxi-dev",
+            "MOXI_HOME": str(tmp_path / "m"), "MOXI_COMMS_HOME": str(tmp_path / "c"),
+            "MOXI_X_INPUT": "given"}
+    for name, value in {**SESSION_SOURCE, **kept}.items():
+        if name != "NoDefaultCurrentDirectoryInExePath" or not testing.WINDOWS:
+            monkeypatch.setenv(name, value)
+    cleared = sorted(set(SESSION_SOURCE) - {"MOXI_X_INPUT"})
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(xinput=INPUT_PLUGIN)
+    pytester.makepyfile(test_probe=RUN_PROBE.format(cleared=cleared, kept=sorted(kept)))
+    result = pytester.runpytest_subprocess("-p", "xinput", "-p", "no:cacheprovider", "-s")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["*at collection: given None*"])
+
+
 # --- a pytest run inside a test --------------------------------------------------------
 
 @POSIX

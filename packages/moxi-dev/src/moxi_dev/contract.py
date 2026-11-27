@@ -28,7 +28,12 @@ finding names them:
    module's; a `GATED` script or extra that does not exist.
 5. A setting in the environment (in `src/`): an environment read whose key is neither a
    literal nor a module-level string constant, unless it falls under a prefix entry of
-   `INTERNAL_ENV`; a key starting `MOXI_` that `INTERNAL_ENV` does not declare.
+   `INTERNAL_ENV`; a key starting `MOXI_` that `INTERNAL_ENV` does not declare. And in a
+   pytest plugin, a file that defines a top-level `pytest_*` function: a `MOXI_` key it
+   reads that its own module-level `RUN_INPUT_ENV` tuple does not name, other than a
+   `MOXI_TEST_` name, `MOXI_STARTED_BY` and the locators. The test kit clears every other
+   `MOXI_` name when a run starts (`moxi_dev.testing`, the run-level clear), so a plugin
+   names there each one the command starting the run sets for it.
 6. A module's own console script looked up on PATH with `shutil.which` (in `src/`).
 7. The names: the `moxi.modules` entry point, the distribution and import names (no
    module may take a core verb or a name the core keeps for itself), the console
@@ -101,15 +106,17 @@ from pathlib import Path, PurePosixPath
 from moxi import names
 from moxi.modules import KNOWN, _check, _relative, _TooNew
 
+# The test kit's prefix is also the prefix of the variables the contributors' package
+# reads, having no announcement to declare them in: the test tiers' and the check's own
+# (`MOXI_TEST_LIVE`, `MOXI_TEST_WORKERS`).
+from moxi_dev.testing import RUN_INPUT_ATTR, TEST_PREFIX_ENV, is_kept_moxi_name
+
 #: The distribution and import name of the core.
 CORE = names.HARNESS
 #: The contributors' package: not a module, so checks 1, 7 and 8 pass it by.
 DEV = f"{names.HARNESS}-dev"
 #: Its import name, which another package's tests may import like any declared one.
 DEV_IMPORT = f"{names.HARNESS}_dev"
-#: The variables the contributors' package reads, having no announcement to declare
-#: them in: the test tiers' and the check's own (`MOXI_TEST_LIVE`, `MOXI_TEST_WORKERS`).
-TEST_PREFIX_ENV = "MOXI_TEST_"
 #: The entry-point group a module announces itself in (as `moxi.modules.GROUP`).
 GROUP = "moxi.modules"
 #: The core modules another module may import (the core's table of what it holds). The
@@ -962,8 +969,17 @@ class _Repo:
                 continue
             names_ = _OsNames(source.tree)
             consts = _string_constants(source.tree)
+            inputs = _run_inputs(source.tree, consts)
             for line, key in names_.env_reads():
                 literal, prefix = _key_text(key, consts)
+                if (inputs is not None and literal is not None
+                        and literal.startswith("MOXI_") and literal not in inputs
+                        and not is_kept_moxi_name(literal)):
+                    self.add(source.path, line, "5",
+                             f"a pytest plugin reads {literal}, which its {RUN_INPUT_ATTR} "
+                             "does not name; the test kit clears it when the run starts, "
+                             f"so a name the command starting the run sets goes in "
+                             f"{RUN_INPUT_ATTR}")
                 if literal is None:
                     if prefixes and prefix.startswith(prefixes):
                         continue
@@ -1438,6 +1454,24 @@ def _write_call(call: ast.Call) -> str | None:
 
 def _target(text: str | None) -> str | None:
     return None if text is None else re.sub(r"\s+", "", text)
+
+
+def _run_inputs(tree: ast.Module, consts: Mapping[str, str]) -> frozenset[str] | None:
+    """For a pytest plugin, a file that defines a top-level `pytest_*` function, the names
+    its module-level `RUN_INPUT_ENV` tuple or list holds, each a literal or a module-level
+    string constant; None for any other file."""
+    if not any(isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and stmt.name.startswith("pytest_") for stmt in tree.body):
+        return None
+    declared = _assignments(tree).get(RUN_INPUT_ATTR)
+    if not isinstance(declared, (ast.Tuple, ast.List)):
+        return frozenset()
+    found = set()
+    for element in declared.elts:
+        literal, _ = _key_text(element, consts)
+        if literal is not None:
+            found.add(literal)
+    return frozenset(found)
 
 
 def _key_text(node: ast.AST, consts: Mapping[str, str]) -> tuple[str | None, str]:
