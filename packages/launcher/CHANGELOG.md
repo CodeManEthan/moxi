@@ -5,6 +5,13 @@
 - Every launcher module imports on its own, in any order: `parks` reaches `fork` only when
   it reads a launch, which ends the import cycle that made `import moxi_launcher.keepwarm`
   or `moxi_launcher.relaunch` fail when imported first.
+- Opening the launch log only to read it (`store.connect(create=False)`) no longer
+  creates its tables in an empty file: a file that holds no launch log yet raises
+  `StoreError`, as a missing one does, and is left as it was. Every reader treats that as
+  no launch log. A log at an older schema version is still brought up to date.
+- `moxi config set` and the launch defaults writer no longer crash on a valid
+  `presets.toml` whose `[defaults.<name>]` table comes before `[defaults]`: the value is
+  written under `[defaults]`, and the file keeps its order and comments.
 - Interface 4, for a caller that runs its own headless agents: a `LaunchRequest`'s
   `stamps` (a fork's rule), kept in the launch's values; `continue_headless`, a headless
   resume that replays the stored values and stamps, launched by `by` (the caller's

@@ -9,9 +9,10 @@ launcher's state of it. Every timed row's line two ends in what going cold costs
 usage's context of the session and its price for the record's lifetime, and its opened row
 says it in full with a `Usage` link. A session waiting on agents with nothing to keep it
 warm is loud and first, and carries `Keep warm`, whose press posts the launch's request id;
-a covered one says it is kept warm. Without launcher, or without usage, or with either's
-read failing after a first good answer, that module's pieces are absent and nothing stands
-in their place.
+a covered one says it is kept warm, and line two ends in its next keep-alive where launcher
+gives one: a time, or `due` once the time has come. Without launcher, or without usage, or
+with either's read failing after a first good answer, that module's pieces are absent and
+nothing stands in their place.
 
 The transcripts are written and usage's index built in each shell's own environment, and
 the launches are rows of the shell's own launch log whose process is this test's own, so
@@ -192,17 +193,24 @@ def iso_in(seconds: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + seconds))
 
 
+#: `next_in` for a launch whose entry has no `next_keep_alive_at`, as an older launcher sends.
+NO_KEY = object()
+
+
 def launch(request_id: str, session: str, name: str, *, waits: int = 0, covered: bool = False,
-           coverable: bool = False, effort: str | None = "high") -> dict:
-    """One running launch in launcher's declared shape, warm until its record goes cold."""
+           coverable: bool = False, effort: str | None = "high", next_in: Any = None) -> dict:
+    """One running launch in launcher's declared shape, warm until its record goes cold;
+    its next keep-alive `next_in` seconds from now, null where None, and left out where
+    `NO_KEY`."""
     project, age = SESSIONS[session]
+    nexts = {} if next_in is NO_KEY else {"next_keep_alive_at": None if next_in is None else iso_in(next_in)}
     return {
         "request_id": request_id, "harness": "claude", "session_id": session, "name": name, "identity": None,
         "where": {"target": "slot", "slot": "2", "project_key": project, "folder": project},
         "started_at": iso_in(-7200), "model": "sonnet", "effort": effort,
         "cache": {"state": "warm", "until": iso_in(3600 - age), "estimated": False},
         "waits": {"kind": "agents", "count": waits} if waits else None,
-        "covered": covered, "coverable": {"cap": 3} if coverable else None, "activity": None,
+        "covered": covered, "coverable": {"cap": 3} if coverable else None, "activity": None, **nexts,
     }
 
 
@@ -397,6 +405,66 @@ def test_the_session_waiting_uncovered_is_loud_and_first_and_a_covered_one_is_ke
     expect(loud).to_have_attribute("fact", "kept warm while 2 agents work")
     expect(loud.locator('[data-action="keep-warm"]')).to_have_count(0)
     no_attribute(loud, "fact-heavy")
+
+
+def clock_of(page, at: str) -> str:
+    """The launcher time `at` as the page words a time of day, in the browser's zone."""
+    return page.evaluate("""(at) => new Date(Date.parse(at))
+      .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })""", at)
+
+
+def read_again(page, stub: LauncherStub, sessions: list[dict] | None = None, status: int | None = None) -> None:
+    """Launcher answers `sessions` (or `status`) from now on, and the page reads it again."""
+    if sessions is not None:
+        stub.sessions = sessions
+    stub.status = status
+    with page.expect_response(lambda answer: "/m/launcher/api/running" in answer.url
+                              and answer.status == (status or 200)):
+        shown_again(page)
+
+
+def test_a_covered_row_ends_in_its_next_keep_alive_and_nothing_stale_stays(full, ui_contexts):
+    cold, _, _ = costs(full)
+    page = ui_contexts(full).pages[0]
+    # COVERED goes cold in 35 minutes; keep-warm's window opens 15 minutes before that.
+    first = launch("r-covered", COVERED, "planner", waits=1, covered=True, next_in=1200)
+    stub = LauncherStub(page, [first, launch("r-slot", SLOT, "builder-1")],
+                        [state("r-covered", COVERED, on=True), state("r-slot", SLOT, on=False)])
+    panel, _ = open_page(page)
+    covered, slot = row(panel, COVERED), row(panel, SLOT)
+    expect(covered).to_have_attribute("fact", "kept warm while 1 agent works")
+    expect(covered).to_have_attribute("rest", re.compile(r"^last request "))
+    # a time past midnight carries its day word
+    expect(covered).to_have_attribute("tail", re.compile(
+        rf"^next keep-alive (?:tomorrow )?{re.escape(clock_of(page, first['next_keep_alive_at']))}$"))
+    # not covered: launcher sends null, and the row keeps its cost
+    expect(slot).to_have_attribute("tail", f"about {cold} to re-read if cold")
+
+    # a time already come: the nudge goes at keep-warm's next ask
+    read_again(page, stub, [launch("r-covered", COVERED, "planner", waits=1, covered=True, next_in=-60),
+                            launch("r-slot", SLOT, "builder-1")])
+    expect(covered).to_have_attribute("tail", "next keep-alive due")
+
+    # null after a good time: no piece, and no stale one
+    read_again(page, stub, [launch("r-covered", COVERED, "planner", waits=1, covered=True)])
+    expect(covered).to_have_attribute("fact", "kept warm while 1 agent works")
+    no_attribute(covered, "tail")
+
+    # an older launcher that sends no such key: the row as before
+    read_again(page, stub, [launch("r-covered", COVERED, "planner", waits=1, covered=True, next_in=1200)])
+    expect(covered).to_have_attribute("tail", re.compile(r"^next keep-alive "))
+    read_again(page, stub, [launch("r-covered", COVERED, "planner", waits=1, covered=True, next_in=NO_KEY)])
+    expect(covered).to_have_attribute("fact", "kept warm while 1 agent works")
+    no_attribute(covered, "tail")
+
+    # a read failing after a good one: nothing of it stays
+    read_again(page, stub, [launch("r-covered", COVERED, "planner", waits=1, covered=True, next_in=1200)])
+    expect(covered).to_have_attribute("tail", re.compile(r"^next keep-alive "))
+    read_again(page, stub, status=500)
+    expect(covered).to_have_attribute("fact", re.compile(r"^warm until "))
+    expect(covered).to_have_attribute("tail", f"about {cold} to re-read if cold")
+    expect(panel.get_by_text(re.compile("keep-alive", re.I))).to_have_count(0)
+    expect(panel.locator('moxi-ui-row[tail^="next keep-alive"]')).to_have_count(0)
 
 
 def test_a_refused_press_says_why_on_its_row(full, ui_contexts):

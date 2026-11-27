@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- With launcher, a warm `Cache` line on an opened agent ends in the session's next
+  keep-alive where launcher gives one (`next_keep_alive_at`): `kept warm while 1 agent
+  works, next keep-alive 19:49`, or `next keep-alive due` once that time has come. A null
+  or missing time, or a failed read, draws nothing.
 - A `project-facts` component for the Projects page: the opened project's lead and
   agents read `not running now` where no session holds the name, while comms' roster
   can say so.

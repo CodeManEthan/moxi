@@ -151,6 +151,7 @@ from typing import TYPE_CHECKING
 from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
+from moxi import store as core_store
 
 from . import (catalog, compose, first, handoffs, headless, identity, live, names, parks,
                presets, recycle, slots, store, targets)
@@ -546,7 +547,12 @@ def _live_names(env: Mapping[str, str] | None) -> frozenset[str]:
     """The names of the live launches; none when the launch log was never made."""
     if not store.path(env).exists():
         return frozenset()
-    conn = store.connect(env=env, create=False)
+    try:
+        conn = store.connect(env=env, create=False)
+    except core_store.StoreTooNew:
+        raise
+    except core_store.StoreError:
+        return frozenset()  # removed since, or holds no launch log yet
     try:
         return names.taken(conn)
     finally:
@@ -824,7 +830,12 @@ def _known(request_id: str | None,
     left unmade."""
     if not request_id or not store.path(env).exists():
         return None
-    conn = store.connect(env=env, create=False)
+    try:
+        conn = store.connect(env=env, create=False)
+    except core_store.StoreTooNew:
+        raise
+    except core_store.StoreError:
+        return None  # removed since, or holds no launch log yet
     try:
         return store.get(conn, request_id)
     finally:
