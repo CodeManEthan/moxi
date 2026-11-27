@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from moxi import modules
-from moxi_comms import reserved, scoped, secrets
+from moxi_comms import provision, reserved, scoped, secrets
 from moxi_comms.paths import comms_db
 from moxi_comms.tokens import TokenStore
 
@@ -115,6 +115,19 @@ def test_a_declared_word_is_active_with_a_token_for_its_module(chain, store):
     assert r["description"] == "the nightly digest a session gets"
     token = token_of(store, "pager", "digest")
     assert token and r["token_hash"] == reserved.token_hash(token)
+
+
+def test_setup_mints_the_tokens_installed_modules_declare(chain, store, monkeypatch):
+    monkeypatch.setattr(provision, "main", lambda argv: 0)
+    monkeypatch.setattr(reserved, "declared_names", lambda gone=None: {})
+    monkeypatch.setattr(scoped, "load", lambda gone=None: scoped.from_mapping(DIGEST, gone))
+    monkeypatch.setattr(reserved, "_chain", lambda given, env: chain)
+
+    assert provision.setup() == 0
+    row = word_row("digest")
+    token = token_of(store, "pager", "digest")
+    assert row["state"] == "active"
+    assert token and row["token_hash"] == reserved.token_hash(token)
 
 
 def test_a_second_reconcile_changes_nothing(chain, store):

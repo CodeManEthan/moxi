@@ -306,14 +306,21 @@ SETUP_WAITS = "comms' 0.2 data moves at the daemon's next start"
 
 def setup():
     """comms' `SETUP`, which `moxi install` runs before it starts the daemon: provisioning
-    as `moxi-comms-provision` makes it with no flags, through the store's one opener.
-    While comms 0.2's daemon still answers it writes nothing and says so, and the new
-    daemon's start moves the files and provisions. Any other refusal of the move is
-    returned as its line, so the install fails with it. Returns 0 when done."""
+    as `moxi-comms-provision` makes it with no flags, through the store's one opener,
+    then reconciling the send-only names and scoped sender words installed modules
+    declare. While comms 0.2's daemon still answers provisioning writes nothing and says
+    so, and the new daemon's start moves the files, provisions and reconciles. Any other
+    refusal of the move is returned as its line, so the install fails with it. Returns 0
+    when done."""
     try:
-        return main([])
+        code = main([])
     except SystemExit as exc:
-        return exc.code
+        code = exc.code
+    if code == 0:
+        from . import reserved
+
+        reserved.on_install("comms")
+    return code
 
 
 def main(argv=None) -> int:  # pragma: no cover - exercised by the smoke runs
