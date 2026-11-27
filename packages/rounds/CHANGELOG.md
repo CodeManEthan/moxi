@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.6 (unreleased)
+
+- New settings `check_lock.at_once` (how many runs may hold the machine's check lock at
+  once, default 1) and `check_lock.need_mib` (the free memory, in MiB, a run needs to
+  start beside running ones; 0, the default, sums their `memory_mib`). A project's
+  `check` table and its `ci.local` take `memory_mib`, the most memory one run of that
+  command holds, a whole number of MiB of at least 64, and `{memory_mib}` in that table's
+  command lines is filled with it; left out, the placeholder stays as written. rounds
+  needs `moxi>=0.1.12`.
+
 ## 0.1.5 (unreleased)
 
 - The page acts, at a desk. An item's popover and the walk take the operator's answer:

@@ -27,6 +27,9 @@ forward, so the record stays good while the build waits in the queue.
 **The command line** is split as a shell would split it and run with no shell; a step of
 the user's own gives its words as a list. Each word may hold the placeholders `{round}`, `{stage}`, `{repo}`, `{root}`, `{branch}`, `{tip}`
 and `{into}`, filled in for the build (`fill`); any other text in braces is left as it is.
+The repo's check and `ci.local` may also hold `{memory_mib}`, filled in as their words are
+read with their own table's `memory_mib` (`settings.fill_memory`), and left as written
+where that table declares none.
 
 **The run** (`check`), through the write path, with the round's lock held only to read
 and to append:
@@ -131,11 +134,12 @@ def fill(words: Sequence[str], values: Mapping[str, str]) -> list[str]:
 
 def declared(settings, repo: str) -> list[str] | None:
     """The words of the repo's declared check, split as a shell would, with their
-    placeholders as written; None when the repo declares no check."""
+    placeholders as written but `{memory_mib}`, filled from the check's own
+    `memory_mib` where it declares one; None when the repo declares no check."""
     found = own.build_setting(settings, repo, "check")
     if not isinstance(found, Mapping) or not isinstance(found.get("command"), str):
         return None
-    return shlex.split(found["command"])
+    return own.fill_memory(shlex.split(found["command"]), found)
 
 
 def values(name: str, build: builds.Build, *, root: str | os.PathLike,
@@ -153,12 +157,13 @@ def queued(settings, repo: str) -> bool:
 
 def scoped(settings, repo: str) -> list[str] | None:
     """The words of a queue project's `check.scoped`, placeholders and `{base}` as
-    written; None when the repo is no queue project or names no scoped command."""
+    written but `{memory_mib}`, filled as `declared` fills it; None when the repo is no
+    queue project or names no scoped command."""
     found = own.build_setting(settings, repo, "check")
     if not queued(settings, repo) or not isinstance(found, Mapping) or not isinstance(
             found.get("scoped"), str):
         return None
-    return shlex.split(found["scoped"])
+    return own.fill_memory(shlex.split(found["scoped"]), found)
 
 
 def fill_base(words: Sequence[str], base: str | None) -> list[str]:
