@@ -299,6 +299,35 @@ def test_an_exit_with_no_init_for_another_reason_records_nothing(claude):
     assert len(claude.runs()) == 2          # the next recall probed again
 
 
+class TurnsDown(api.Refusal):
+    code = "turns-additions"
+
+
+class RefusesTheProbe:
+    """The real launcher, but its preview refuses the probe's own request, as it would
+    when turns' additions fail between the check and the probe."""
+
+    def __getattr__(self, name):
+        return getattr(api, name)
+
+    def preview(self, req, **kw):
+        if req.typed.get("brief") == fence.PROBE_PROMPT:
+            raise TurnsDown(None, "turns could not give the launch its additions",
+                            "run moxi doctor")
+        return api.preview(req, **kw)
+
+
+@POSIX
+def test_a_refusal_of_the_probes_request_is_refused_not_a_crash(claude):
+    v = fence.ensure(RefusesTheProbe(), spec())
+    assert v.reason == fence.REFUSED
+    assert v.detail == ("the launcher refused this launch (turns-additions): turns could "
+                        "not give the launch its additions; run moxi doctor")
+    assert v.binary == fence.verdict(api, spec()).binary
+    assert fence.recorded(v.binary) is None
+    assert claude.runs() == []
+
+
 def test_a_waiting_child_waits_out_a_probes_longest_run(monkeypatch):
     from moxi import files
 

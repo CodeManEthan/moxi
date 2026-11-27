@@ -745,7 +745,8 @@ any other refusal, such as a launcher row it won't take or turns' additions fail
 about the very launch its first round runs, its own brief and notes folders included,
 before the probe. A refusal that depends on the brief, such as a brief past the launch
 log's 64 KiB cap, ends that recall `lost` with reason `denied` and the launcher's words,
-which `moxi memory subconscious list --session chat-<conversation>` prints.
+which `moxi memory subconscious list --session chat-<conversation>` prints. A refusal of
+the fence probe's own launch ends it the same way.
 
 **What it can't do** that the terminal recall can. It has no shell, so it can't search
 past sessions again with other words or read around a hit (`moxi memory search`, `moxi

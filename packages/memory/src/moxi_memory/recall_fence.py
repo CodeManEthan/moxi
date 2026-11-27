@@ -327,9 +327,10 @@ def ensure(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None,
            wait_s: float = PROBE_MAX_S) -> Verdict:
     """The verdict a recall's child goes on by: `verdict`, after probing the binary when
     the record holds no outcome for it. One probe runs at a time; a child that waits for
-    another's (at most `wait_s`) reads its outcome. A probe with no outcome (no
-    `system/init` for a reason the fence doesn't judge) records nothing, and the verdict
-    is `no-outcome` with what happened."""
+    another's (at most `wait_s`) reads its outcome. A probe with no outcome records
+    nothing, and the verdict is the probe's: `no-outcome` with what happened (no
+    `system/init` for a reason the fence doesn't judge), or `refusal_verdict`'s when the
+    launcher refuses the probe's own request."""
     from moxi import files
 
     first = verdict(launcher, spec, env=env)
@@ -341,9 +342,9 @@ def ensure(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None,
             found = first.binary
             outcome = recorded(found)
             if outcome is None:
-                outcome, why = probe(launcher, spec, found, env=env)
-                if outcome is None:
-                    return Verdict(NO_OUTCOME, why, found)
+                outcome = probe(launcher, spec, found, env=env)
+                if isinstance(outcome, Verdict):
+                    return replace(outcome, binary=found)
                 _write_outcome(outcome)
     except files.LockTimeout:
         return Verdict(NO_OUTCOME, f"another probe ran past {wait_s:.0f} s", first.binary)
@@ -357,27 +358,32 @@ NO_OUTCOME = "no-outcome"
 
 
 def probe(launcher: Any, spec: Spec, found: Binary, *,
-          env: Mapping[str, str] | None = None) -> tuple[Outcome | None, str]:
-    """Probe `found` with `spec`'s own request: its outcome, or None and why there is
-    none. Records nothing on the fence record."""
+          env: Mapping[str, str] | None = None) -> Outcome | Verdict:
+    """Probe `found` with `spec`'s own request: its outcome, or the verdict when there
+    is none, `no-outcome` with why, or `refusal_verdict`'s when the launcher refuses the
+    probe's request. Records nothing on the fence record."""
     from moxi import proc
+    from moxi.store import StoreError
 
     req = probe_request(launcher, spec)
-    composition = launcher.preview(req, env=env)
-    child_env = launcher.child_env(req, composition, env=env)
+    try:
+        composition = launcher.preview(req, env=env)
+        child_env = launcher.child_env(req, composition, env=env)
+    except (launcher.Refusal, StoreError) as exc:
+        return refusal_verdict(exc)
     now = time.time()
     try:
         ran = proc.run([found.path, "--version"], timeout_s=VERSION_S, env=child_env,
                        cwd=spec.cwd)
         version = _version((ran.stdout or b"").decode("utf-8", "replace"))
     except Exception as exc:  # noqa: BLE001 - a version that can't be read is no outcome
-        return None, f"claude --version failed: {exc}"
+        return Verdict(NO_OUTCOME, f"claude --version failed: {exc}")
     if version is None:
-        return None, "claude --version printed no version"
+        return Verdict(NO_OUTCOME, "claude --version printed no version")
     if _older(version, FENCE_MIN_VERSION):
         return Outcome(found, version, passed=False, part=FLAGS,
                        detail=f"Claude Code {version} is older than {FENCE_MIN_VERSION}, "
-                              "the first that takes every fence flag", at=now), ""
+                              "the first that takes every fence flag", at=now)
     prompt = getattr(composition, "prompt_file", None)
     try:
         ran_to = _run_to_init(launcher, req, env)
@@ -385,13 +391,12 @@ def probe(launcher: Any, spec: Spec, found: Binary, *,
         if prompt is not None:
             Path(prompt.path).unlink(missing_ok=True)
     if isinstance(ran_to, str):
-        return None, ran_to
+        return Verdict(NO_OUTCOME, ran_to)
     init, text, exited = ran_to
     part, detail = judge(init, text, exited=exited, allows_web=spec.allows_web)
     if part is None and init is None:
-        return None, detail
-    return Outcome(found, version, passed=part is None, part=part, detail=detail,
-                   at=now), ""
+        return Verdict(NO_OUTCOME, detail)
+    return Outcome(found, version, passed=part is None, part=part, detail=detail, at=now)
 
 
 def probe_request(launcher: Any, spec: Spec) -> Any:

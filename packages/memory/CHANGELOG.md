@@ -61,7 +61,8 @@
   launcher's PATH lookup can't find `claude` (or can't read the one it found), and a new
   `skipped` value and doctor and status reason, `refused`, with the launcher's words,
   for any other. A refusal the child meets ends the recall `lost` with reason `denied`
-  and the launcher's words, as a round's refused launch does.
+  and the launcher's words, as a round's refused launch does. So does a refusal of the
+  fence probe's own launch, which used to stop the child with an error.
 
 - A recall fork's plain-read test reads the shell text through turns' shell reader
   (`read_shell`) in place of a splitter of its own, after the same character filter. It
