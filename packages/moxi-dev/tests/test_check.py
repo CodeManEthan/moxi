@@ -534,7 +534,14 @@ def run_check(repo, runs, **kw):
     return check.check(repo, run=runs, **kw)
 
 
-def test_code_check_failures_are_recorded_and_later_steps_run(repo, monkeypatch):
+STATIC_STOP = ("moxi-dev check: a static step failed, so the check stops before the "
+               "packages' steps\n")
+LINT_STOP = "moxi-dev check: a package's import rules failed, so the check runs no tests\n"
+NOT_REACHED = ("| stamps not run | web not run | sync not run | lint not run | "
+               "no suites run | timed not run |")
+
+
+def test_code_check_failures_are_recorded_and_stop_the_check(repo, monkeypatch, capsys):
     commit_file(repo, "packages/sessions/x.py")
     monkeypatch.setattr(check.refs, "scan", lambda root: [
         check.refs.Hit("packages/sessions/x.py", 1, "Gone")])
@@ -546,7 +553,33 @@ def test_code_check_failures_are_recorded_and_later_steps_run(repo, monkeypatch)
     result = run_check(repo, runs)
     assert (result.code == 1 and result.refs == "fail" and result.names == "fail"
             and result.ruff == "fail")
-    assert runs.suites(), "the package suites still run after whole-tree findings"
+    # Every static step ran, then the check stopped: no stamps, sync, lint or suite.
+    assert result.release == "pass" and result.machine == "pass"
+    assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
+    assert NOT_REACHED in result.line() and LINE.match(result.line())
+    assert capsys.readouterr().out.endswith(STATIC_STOP)
+
+
+def test_under_full_a_static_failure_still_runs_every_suite(repo, monkeypatch, capsys):
+    monkeypatch.setattr(check.refs, "scan", lambda root: [
+        check.refs.Hit("packages/sessions/x.py", 1, "Gone")])
+    runs = Runs()
+    result = run_check(repo, runs, full=True)
+    assert result.code == 1 and result.refs == "fail" and result.sync == "pass"
+    assert [name for name, _ in runs.suites()] == list(LAYOUT)
+    assert STATIC_STOP not in capsys.readouterr().out
+
+
+def test_with_nothing_picked_a_static_failure_reads_as_before(repo, monkeypatch, capsys):
+    monkeypatch.setattr(check.refs, "scan", lambda root: [
+        check.refs.Hit("README.md", 1, "Gone")])
+    runs = Runs()
+    result = run_check(repo, runs, with_dependents=False)
+    assert result.code == 1 and result.refs == "fail"
+    assert ("packages: none | lock pass | tags pass | refs fail" in result.line()
+            and "| stamps skipped | web skipped | sync skipped | lint not run | "
+                "no suites run |" in result.line())
+    assert STATIC_STOP not in capsys.readouterr().out
 
 
 def test_only_runs_one_scanner_reads_the_whole_tree_and_filters_printing(tmp_path,
@@ -962,14 +995,16 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
 
 # --- the tag check and the lint -------------------------------------------------------
 
-def test_a_tag_fails_the_check_and_the_rest_still_run(repo, capsys):
+def test_a_tag_fails_the_check_and_stops_it_before_the_packages(repo, capsys):
     tag = "[B5]"
     commit_file(repo, "packages/sessions/x.py", f"# see {tag}\n")
     runs = Runs()
     result = run_check(repo, runs)
-    assert result.code == 1 and result.tags == "fail"
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
-    assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in capsys.readouterr().out
+    assert result.code == 1 and result.tags == "fail" and result.refs == "pass"
+    assert runs.suites() == [] and NOT_REACHED in result.line()
+    out = capsys.readouterr().out
+    assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in out
+    assert out.endswith(STATIC_STOP)
 
 
 
@@ -985,12 +1020,13 @@ def test_the_release_step_runs_whatever_the_change_picks(repo, capsys):
             "0.0.9, but project.version is 0.1.0;") in capsys.readouterr().out
 
 
-def test_a_release_problem_fails_the_check_and_the_rest_still_run(repo, capsys):
+def test_a_release_problem_fails_the_check_and_stops_it_before_the_packages(repo, capsys):
     commit_file(repo, "packages/sessions/README.md", "See [the guide](docs/guide.md).\n")
     runs = Runs()
     result = run_check(repo, runs)
     assert result.code == 1 and result.release == "fail" and result.tags == "pass"
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+    assert result.pronouns == "pass" and result.machine == "pass"
+    assert runs.suites() == [] and NOT_REACHED in result.line()
     assert "packages/sessions: README.md:1: links to docs/guide.md" in capsys.readouterr().out
 
 def test_each_lint_command_runs_in_the_check_s_env(repo):
@@ -1022,19 +1058,28 @@ def test_each_lint_command_runs_in_the_check_s_env(repo):
     assert last_lint < first_suite
 
 
-def test_a_lint_failure_fails_the_check_and_the_rest_still_run(repo):
+def _failing_lint(package, work, members):
+    if package.name == "cache":
+        raise check.lint.LintError("no announcement")
+    return [check.lint.Command("one", ["deptry", "."])]
+
+
+def test_a_lint_failure_fails_the_check_after_every_lint_and_runs_no_suite(repo, capsys):
     commit_file(repo, "packages/sessions/x.py")
-
-    def plan(package, work, members):
-        if package.name == "cache":
-            raise check.lint.LintError("no announcement")
-        return [check.lint.Command("one", ["deptry", "."])]
-
     runs = Runs({lambda cmd, cwd: Path(cmd[0]).stem == "deptry" and cwd.name == "comms": 1})
-    result = run_check(repo, runs, plan=plan)
+    result = run_check(repo, runs, plan=_failing_lint)
     assert result.code == 1
-    assert "| lint fail (cache, comms) |" in result.line()
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+    assert "| lint fail (cache, comms) | no suites run | timed not run |" in result.line()
+    assert runs.suites() == []
+    assert capsys.readouterr().out.endswith(LINT_STOP)
+
+
+def test_under_full_a_lint_failure_still_runs_every_suite(repo, capsys):
+    runs = Runs({lambda cmd, cwd: Path(cmd[0]).stem == "deptry" and cwd.name == "comms": 1})
+    result = run_check(repo, runs, plan=_failing_lint, full=True)
+    assert result.code == 1 and "| lint fail (cache, comms) |" in result.line()
+    assert [name for name, _ in runs.suites()] == list(LAYOUT)
+    assert LINT_STOP not in capsys.readouterr().out
 
 
 def test_a_package_with_no_lint_commands_is_left_out(repo):
@@ -1305,7 +1350,7 @@ def test_a_settled_tree_passes_the_renames_step(repo):
     assert LINE.match(result.line()), result.line()
 
 
-def test_a_row_to_apply_fails_the_renames_step_and_the_rest_still_run(repo, capsys):
+def test_a_row_to_apply_fails_the_renames_step_and_stops_the_check(repo, capsys):
     with_renames(repo, {X: "old = 1\n"}, (X, "-", "name", "old", "fresh"))
     runs = Runs()
     result = run_check(repo, runs)
@@ -1314,8 +1359,7 @@ def test_a_row_to_apply_fails_the_renames_step_and_the_rest_still_run(repo, caps
     assert (f"moxi-dev check: renames: to apply: renames.tsv row 2: {X} name old -> fresh"
             in capsys.readouterr().out)
     assert "| renames fail |" in result.line() and LINE.match(result.line())
-    # the table's own change picks moxi-dev
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms", "moxi-dev"]
+    assert runs.suites() == []
 
 
 def test_a_leftover_fails_the_renames_step(repo, capsys):

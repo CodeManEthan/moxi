@@ -148,9 +148,15 @@ worker count or base stops it there, before any step runs. Then, in order:
    root on disk was kept; and how many suites kept it in memory after all, read from
    their durations, with why), the total and the exit code.
 
-The tags, references, names, Ruff, renames, release, pronoun and machine-text steps, each
-package's lint and each package's tests all run even when one before them failed, so one
-run shows every failure.
+The tags, references, names, Ruff, renames, release, pronoun and machine-text steps all
+run even when one before them failed, as do each package's lint and each package's
+tests, so one run shows every failure of its kind. Outside `--full`, when a static step
+failed the check stops there, printing `moxi-dev check: a static step failed, so the
+check stops before the packages' steps`, and when a package's lint failed it stops before
+the suites, printing `moxi-dev check: a package's import rules failed, so the check runs
+no tests`; the steps it skipped read `not run` in the summary, `timed not run` and `no
+suites run` among them. `--full` stops at neither: a failed static step or lint still
+lets every suite run.
 
 The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
 could not start or a step could not be run (not in a workspace, a member with no readable
@@ -822,8 +828,11 @@ class _Steps:
 
     def all(self, chosen: Sequence[Package]) -> bool:
         """The lock, the tags, the stamps, the sync, the lint and the suites, recorded in
-        the result; True when all passed."""
+        the result; True when all passed. Outside `--full` a failed static step stops the
+        check before the stamps, and a failed lint before the suites; a step it never
+        reaches reads `not run`."""
         root, run, result = self.root, self.run, self.result
+        full = self.changed is None
         env = _base_env(self.check_env)
         ok = run(["uv", "lock", "--check"], root, env) == 0
         result.lock = "pass" if ok else "fail"
@@ -833,6 +842,10 @@ class _Steps:
         if not chosen:
             result.stamps = result.web = result.sync = "skipped"
             return ok
+        if not ok and not full:
+            print("moxi-dev check: a static step failed, so the check stops before the "
+                  "packages' steps", flush=True)
+            return False
         if not (_stamps(root, chosen, result) and _web(root, env, run, result)):
             return False
         venv = root / ENV_DIR
@@ -850,6 +863,10 @@ class _Steps:
         result.lint = []
         for package in chosen:
             ok = self.lint(package, venv, suite_env) and ok
+        if not ok and not full:
+            print("moxi-dev check: a package's import rules failed, so the check runs no "
+                  "tests", flush=True)
+            return False
         return self.suites(chosen, venv, suite_env) and ok
 
     def static(self) -> bool:
