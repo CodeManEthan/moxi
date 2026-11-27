@@ -130,8 +130,10 @@ Every limits reading usage sees is kept for `limits.history_days` (8) in
 A window is known by its duration, whatever slot the harness puts it in: `5h`, `7d`, or
 its minutes. A per-model weekly cap is its own row (`7d opus`). Each row is `fresh`,
 `reset` or `unavailable` with the reason. Claude's row takes the reading with the latest
-future reset time (on a tie the highest percent), so an idle session's old number never
-passes for fresh; Codex's takes the newest reading. When a window has three or more
+future reset time, so an idle session's old number never passes for fresh; on a tie the
+newest reading, or the highest percent among readings observed within 15 minutes of it,
+so a counter cleared before its reset shows its new number. Codex's takes the newest
+reading. When a window has three or more
 readings of its current period in the last `limits.projection_minutes` (60), a straight
 line through them says when it reaches 100%, given only when that comes after now and
 before the reset. Of what else a reading says, the line prints only a spend limit's

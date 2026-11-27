@@ -17,8 +17,10 @@
 Then one row per window, a window being `(harness, limit_id, window_minutes)`:
 
 * **Picking.** Claude: among readings with a future `resets_at` and a known percent, the
-  latest `resets_at` wins, on a tie the highest percent, so an idle session's old number
-  never passes for fresh; with none, the newest reading's state. Codex: the newest
+  latest `resets_at` wins, so an idle session's old number never passes for fresh. Among
+  those, the newest reading decides; a higher percent wins only among readings observed
+  within `TIE_WINDOW_S` of the newest, so a counter cleared mid-window (its reset time
+  unmoved) shows its new number. With none, the newest reading's state. Codex: the newest
   `observed_at`, from either source. A reading in another slot never moves a window's
   row: a 7-day reading in `primary` is the 7-day row's, and the 5-hour row keeps its own.
 * **States.** `fresh`, `reset` or `unavailable`, the last two with a reason: no
@@ -80,6 +82,11 @@ PULL_TIMEOUT = 3.0
 PRUNE_EVERY = 3600.0
 #: Readings a projection needs.
 MIN_FIT = 3
+#: Seconds before a window's newest reading within which a higher percent still wins a
+#: tie on the reset time: sessions reporting at nearly the same time may lag each other.
+#: An older reading never wins on percent, since a counter can be cleared mid-window
+#: without its reset time moving.
+TIE_WINDOW_S = 15 * 60.0
 #: Where a key splits into words: an underscore, a hyphen, or a lower-case letter
 #: followed by a capital.
 _WORDS = re.compile(r"[_-]|(?<=[a-z])(?=[A-Z])")
@@ -361,16 +368,20 @@ def _said(value: Any) -> Any:
 def pick(harness: str, found: list[Reading], now: float) -> Reading:
     """The winning reading of one window.
 
-    Claude: among readings with a future `resets_at` and a known percent, the latest
-    `resets_at`, then the highest percent; with none, the newest reading. Codex: the
+    Claude: among readings with a future `resets_at` and a known percent, those with the
+    latest `resets_at`; of them, the ones observed within `TIE_WINDOW_S` of the newest,
+    then the highest percent, then the newest. With none, the newest reading. Codex: the
     newest `observed_at`, then the highest percent.
     """
     if harness == CLAUDE:
         candidates = [r for r in found if r.resets_at is not None and r.resets_at > now
                       and r.used_percent is not None]
         if candidates:
-            return max(candidates, key=lambda r: (r.resets_at, r.used_percent,
-                                                  r.observed_at))
+            latest = max(r.resets_at for r in candidates)
+            tied = [r for r in candidates if r.resets_at == latest]
+            newest = max(r.observed_at for r in tied)
+            return max((r for r in tied if r.observed_at >= newest - TIE_WINDOW_S),
+                       key=lambda r: (r.used_percent, r.observed_at))
     return max(found, key=lambda r: (r.observed_at, -1.0 if r.used_percent is None
                                      else r.used_percent))
 
