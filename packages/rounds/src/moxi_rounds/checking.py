@@ -60,19 +60,28 @@ and to append:
 A run the caller interrupts records nothing: the interrupt ends the run's tree and the
 verb before its append.
 
-**The check lock.** One run at a time on this machine, across every repo and round, so
-builds of parallel rounds don't run whole test suites side by side: each run, the
-local part of a check by CI and a command step's included, holds an exclusive lock on
-`check.lock` in rounds' folder of lock files (`lock_file`) from just before its command
-starts until it ends, however it ends. The lock is the process's, so the system frees
-it when the verb dies, and the command does not inherit it. Runs take it in the order
-they asked for it: each takes a ticket in the lock's line and tries the lock only once
-no live ticket is ahead of it (`check_line`), and the run that holds it keeps a holder
-record naming its round, stage, step, repo and output file, which the doctor's check
-lock row reads. A run that must wait says once who holds the lock and how many are
-ahead of it, then says how long it waited; with `wait=False` (`--no-wait`) it takes the
-lock only when it is free and no ticket waits, and is refused at once otherwise, naming
-the holder and the number waiting, with nothing run or recorded. A wait that a tip
+**The check lock.** At most `check_lock.at_once` runs at a time on this machine (one by
+default), across every repo and round, so builds of parallel rounds don't run whole test
+suites side by side past what memory holds: each run, the local part of a check by CI and
+a command step's included, holds a place of the machine's check lock (`check_line.slot`)
+from just before its command starts until everything the command started has ended,
+however it ends. The place's lock is the process's, so the system frees it when the verb
+dies, and the command does not inherit it. Runs take places in the order they asked for
+them: each takes a ticket in the lock's line and tries only once no live ticket is ahead
+of it. A run starts beside others only when its command's table (the check, or
+`ci.local`) and every holder declare `memory_mib` and the free memory covers the need;
+a command step of the user's own declares none, so it runs only alone. The run that holds
+a place keeps a holder record naming its round, stage, step, repo, output file, the
+place, its `memory_mib` and its command's tag and first process, which the doctor's
+check lock row reads. The command runs with that tag (`moxi.proc.run`'s `tag`,
+`on_start` and `end_leftovers`): its process group and every process carrying the tag
+are ended before the place is let go, so a place whose rounds process died stays taken
+while its command still runs. A run that must wait says once why, and again when the
+reason changes, then where it got in; with `wait=False` (`--no-wait`) it takes a place
+only when no ticket waits and one can be taken now, and is refused at once otherwise,
+naming the holders, the number waiting and, when memory is short, the reading and the
+need, with nothing run or recorded. The record of a run names its place (`check_lock`)
+and, for one started beside others, the reading and the need it met. A wait that a tip
 moved during is caught by step 3.
 """
 
@@ -84,11 +93,11 @@ import shlex
 import subprocess
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from moxi import files, proc
+from moxi import proc
 
 from . import (builds, check_line, findings, flows, folders, gitreads, open_builds,
                paths, places, write)
@@ -493,11 +502,33 @@ class _Look:
     ci: object = None
     local_argv: list[str] | None = None
     local_due: bool = False
+    memory_mib: int | None = None
 
 
 def lock_file(env=None) -> Path:
-    """The machine's check lock, STATE/rounds/locks/check.lock."""
+    """The machine's check lock's first place, STATE/rounds/locks/check.lock; the k-th is
+    `check-<k>.lock` beside it (`check_line.slot_path`)."""
     return paths.locks_dir(env) / LOCK_FILE
+
+
+def lock_setting(settings, key: str) -> int:
+    """The machine's `check_lock.<key>` as the settings give it: `at_once` or
+    `need_mib`, their defaults where the settings hold no such key."""
+    try:
+        return int(settings[f"check_lock.{key}"])
+    except (KeyError, TypeError):
+        return 1 if key == "at_once" else 0
+
+
+def lock_fields(taken: check_line.Taken) -> dict:
+    """What a run's record says of the check lock's place it held: `check_lock`, and for
+    a run started beside others the `available_mib` and `need_mib` read when it took
+    it."""
+    found: dict = {"check_lock": taken.k}
+    if taken.beside:
+        found.update(available_mib=taken.decision.available_mib,
+                     need_mib=taken.decision.need_mib)
+    return found
 
 
 def check(name: str, stage: str, *, by: str, step: str | None = None,
@@ -546,7 +577,9 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
                                      by_ci=step is None and not full, full=full)
         return looked[id(view)]
 
-    held = _Held(wait=wait, say=say, again=again, env=env, name=name, step=run_as)
+    held = _Held(wait=wait, say=say, again=again, env=env, name=name, step=run_as,
+                 at_once=lock_setting(settings, "at_once"),
+                 need_mib=lock_setting(settings, "need_mib"))
 
     def act(view):
         found = look(view)
@@ -555,7 +588,7 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
         where = ("the check's command in the settings" if step is None
                  else f"the argv of the step {step} in the round's flow")
         return _run(found, found.argv, found.timeout_s, f"fix {where}, then {again}",
-                    held=held)
+                    held=held, memory_mib=found.memory_mib)
 
     first: list[_Look] = []
 
@@ -566,12 +599,12 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
             raise Refused(moved)
         if before.ci is not None:
             return _ci_entries(before, result, stage=stage, name=name)
-        code, duration_s, output = result
+        code, duration_s, output, taken = result
         return write.Entry(RAN, {
             "stage": stage, "step": run_as, "commit": before.tip,
             "merge_base": before.merge_base, "argv": recorded_argv(before.argv),
             "exit_code": code, "duration_s": duration_s,
-            "output": places.contract_home(output)})
+            "output": places.contract_home(output), **lock_fields(taken)})
 
     def gate_and_keep(view):
         found = look(view)
@@ -597,8 +630,10 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
 class _Held:
     """How a run takes the machine's check lock: whether it `wait`s, the `say` that
     gets the waiting lines, the command that runs the check `again`, the `env` the lock
-    file's place is read from, and the round (`name`) and `step` its ticket and holder
-    record name."""
+    file's place is read from, the round (`name`) and `step` its ticket and holder
+    record name, how many runs may hold it `at_once` and the free memory a run beside
+    others needs (`need_mib`, 0 for the sum), and the free-memory reader (`available`,
+    `check_line.available_mib` when None)."""
 
     wait: bool = True
     say: object = None
@@ -606,97 +641,63 @@ class _Held:
     env: object = None
     name: str = ""
     step: str = ""
+    at_once: int = 1
+    need_mib: int = 0
+    available: object = None
 
 
 @contextmanager
-def _check_lock(held: _Held, found: _Look) -> Iterator[Path]:
-    """Hold the machine's check lock for the block, taken in the order the runs asked
-    for it (`check_line`), or refused at once where `held.wait` is false and the lock
-    is held or a run waits for it. The block gets the lock file's path, to name its
-    output in the holder record (`check_line.update_holder`)."""
+def _check_lock(held: _Held, found: _Look, *,
+                memory_mib: int | None = None) -> Iterator[check_line.Taken]:
+    """Hold a place of the machine's check lock for the block, taken in the order the
+    runs asked for it (`check_line.slot`), or refused at once where `held.wait` is false
+    and no place can be taken now. `memory_mib` is what the run declares it holds at
+    most. The block gets the place taken, to name its output and its command in the
+    holder record (`check_line.update_holder`)."""
     path = lock_file(held.env)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    say = held.say or (lambda _line: None)
     build = found.build
     fields = {**check_line.me(), "round": held.name,
               "stage": None if build is None else build.stage, "step": held.step,
               "repo": None if build is None else build.repo}
-    with ExitStack() as stack:
-        if not held.wait:
-            waiting = check_line.remove_dead(path)
-            taken = False
-            if not waiting:
-                try:
-                    stack.enter_context(files.lock(path, timeout_s=0))
-                    taken = True
-                except files.LockTimeout:
-                    pass
-            if not taken:
-                who = check_line.held_by(check_line.holder(path),
-                                         check_line.lock_pid(path))
-                raise Refused([Unmet(
-                    f"another check holds or waits for the machine's check lock {path}: "
-                    f"held by {who}; {len(waiting)} waiting",
-                    f"run it again once those are done: {held.again}, or leave "
-                    "--no-wait out to wait in line")])
-        else:
-            _wait_in_line(stack, path, fields, say)
-        check_line.write_holder(path, fields)
-        try:
-            yield path
-        finally:
-            check_line.remove_holder(path)
-
-
-def _wait_in_line(stack: ExitStack, path: Path, fields: Mapping, say) -> None:
-    """Take a ticket in the check lock's line and wait until it is first and the lock
-    is free, then take the lock into `stack`. The ticket is removed however the wait
-    ends; one a killed waiter leaves is removed by the next poll of another."""
-    ticket = check_line.take(path, fields)
-    started = time.monotonic()
-    said = False
     try:
-        while True:
-            ahead = check_line.remove_dead(path, own=ticket)
-            if not ahead:
-                try:
-                    stack.enter_context(files.lock(path, timeout_s=0))
-                    break
-                except files.LockTimeout:
-                    pass
-            if not said:
-                who = check_line.held_by(check_line.holder(path),
-                                         check_line.lock_pid(path))
-                say(f"waiting for the machine's check lock, held by {who}; "
-                    f"{len(ahead)} ahead of you")
-                said = True
-            time.sleep(check_line.LINE_POLL_S)
-    finally:
-        check_line.leave(path, ticket)
-    if said:
-        say(f"got the check lock after {time.monotonic() - started:.1f} s")
+        with check_line.slot(path, fields, memory_mib=memory_mib, at_once=held.at_once,
+                             need_mib=held.need_mib, wait=held.wait, say=held.say,
+                             available=held.available or check_line.available_mib) as taken:
+            yield taken
+    except check_line.NotFree as exc:
+        raise Refused([Unmet(exc.words, f"run it again once those are done: {held.again}, "
+                             "or leave --no-wait out to wait in line")]) from None
 
 
 def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
-         fix: str, *, held: _Held) -> tuple[int | None, float, Path]:
-    """Run `argv` in the build's worktree, holding the machine's check lock, its
-    output to a new file in the scratch folder: its exit code (None when ended at
-    `timeout_s`), duration and output file. The duration counts the run only."""
-    with _check_lock(held, found) as lock_path:
+         fix: str, *, held: _Held, memory_mib: int | None = None) -> tuple:
+    """Run `argv` in the build's worktree, holding a place of the machine's check lock,
+    its output to a new file in the scratch folder: its exit code (None when ended at
+    `timeout_s`), duration, output file and the place it held (`check_line.Taken`). The
+    duration counts the run only. The command runs tagged with the place's tag, its
+    first process is named in the holder record once it starts, and everything it
+    started is ended before the place is let go, however the run ends."""
+    with _check_lock(held, found, memory_mib=memory_mib) as taken:
         output = _output_file(found.scratch)
-        check_line.update_holder(lock_path, output=str(output))
+        check_line.update_holder(taken.path, output=str(output))
+
+        def named(first: proc.ProcId) -> None:
+            check_line.update_holder(taken.path, run_pid=first.pid,
+                                     run_started=first.started)
+
         started = time.monotonic()
         try:
             done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
                             cwd=found.worktree, output=output, first_signal="SIGINT",
-                            grace_s=GRACE_S)
+                            grace_s=GRACE_S, tag=taken.tag, on_start=named,
+                            end_leftovers=True)
             code: int | None = done.returncode
         except subprocess.TimeoutExpired:
             code = None
         except OSError as exc:
             raise RoundsError(f"the command {shlex.join(argv)} could not be started in "
                               f"{found.worktree}: {exc}", fix) from None
-        return code, round(time.monotonic() - started, 3), output
+        return code, round(time.monotonic() - started, 3), output, taken
 
 
 # -- by CI -------------------------------------------------------------------------------
@@ -834,7 +835,8 @@ def _by_ci(found: _Look, *, again: str, held: _Held) -> _ByCi:
     local = None
     if found.local_due:
         local = _run(found, found.local_argv, found.timeout_s,
-                     f"fix ci.local in the settings, then {again}", held=held)
+                     f"fix ci.local in the settings, then {again}", held=held,
+                     memory_mib=found.ci.local_memory_mib)
         if local[0] != 0:
             # A failed local run stops the check there: CI is not read.
             return _ByCi(pushed, local, ref=ref, already=already)
@@ -861,12 +863,12 @@ def _ci_entries(before: _Look, result: _ByCi, *, stage: str, name: str) -> list:
     pushed = ({} if result.ref is None
               else {"pushed": {"remote": result.pushed, "ref": result.ref}})
     if result.local is not None:
-        code, duration_s, output = result.local
+        code, duration_s, output, taken = result.local
         entries.append(write.Entry(RAN, {
             "stage": stage, "step": ci.LOCAL, "commit": before.tip,
             "merge_base": before.merge_base, "argv": recorded_argv(before.local_argv),
             "exit_code": code, "duration_s": duration_s,
-            "output": places.contract_home(output),
+            "output": places.contract_home(output), **lock_fields(taken),
             **pushed}))
     if result.reading is not None:
         found = result.reading
@@ -1029,6 +1031,8 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         found.values = values(name, build, root=root, tip=found.tip)
         found.argv = fill(words, found.values)
     found.timeout_s = _limit(timeout_s, own_timeout_s)
+    if step is None:
+        found.memory_mib = own.memory_mib(own.build_setting(settings, build.repo, "check"))
     if step is None and queued(settings, build.repo):
         _queue_look(found, full=full, name=name, stage=stage)
         return found
@@ -1136,7 +1140,7 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build,
 
 
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "DEFAULT_TIMEOUT_S",
-           "GRACE_S", "LOCK_FILE", "lock_file", "fill", "declared",
+           "GRACE_S", "LOCK_FILE", "lock_file", "lock_setting", "lock_fields", "fill", "declared",
            "values", "queued", "scoped", "fill_base", "argv_now", "runs", "newest", "why_not", "passes", "recorded_argv",
            "step_entry", "report_steps", "commission_of",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]
