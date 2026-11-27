@@ -512,12 +512,17 @@ def connect(db: str | Path | None = None, *, env: Mapping[str, str] | None = Non
             create: bool = True, timeout: float = 5.0) -> sqlite3.Connection:
     """Open the launch log and bring its schema up to date.
 
-    `db` defaults to `path(env)`. With `create=False` a missing store raises
-    `moxi.store.StoreError`. A store written by a newer launcher raises
-    `moxi.store.StoreTooNew`.
+    `db` defaults to `path(env)`. With `create=False` nothing is created: a missing store
+    raises `moxi.store.StoreError`, and so does a file that holds no schema yet (an empty
+    file, or one another process has only just created), which is left as it is. A store
+    at an older schema version is still moved forward. A store written by a newer
+    launcher raises `moxi.store.StoreTooNew`.
     """
-    conn = store.connect(path(env) if db is None else db, create=create, timeout_s=timeout)
+    where = path(env) if db is None else db
+    conn = store.connect(where, create=create, timeout_s=timeout)
     try:
+        if not create and conn.execute("PRAGMA user_version").fetchone()[0] == 0:
+            raise store.StoreError(f"{where} holds no launch log yet")
         store.migrate(conn, STEPS)
     except BaseException:
         conn.close()
@@ -1049,7 +1054,15 @@ def reading(*, timeout: float = 1.0,
         yield None
         return
     try:
-        conn = connect(env=env, create=False, timeout=timeout)
+        try:
+            conn = connect(env=env, create=False, timeout=timeout)
+        except store.StoreTooNew:
+            raise
+        except store.StoreError:
+            conn = None  # removed since, or holds no launch log yet
+        if conn is None:
+            yield None
+            return
         try:
             yield conn
         finally:
