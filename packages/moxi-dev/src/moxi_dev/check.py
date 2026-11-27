@@ -1,10 +1,10 @@
 """`moxi-dev check`: the checks a change must pass before it merges.
 
 Run from the repository's root as
-`uv run --locked moxi-dev check [--full] [--base REV] [--finding L<n>]`, or as
-`uv run --locked moxi-dev check --static` for step 2 alone, or as
-`uv run --locked moxi-dev check --pick [--base REV]` to print what step 3 picks (see
-the end).
+`uv run --locked moxi-dev check [--full] [--with-dependents] [--base REV]
+[--finding L<n>]`, or as `uv run --locked moxi-dev check --static` for step 2 alone, or
+as `uv run --locked moxi-dev check --pick [--with-dependents] [--base REV]` to print
+what step 3 picks (see the end).
 It first reads the workspace, the worker count and the changed paths; a bad workspace,
 worker count or base stops it there, before any step runs. Then, in order:
 
@@ -38,19 +38,29 @@ worker count or base stops it there, before any step runs. Then, in order:
    with the fix; the private name itself is never printed.
 3. Pick the packages. The changed paths are the commits since the branch left `main`
    (`git merge-base main HEAD`, or `--base REV` in place of `main`) plus the working
-   tree's staged, unstaged and untracked files. A path under `packages/<p>/` picks `p`,
-   and one under `packages/moxi-dev/`, the check itself, picks every package; its
-   rename table, which the renames step above reads whatever the pick, picks only
-   `moxi-dev`. A root path a package's tests read picks that package (`READ_BY`):
-   `README.md` picks `memory`, publishing's two workflow files pick `publishing`, and
-   `ci.yml` and `queue.yml` pick `moxi-dev` alone, whose tests read them.
-   The other workflows (`.github/`), `docs/` and `CONTRIBUTING.md` pick nothing; any
-   other path (the lock, the root `pyproject.toml`, the other root files) picks every
-   package. Then every package that depends on a picked one, by its declared
-   dependencies, optional dependencies or dependency groups, is picked too, and so on
-   until nothing is added: a plain path filter would skip a dependent's tests and its
-   contract check. An edge to `moxi-dev` is left out of that, since every package lists
-   it in its dev group. `--full` picks every package.
+   tree's staged, unstaged and untracked files. The check runs the packages the change
+   touches (`touch`, `pick`): a path under `packages/<p>/` touches `p`, the check's own
+   folder `packages/moxi-dev/` included, and one under `packages/` outside every member
+   touches nothing. A root path touches the packages whose tests read it. `README.md`
+   touches `memory`, publishing's two workflow files `publishing`, and `ci.yml` and
+   `queue.yml` `moxi-dev` (`READ_BY`); the other workflows (`.github/`), `docs/` and
+   `CONTRIBUTING.md` touch nothing (`PICKS_NOTHING`); the root `pyproject.toml` touches
+   `moxi` and `moxi-dev`, the license, the git files and the static steps' allow files
+   `moxi-dev`, and the lock and `SECURITY.md` nothing (`ROOT_READERS`). Any other root
+   path, the web toolchain's files and a root file added later among them, picks every
+   package. No dependent is added.
+
+   With `--with-dependents` the pick is wider, as CI runs it. A path under
+   `packages/moxi-dev/` picks every package, but its rename table, which the renames
+   step above reads whatever the pick, picks only `moxi-dev`; a path under `packages/`
+   outside every member, and every root path but those `READ_BY` and `PICKS_NOTHING`
+   name, the lock and the root `pyproject.toml` among them, picks every package. Then
+   every package that depends on a picked one, by its declared dependencies, optional
+   dependencies or dependency groups, is picked too, and so on until nothing is added: a
+   plain path filter would skip a dependent's tests and its contract check. An edge to
+   `moxi-dev` is left out of that, since every package lists it in its dev group.
+   `--with-dependents` goes with `--base`, `--finding` and `--pick`; with `--full`,
+   `--static` or `--only` it is a usage error. `--full` picks every package.
 4. Check the build stamps of the picked packages that have a web page
    (`moxi-dev stamp`, on the working tree): built files that lag their sources fail here,
    with no Node.
@@ -94,9 +104,12 @@ worker count or base stops it there, before any step runs. Then, in order:
    (`moxi_dev.testing`): a tier test marked `touches` whose glob matches a changed path;
    with `--full`, every tier but `live`; with `--finding L<n>`, only the tests marked
    with that finding (one reported issue, named by an L and a number, which
-   `@pytest.mark.finding` gives the tests that cover it), whatever their tier but `live`. Under `--finding` a package where
-   no test carries it counts as `none`, not as a failure, but a check where no package
-   has one fails. A finding whose tests are all timed counts as found: the check prints
+   `@pytest.mark.finding` gives the tests that cover it), whatever their tier but `live`.
+   `--finding` picks as the check it goes with: the touched packages, or with
+   `--with-dependents` the wider pick. Under `--finding` a package where no test carries
+   it counts as `none`, not as a failure, but a check where no package has one fails,
+   and without `--with-dependents` its line says a test in a package that depends on
+   them needs that flag. A finding whose tests are all timed counts as found: the check prints
    `L<n>: its tests are timed; moxi-dev timed --finding L<n> runs them` and passes
    having run none of them. A `live` test never runs here.
 
@@ -152,9 +165,10 @@ with the same printed lines, the same summary line (every other step `not run`,
 no worker count, and runs no lock check, so no step needs the network. It starts no
 test, so it reads no `MOXI_TEST_TEMP`, chooses no temp root and sweeps nothing.
 
-`--pick` reads the workspace and the changed paths as step 3 does, prints one line,
-the JSON object `{"packages": [...]}` with the picked packages' folders under
-`packages/` in the workspace's order, and runs no step: a workflow reads it to run
+`--pick` reads the workspace and the changed paths as step 3 does, with the same
+`--with-dependents` the check takes, so it names exactly the packages that check runs. It
+prints one line, the JSON object `{"packages": [...]}` with the picked packages' folders
+under `packages/` in the workspace's order, and runs no step: a workflow reads it to run
 only the picked packages' jobs. It exits 0, or 2 with the reason on stderr and nothing
 on stdout when the workspace or the base can't be read.
 """
@@ -326,15 +340,15 @@ def load_workspace(root: Path) -> list[Package]:
 
 
 # The check's own distribution. Every package lists it in its dev group, so picking
-# ignores edges to it; a change to it picks every package, but for its rename table,
-# which only the renames step reads, and that runs whatever the pick.
+# ignores edges to it. A change to it touches it alone; with the dependents, it picks
+# every package, but for its rename table, which only the renames step reads, and that
+# runs whatever the pick.
 CHECK_DIST = "moxi-dev"
 CHECK_TABLE = "packages/moxi-dev/renames.tsv"
 
 # Root paths that hold no package's code, tests or declarations: a change to one picks
 # no package (the whole-tree steps still read it), unless `READ_BY` names it. Any other
-# path outside a package, the lock and the root pyproject.toml among them, picks every
-# package.
+# root path picks every package, unless `ROOT_READERS` names it for the touched pick.
 PICKS_NOTHING = frozenset({".github", "docs", "CONTRIBUTING.md", "README.md"})
 
 # Root paths a package's tests read, each with that package's folder in `packages/`: a
@@ -347,29 +361,76 @@ READ_BY = {"README.md": "memory",
            ".github/workflows/ci.yml": "moxi-dev",
            ".github/workflows/queue.yml": "moxi-dev"}
 
+# Root files the touched pick reads more narrowly than every package, each with the
+# folders in `packages/` whose tests read it, or pin the rules of the step that reads it.
+# The core's catalogue test reads the root pyproject.toml, as the check's release,
+# workflow and check tests read the workspace; the check's `new`, tick and stamp tests
+# copy the license and the git files; the allow files configure the static steps whose
+# rules the check's tests pin. The lock and SECURITY.md touch no package: no test reads
+# them, and the lock's reach is the dependents' pick's. Under `--with-dependents` each of
+# these picks every package, as any root path outside `READ_BY` and `PICKS_NOTHING` does.
+ROOT_READERS = {"pyproject.toml": ("moxi", "moxi-dev"),
+                "LICENSE": ("moxi-dev",),
+                ".gitignore": ("moxi-dev",),
+                ".gitattributes": ("moxi-dev",),
+                ".public-paths": ("moxi-dev",),
+                ".refs-allow": ("moxi-dev",),
+                ".residue-allow": ("moxi-dev",),
+                "uv.lock": (),
+                "SECURITY.md": ()}
 
-def pick(packages: Sequence[Package], paths: Sequence[str]) -> list[Package]:
-    """The packages the changed paths pick, with every package that depends on them.
 
-    A dependent is found through every edge a package declares but one to `CHECK_DIST`;
-    a path in `CHECK_DIST` itself picks every package (`CHECK_TABLE` picks it alone),
-    a root path in `READ_BY` picks the package whose tests read it, and any other root
-    path in `PICKS_NOTHING` picks none."""
+@dataclass(frozen=True)
+class Touch:
+    """What one changed path touches, as folders under `packages/`, under each rule: the
+    touched pick and the dependents' pick. None is every package."""
+    touched: frozenset[str] | None
+    wide: frozenset[str] | None
+
+
+def touch(packages: Sequence[Package], path: str) -> Touch:
+    """What `path` touches among the workspace's `packages`, under each rule.
+
+    A path under a member's folder touches that member; with the dependents, one in
+    `CHECK_DIST` picks every package but `CHECK_TABLE`. A path under `packages/` outside
+    every member touches nothing, and with the dependents picks every package. A root path
+    touches the package `READ_BY` names, nothing when its first part is in
+    `PICKS_NOTHING`, the readers `ROOT_READERS` names for the touched pick, and every
+    package otherwise; with the dependents only `READ_BY` and `PICKS_NOTHING` narrow it."""
     by_dir = {package.dir: package for package in packages}
-    picked: set[str] = set()
+    parts = path.split("/")
+    if parts[0] == "packages" and len(parts) >= 2:
+        if len(parts) >= 3 and parts[1] in by_dir:
+            member = frozenset({parts[1]})
+            if by_dir[parts[1]].dist == CHECK_DIST and path != CHECK_TABLE:
+                return Touch(member, None)
+            return Touch(member, member)
+        return Touch(frozenset(), None)
+    if path in READ_BY:
+        reader = frozenset({READ_BY[path]}).intersection(by_dir)
+        return Touch(reader, reader)
+    if parts[0] in PICKS_NOTHING:
+        return Touch(frozenset(), frozenset())
+    if path in ROOT_READERS:
+        return Touch(frozenset(ROOT_READERS[path]).intersection(by_dir), None)
+    return Touch(None, None)
+
+
+def pick(packages: Sequence[Package], paths: Sequence[str], *,
+         with_dependents: bool) -> list[Package]:
+    """The packages the changed paths pick: the touched ones (`touch`), or with
+    `with_dependents` the wider pick and every package that depends on one.
+
+    A dependent is found through every edge a package declares but one to `CHECK_DIST`."""
+    picked_dirs: set[str] = set()
     for path in paths:
-        parts = path.split("/")
-        if len(parts) >= 3 and parts[0] == "packages" and parts[1] in by_dir:
-            dist = by_dir[parts[1]].dist
-            if dist == CHECK_DIST and path != CHECK_TABLE:
-                return list(packages)
-            picked.add(dist)
-        elif path in READ_BY:
-            if READ_BY[path] in by_dir:
-                picked.add(by_dir[READ_BY[path]].dist)
-        elif parts[0] not in PICKS_NOTHING:
+        reading = touch(packages, path)
+        reach = reading.wide if with_dependents else reading.touched
+        if reach is None:
             return list(packages)
-    grew = True
+        picked_dirs |= reach
+    picked = {package.dist for package in packages if package.dir in picked_dirs}
+    grew = with_dependents
     while grew:
         grew = False
         for package in packages:
@@ -682,11 +743,13 @@ def _signals_end_the_check() -> Iterator[None]:
 
 def check(root: Path, *, full: bool = False, base: str | None = None,
           finding: Sequence[str] = (), static: bool = False,
+          with_dependents: bool = False,
           env: Mapping[str, str] | None = None, run: Run | None = None,
           plan: Plan | None = None, probe: Probe | None = None,
           sweep: Sweep | None = None) -> Result:
     """Run the check's steps on the workspace at `root`; the result holds the exit code.
-    With `static`, run only the whole-tree static steps (`_Steps.static`), which start no
+    Without `full` it runs the packages the change touches, with `with_dependents` those
+    and every package that depends on one (`pick`). With `static`, run only the whole-tree static steps (`_Steps.static`), which start no
     test, so it chooses no temp and sweeps nothing."""
     env = os.environ if env is None else env
     run = run or _run
@@ -712,11 +775,12 @@ def check(root: Path, *, full: bool = False, base: str | None = None,
             workers = worker_args(env)
             bound_s = suite_bound(env)
             changed = None if full else changed_paths(root, base or "main")
-            chosen = list(packages) if changed is None else pick(packages, changed)
+            chosen = (list(packages) if changed is None
+                      else pick(packages, changed, with_dependents=with_dependents))
             result.packages = [package.dir for package in chosen]
             steps = _Steps(root, packages, workers, env, run, plan, result,
                            changed=changed, findings=findings, base=base or "main",
-                           probe=probe, suite_bound_s=bound_s,
+                           with_dependents=with_dependents, probe=probe, suite_bound_s=bound_s,
                            sweep=lambda: _swept(sweep))
             result.code = 0 if steps.all(chosen) else 1
         except CheckError as exc:
@@ -751,6 +815,7 @@ class _Steps:
     changed: Sequence[str] | None = None      # None: --full
     findings: Sequence[str] = ()
     base: str = "main"
+    with_dependents: bool = False
     probe: Probe = chromium_probe
     suite_bound_s: float = SUITE_BOUND_S
     sweep: Callable[[], None] = lambda: None
@@ -876,8 +941,13 @@ class _Steps:
                 print(f"moxi-dev check: {names}: {whose} tests are timed; "
                       f"moxi-dev timed {flags} runs them", flush=True)
             else:
+                # A test in a dependent of the touched packages is picked only with the
+                # dependents.
+                wider = ("" if self.changed is None or self.with_dependents
+                         else "; a test in a package that depends on them needs "
+                              "--with-dependents")
                 print(f"moxi-dev check: no test in {', '.join(p.dir for p in chosen)} "
-                      f"carries {names}", flush=True)
+                      f"carries {names}{wider}", flush=True)
                 ok = False
         timed = {name: (passed, durations.PackageRun(
                      tiers=durations.tiers_of(tests, full=self.changed is None),
@@ -1130,15 +1200,18 @@ def _parser() -> argparse.ArgumentParser:
                     "tag, comment-reference, naming and Ruff checks, the renames step, "
                     "the release step, the pronoun step and the machine-text step, "
                     "then the import rules and the tests "
-                    "of every package the change touches and of every package that "
-                    "depends on one, in an environment of the check's own. Run it from "
-                    "the repository's root.")
+                    "of every package the change touches, in an environment of the "
+                    "check's own. Run it from the repository's root.")
     parser.add_argument("--full", action="store_true",
                         help="check every package, whatever changed, and run every "
                              "test tier but live")
     parser.add_argument("--base", metavar="REV",
                         help="count the changes since HEAD left REV, and compare the "
                              "durations with REV's records (default: main)")
+    parser.add_argument("--with-dependents", action="store_true",
+                        help="check every package that depends on a touched one as well, "
+                             "and every package when the lock or another root file "
+                             "changes, as CI does")
     parser.add_argument("--finding", metavar="L<n>", action="append", default=[],
                         help="run only the tests marked with this finding; may be given "
                              "more than once")
@@ -1157,10 +1230,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def print_pick(root: Path, base: str) -> int:
-    """Print the packages the changes since HEAD left `base` pick, as `--pick` does."""
+def print_pick(root: Path, base: str, *, with_dependents: bool = False) -> int:
+    """Print the packages the changes since HEAD left `base` pick, as `--pick` does:
+    the touched ones, or with `with_dependents` the check's wider pick."""
     try:
-        chosen = pick(load_workspace(root), changed_paths(root, base))
+        chosen = pick(load_workspace(root), changed_paths(root, base),
+                      with_dependents=with_dependents)
     except CheckError as exc:
         print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
         return 2
@@ -1208,6 +1283,9 @@ def main(argv: list[str]) -> int:
     if args.pick and (args.only or args.full or args.finding or args.static):
         _parser().error("--pick cannot be combined with --only, --full, --finding or "
                         "--static")
+    if args.with_dependents and (args.only or args.full or args.static):
+        _parser().error("--with-dependents cannot be combined with --only, --full or "
+                        "--static")
     try:
         root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     except CheckError as exc:
@@ -1218,8 +1296,9 @@ def main(argv: list[str]) -> int:
     if args.only:
         return only(root, args.only, args.paths)
     if args.pick:
-        return print_pick(root, args.base or "main")
+        return print_pick(root, args.base or "main",
+                          with_dependents=args.with_dependents)
     result = check(root, full=args.full, base=args.base, finding=args.finding,
-                   static=args.static)
+                   static=args.static, with_dependents=args.with_dependents)
     print(result.line(), flush=True)
     return result.code

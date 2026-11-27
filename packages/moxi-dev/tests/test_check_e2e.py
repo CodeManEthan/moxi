@@ -85,7 +85,7 @@ def test_the_check_syncs_its_own_env_and_runs_the_picked_suites(workspace, capsy
     # Inherited, this would make `-n auto` serial; the suites still run under workers.
     monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", "0")
     (workspace / "packages/low/tests/test_more.py").write_text(UNDER_WORKERS)
-    assert check.main([]) == 0
+    assert check.main(["--with-dependents"]) == 0
     line = last_line(capsys)
     assert ("packages: low, high | lock pass | tags pass | refs pass | names pass | ruff pass | "
             "renames none | release pass | pronouns pass | machine pass | stamps none | web none | "
