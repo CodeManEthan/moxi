@@ -199,6 +199,51 @@ def test_a_recall_forks_transcript_stays_out_of_the_index_even_with_subagents_on
     assert "subagent work item" in texts()
 
 
+def put_headless_line(sid):
+    from moxi_memory import recalls
+
+    with recalls.session_lock("chat-kiosk-approver-1530"):
+        recalls.put_line("chat-kiosk-approver-1530", {
+            "recall": "c1", "state": recalls.OPEN, "harness": "claude",
+            "start": recalls.CHAT, "route": recalls.HEADLESS, "headless_session": sid})
+
+
+def headless_agent():
+    t = claude(sid="0190b000-0000-7000-8000-00000000a6e1", serial=100)
+    t.user("chat recall agent reads")
+    sub = t.subagent("a0190b00000000a1")
+    sub.user("chat recall agent subagent")
+    t.write()
+    return t
+
+
+def test_a_chat_recalls_agent_session_stays_out_of_the_index_with_its_subagents():
+    other = claude(serial=300)
+    other.user("main prompt")
+    other.write()
+    t = headless_agent()
+    with_subagents = config(**{"index.include_subagents": True})
+    run("all", config=with_subagents)
+    assert "chat recall agent reads" in texts()   # read before its id reached the log
+    put_headless_line(t.session_id)
+    t.user("chat recall agent later")
+    t.write()
+    run(config=with_subagents)
+    assert not any("chat recall agent" in x for x in texts())
+    assert not any(r[2] == t.session_id for r in index_rows("tails"))
+    assert "main prompt" in texts()
+    run("rebuild", config=with_subagents)
+    assert not any("chat recall agent" in x for x in texts())
+
+
+def test_without_the_check_the_chat_recalls_agent_session_is_indexed(monkeypatch):
+    t = headless_agent()
+    put_headless_line(t.session_id)
+    monkeypatch.setattr(ingest.Ingest, "recall_agent", lambda self, harness, main: False)
+    run("all")
+    assert "chat recall agent reads" in texts()
+
+
 def test_imported_codex_threads_are_skipped_and_compressed_ones_counted():
     r = T.CodexRollout(api.root("codex"), imported=True)
     r.turn()

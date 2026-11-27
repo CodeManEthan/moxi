@@ -9,7 +9,8 @@ again whenever it changed, so an edit takes effect at the next read.
 names only harnesses memory reads, `index.tail_chars` is at least 1, `redact.sets`
 names at least one set, `subconscious.limit_s` is 1 to `LIMIT_S_MAX` (so a round's bound,
 `limit_s` plus 30 s, stays inside turns' longest timer), the subconscious's counts are at
-least their floor (`FLOORS`), and `subconscious.fork_commands` names no empty command.
+least their floor (`FLOORS`), `subconscious.fork_commands` names no empty command, and
+the chat recall's counts lie in their ranges (`RANGES`).
 
 memory reads no environment variable of its own. Its folders move with the core's root
 variables like every module's (`moxi.paths.Layout`): `state_dir()` holds the session table,
@@ -37,6 +38,10 @@ LIMIT_S_MAX = 3600
 FLOORS = {"subconscious.limit_s": 1, "subconscious.max_tools": 1,
           "subconscious.max_rounds": 1, "subconscious.max_points": 1,
           "subconscious.prefetch_hits": 0, "subconscious.on_demand_per_prompt": 0}
+
+#: The inclusive range each of the chat recall's counts may take.
+RANGES = {"subconscious.chat.running_max": (1, 5),
+          "subconscious.chat.drop_after_s": (60, 86400)}
 
 _schema: Schema | None = None
 
@@ -89,6 +94,10 @@ def _check(settings, file) -> None:
         raise ConfigError(file, "subconscious.limit_s",
                           f"is {settings['subconscious.limit_s']}, above {LIMIT_S_MAX}",
                           f"give a number of seconds from 1 to {LIMIT_S_MAX}, such as 60")
+    for key, (low, high) in RANGES.items():
+        if not low <= settings[key] <= high:
+            raise ConfigError(file, key, f"is {settings[key]}, outside {low} to {high}",
+                              f"give a whole number from {low} to {high}")
     commands = settings["subconscious.fork_commands"]
     if any(not c.split() for c in commands):
         raise ConfigError(file, "subconscious.fork_commands", "holds an empty command",
@@ -113,5 +122,5 @@ def cache_dir(env: Mapping[str, str] | None = None) -> Path:
     return layout().cache_dir(env)
 
 
-__all__ = ["MODULE", "HARNESSES", "LIMIT_S_MAX", "FLOORS", "schema", "read", "check_text",
+__all__ = ["MODULE", "HARNESSES", "LIMIT_S_MAX", "FLOORS", "RANGES", "schema", "read", "check_text",
            "layout", "state_dir", "cache_dir"]

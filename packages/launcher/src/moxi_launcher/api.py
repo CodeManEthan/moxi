@@ -3,6 +3,9 @@
     launch(request) -> LaunchResult     # resolve, check, compose, log, start
     check(request) -> list[Refusal]     # the live-state checks; writes nothing
     preview(request) -> Composition     # resolve and compose; starts nothing
+    prepare(request, composition) -> str        # the command its target would run
+    child_env(request, composition) -> dict     # the environment its harness would get
+    settable_rows(harness) -> tuple[str, ...]   # every row a request may type or leave out
     open_hold(request_id, name)         # a keep-warm hold on a launch (`keepwarm`)
     release_hold(request_id, name)
     launch_kind(session_id) -> str | None   # interface 1: how a session was launched
@@ -11,6 +14,9 @@
     fork(session_id) -> LaunchResult        # interface 3: fork a session, live or not
     exit_session(session_id) -> Result      # interface 3: exit a quiet launched session
     slots_here() -> bool                    # interface 3: whether tmux slots run here
+    continue_headless(session_id, text, by=None)  # interface 4: a headless resume
+    run_log(request_id) -> Path             # interface 4: a launch's run log
+    end_headless(request_id) -> Ended       # interface 4: end a headless launch's tree
 
 A request is a `LaunchRequest` (presets and flags, resolved here) or a `ReplayRequest`
 (a stored launch made again: a relaunch, a resume or a fork, its values the stored
@@ -103,6 +109,11 @@ id it copies, which makes its launch kind `fork`. Its environment
 is built as any replay's, so nothing of the asking process's session reaches it, and
 then gets the request's `stamps`.
 
+**A launch's stamps** (interface 4): a `LaunchRequest`'s `stamps` are variables set on
+its environment after the scrub, under a fork's rule: each one a present module lists in
+its `SESSION_ENV` under its own prefix, never the launcher's or turns'. Its values keep
+them (`headless.STAMPS`), so a headless resume (`continue_headless`) stamps them again.
+
 **A session's launch kind** (interface 1) is read from the launch log: `fork`, `scratch`,
 `seat`, `project` or `one-off` for the launch a session id belongs to, by the order in
 `store.LaunchRow.kind`, and None for a session the launcher didn't start (`store.kinds`).
@@ -140,9 +151,10 @@ from typing import TYPE_CHECKING
 from moxi import exit as exits
 from moxi import files
 from moxi import modules as moxi_modules
+from moxi import store as core_store
 
-from . import (catalog, compose, first, handoffs, identity, live, names, parks, presets, recycle,
-               slots, store, targets)
+from . import (catalog, compose, first, handoffs, headless, identity, live, names, parks,
+               presets, recycle, slots, store, targets)
 from .compose import Composition, common
 from .compose.common import KEEP_WARM_ENV, RECYCLE_ON_EXPIRY_ENV
 from .first import TURNS_ENV
@@ -205,6 +217,7 @@ class LaunchRequest:
     actor: str | None = None
     left_out: Sequence[str] = ()
     filled: Sequence[str] = ()
+    stamps: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -328,7 +341,8 @@ def launch(request, *, env: Mapping[str, str] | None = None,
     `warn` is called with each warning line just before the session starts, the last
     moment a launch in this terminal can show one; the result carries them too."""
     caller = dict(os.environ if env is None else env)
-    bad_id = _request_id_refusal(getattr(request, "request_id", None))
+    bad_id = (_request_id_refusal(getattr(request, "request_id", None))
+              or _stamps_refusal(request))
     if bad_id is not None:
         raise bad_id
     known = _known(getattr(request, "request_id", None), env)
@@ -425,7 +439,8 @@ def check(request, *, env: Mapping[str, str] | None = None) -> list[Refusal]:
     (`presets.ScratchNotes` from `compose.build`), a headless launch with no brief, or a
     brief or handoff file that can't be read."""
     caller = dict(os.environ if env is None else env)
-    bad_id = _request_id_refusal(getattr(request, "request_id", None))
+    bad_id = (_request_id_refusal(getattr(request, "request_id", None))
+              or _stamps_refusal(request))
     if bad_id is not None:
         return [bad_id]
     try:
@@ -439,7 +454,8 @@ def preview(request, *, env: Mapping[str, str] | None = None) -> Composition:
     """The composition `request` would launch: argv, the stamped environment, target and
     mode. Starts nothing and writes nothing of the launcher's. Its `warnings` are the
     ones `launch` gives: the resolver's, then the composer's."""
-    bad_id = _request_id_refusal(getattr(request, "request_id", None))
+    bad_id = (_request_id_refusal(getattr(request, "request_id", None))
+              or _stamps_refusal(request))
     if bad_id is not None:
         raise bad_id
     resolved = _named(request, _resolve(request, env), env)
@@ -463,6 +479,27 @@ def prepare(request, composition: Composition,
     child, _ = _child_base(request, caller)
     launch_env = common.child_env(child, composition, moxi_modules.session_env())
     return targets.get(composition.target).prepare(composition, launch_env)
+
+
+def child_env(request, composition: Composition,
+              env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The whole environment `request`'s launch would give its harness (`preview`'s
+    `composition`): the caller's environment (`env`, else this process's) scrubbed of
+    every session's stamps, then the launch's own, as `launch` builds it. Starts and
+    writes nothing."""
+    caller = dict(os.environ if env is None else env)
+    child, _ = _child_base(request, caller)
+    return common.child_env(child, composition, moxi_modules.session_env())
+
+
+def settable_rows(harness: str) -> tuple[str, ...]:
+    """The name of every row a `harness` launch request may type or leave out: the
+    launcher's own settable rows, then the harness's, from the shipped catalogs. A
+    caller that leaves out each row it doesn't type holds every other row at its shipped
+    default, a row added to a catalog later included."""
+    names_ = [row.name for row in catalog.launcher() if row.settable]
+    return tuple(dict.fromkeys(
+        names_ + [row.name for row in catalog.load(harness) if row.settable]))
 
 
 def exit_code(error: BaseException) -> int:
@@ -510,7 +547,12 @@ def _live_names(env: Mapping[str, str] | None) -> frozenset[str]:
     """The names of the live launches; none when the launch log was never made."""
     if not store.path(env).exists():
         return frozenset()
-    conn = store.connect(env=env, create=False)
+    try:
+        conn = store.connect(env=env, create=False)
+    except core_store.StoreTooNew:
+        raise
+    except core_store.StoreError:
+        return frozenset()  # removed since, or holds no launch log yet
     try:
         return names.taken(conn)
     finally:
@@ -525,14 +567,18 @@ MODEL_PIN = "model-pin"
 #: What a replay does not take from the stored values as values: the composer's own
 #: record of the mode and the rows it left out, `--off-posture`, which goes back on
 #: its own field, and a fresh launch's record of what its request gave.
-_NOT_REPLAYED = ("mode", "not_applied", "off_posture", "sources", "filled")
+_NOT_REPLAYED = ("mode", "not_applied", "off_posture", "sources", "filled", "stamps")
 
 
 def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, object]:
     """The values a launch's row records: `values` as they are for a replay, the stored
     model put back over a model pin it applied; for a fresh launch, with `sources` and
     `filled` (see the module's text)."""
+    stamps = dict(getattr(request, "stamps", None) or {})
     if getattr(request, "replay", False):
+        if stamps and not request.fork_of:
+            # A headless resume's stamps, kept for the next one.
+            values = {**values, headless.STAMPS: stamps}
         if getattr(resolved, "model_pin", None) is None:
             return values
         # The pin is the relaunch's alone: the row keeps the stored model.
@@ -550,7 +596,18 @@ def _recorded(request, resolved, values: Mapping[str, object]) -> Mapping[str, o
               if sources.get(str(name)) == presets.TYPED]
     for name in filled:
         sources[name] = LAST
-    return {**values, "sources": sources, "filled": filled}
+    kept = {headless.STAMPS: stamps} if stamps else {}
+    return {**values, "sources": sources, "filled": filled, **kept}
+
+
+def _stamps_refusal(request) -> Refusal | None:
+    """The refusal a fresh request's `stamps` meet (a fork's rule), or None."""
+    stamps = getattr(request, "stamps", None)
+    if not stamps or getattr(request, "replay", False):
+        return None
+    from . import fork
+
+    return fork.stamp_refusal(stamps)
 
 
 #: The option rows a replay sets back to their default, with a warning, when the
@@ -773,7 +830,12 @@ def _known(request_id: str | None,
     left unmade."""
     if not request_id or not store.path(env).exists():
         return None
-    conn = store.connect(env=env, create=False)
+    try:
+        conn = store.connect(env=env, create=False)
+    except core_store.StoreTooNew:
+        raise
+    except core_store.StoreError:
+        return None  # removed since, or holds no launch log yet
     try:
         return store.get(conn, request_id)
     finally:
@@ -838,7 +900,7 @@ def _with_ids(request, harness: str):
                                    request_id=request.request_id or str(uuid.uuid4()),
                                    session_id=session_id)
     names = ("seat", "project_preset", "typed", "extra", "off_posture", "left_out",
-             "filled", "cwd", "actor")
+             "filled", "cwd", "actor", "stamps")
     given = {name: getattr(request, name, None) for name in names}
     request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
     session_id = getattr(request, "session_id", None)
@@ -1064,6 +1126,37 @@ __all__ = ["KINDS", "LAST", "MODEL_PIN", "TAKEN", "KEEP_WARM_ENV", "RECYCLE_ON_E
            "RELAUNCH_ENV", "REQUEST_ENV", "SLOTS_ENV", "TURNS_ENV", "Busy", "CommsOffline",
            "CommsUnanswered", "IdentityRefused", "IdentityTaken", "LaunchRequest",
            "LaunchResult", "NoDirectory", "Refusal", "ReplayRequest", "Replayed", "Running",
-           "ScratchRecycle", "ScratchRoot", "check", "exit_code", "exit_session", "fork",
+           "ScratchRecycle", "ScratchRoot", "check", "child_env", "exit_code", "exit_session", "fork",
            "launch", "launch_kind", "launch_kinds", "open_hold", "prepare", "preview",
-           "release_hold", "running", "slots_here"]
+           "release_hold", "running", "settable_rows", "slots_here"]
+
+
+#: What `end_headless` did (`headless.Ended`), and its outcomes.
+Ended = headless.Ended
+NotHeadless = headless.NotHeadless
+
+
+def continue_headless(session_id: str, text: str, *, request_id: str | None = None,
+                      by: str | None = None,
+                      env: Mapping[str, str] | None = None) -> LaunchResult:
+    """Interface 4: resume the headless session `session_id` with `text` as its prompt,
+    replaying its launch's stored values and the stamps its request gave, under
+    `request_id` (minted when None), the resume's idempotency key, launched by `by` (as a
+    `LaunchRequest`'s `actor`; the caller's identity when None). Raises a refusal with
+    nothing written: `not-launched`, `not-headless`, or `live` while the session runs."""
+    return headless.continue_headless(session_id, text, request_id=request_id, by=by,
+                                      env=env)
+
+
+def run_log(request_id: str, env: Mapping[str, str] | None = None) -> Path:
+    """Interface 4: the run log of the launch `request_id`, where a headless launch's
+    output goes. Its path, whether or not it exists yet."""
+    return targets.run_log(request_id, env)
+
+
+def end_headless(request_id: str, *, env: Mapping[str, str] | None = None) -> Ended:
+    """Interface 4: end the running headless launch `request_id`'s whole process tree, on
+    every system, TERM first then KILL (`headless.end_tree`). Nothing is signalled when
+    the row's pid and start time no longer name a running process: `gone`. Never
+    raises."""
+    return headless.end_headless(request_id, env=env)

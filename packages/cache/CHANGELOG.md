@@ -2,6 +2,9 @@
 
 ## 0.1.7 (unreleased)
 
+- With launcher installed, a warm row whose launch carries launcher's `next_keep_alive_at`
+  ends line two in it, in place of the cost: `next keep-alive 19:49`, or `next keep-alive
+  due` once that time has come. A null or missing time, or a failed read, draws nothing.
 - With launcher installed, the page reads launcher's `/api/running` and `/api/state` and,
   at the desk, follows its topics `running` and `sessions`. A row a running launch holds
   is named and placed by the launch (`slot 4 · atlas-api`), carries launcher's keep-warm

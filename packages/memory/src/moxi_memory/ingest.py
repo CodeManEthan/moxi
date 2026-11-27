@@ -47,7 +47,10 @@ main session's rows (`moxi_memory.rows`'s "Recall answers"), and so is an answer
 comms, a delivered message whose comms id the log names, read through comms'
 `delivered_messages`; a notice whose task id, or a message whose id, the run's read of
 the log doesn't name reads the log again when it is within `FORK_LOG_SLACK_S` of that
-read or newer. A Codex thread whose
+read or newer. A main session that is a chat recall's agent (its id is a
+`headless_session` in memory's recall log, written before the agent starts) is never
+read either, its subagents included, and any rows and tails of it already stored are
+taken out. A Codex thread whose
 import marks say it was imported (it is listed in Codex's imports file, or its turns
 carry the import prefix) is skipped: the Claude Code transcript is the original. A
 compressed Codex rollout, which sessions doesn't read, is recorded in `sources` and counted
@@ -373,6 +376,7 @@ class Ingest:
         self.seen: set[tuple[str, str]] = set()
         self.report = Report(mode)
         self._forks: frozenset[tuple[str, str]] | None = None
+        self._headless: frozenset[tuple[str, str]] | None = None
         #: The comms message ids of the recall answers the log names, read with `_forks`.
         self._messages: frozenset[str] = frozenset()
         #: When the recall log was last read for `_forks`, or None before the first read.
@@ -622,6 +626,30 @@ class Ingest:
             self.conn.execute("DELETE FROM rows WHERE harness = ? AND session_id = ? "
                               "AND agent_id = ?", (src.harness, role.main, role.agent))
 
+    def recall_agent(self, harness: str, main: str) -> bool:
+        """Whether `main` is a chat recall's agent's session, read from memory's recall
+        log once per run."""
+        if self._headless is None:
+            from . import recalls
+
+            try:
+                self._headless = recalls.headless_sessions()
+            except (OSError, ValueError):
+                self._headless = frozenset()
+        return (harness, main) in self._headless
+
+    def leave_out_agent(self, src, skey: str, role: Role) -> None:
+        """Pass a chat recall's agent's source by, its subagents' included, taking out
+        any rows and tails of its session already stored."""
+        from moxi import store
+
+        self.passed.add((src.harness, skey))
+        with store.transaction(self.conn):
+            self.conn.execute("DELETE FROM rows WHERE harness = ? AND session_id = ?",
+                              (src.harness, role.main))
+            self.conn.execute("DELETE FROM tails WHERE harness = ? AND session_id = ?",
+                              (src.harness, role.main))
+
     def note_compressed(self, src) -> None:
         self.report.compressed += 1
         self.conn.execute(
@@ -642,6 +670,9 @@ class Ingest:
         skey = source_key(src)
         if self.recall_fork(src.harness, role.agent):
             self.leave_out_fork(src, skey, role)
+            return
+        if self.recall_agent(src.harness, role.main):
+            self.leave_out_agent(src, skey, role)
             return
         stored = self.conn.execute("SELECT cursor FROM sources WHERE harness = ? AND "
                                    "source = ?", (src.harness, skey)).fetchone()

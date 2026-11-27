@@ -3276,6 +3276,7 @@ launcher	packages/launcher/src/moxi_launcher/api.py	launch	name	error	exc
 launcher	packages/launcher/src/moxi_launcher/api.py	launch_kind	name	timeout	timeout_s
 launcher	packages/launcher/src/moxi_launcher/api.py	launch_kinds	name	timeout	timeout_s
 launcher	packages/launcher/src/moxi_launcher/api.py	preview	name	environ	env
+launcher	packages/launcher/src/moxi_launcher/api.py	`composition`): the caller's environment (`env`, else this process's) scrubbed of	keep	env	env
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	- `launcher.keep-warm` (`KEEP_WARM`): from 900 s before the session's cache expires until	use	`KEEP_WARM`	`KEEP_WARM_ENV`
 launcher	packages/launcher/src/moxi_launcher/cachetimers.py	__all__ = ["JOB", "KEEP_WARM", "TIMERS"]	keep	KEEP_WARM	KEEP_WARM
 launcher	packages/launcher/src/moxi_launcher/catalog.py	WHEN_FIELDS = ("requires", "condition", "target", "refused", "hint", "applies_with")	keep	refused	refused
@@ -4602,6 +4603,8 @@ launcher	packages/launcher/tests/test_live.py	file.parent.mkdir(parents=True, ex
 launcher	packages/launcher/tests/test_live.py	server.wait(timeout=10)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_live.py	test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it	name	folder	project_dir
 launcher	packages/launcher/tests/test_live.py	words = row.tokens(mode, value=True, cwd=str(cwd))	keep	value=	value=
+launcher	packages/launcher/tests/test_live.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_live.py	assert seeds == ([{"folder": str(work.resolve()), "file": str(trust_stand_in()),	keep	folder	folder
 launcher	packages/launcher/tests/test_live_acts.py	[listed] = [e for e in resume.sessions(turns=None).data["sessions"]	keep	sessions	sessions
 launcher	packages/launcher/tests/test_live_acts.py	done = "cleared" if command == "clear" else "compacted"	keep	compacted	compacted
 launcher	packages/launcher/tests/test_live_acts.py	needs_claude_with_turns	name	error	exc
@@ -4914,6 +4917,8 @@ launcher	packages/launcher/tests/test_preview.py	file.parent.mkdir(parents=True,
 launcher	packages/launcher/tests/test_preview.py	monkeypatch.setattr(api, "_resolve", lambda request, environ=None: Resolved(dict(values)))	use	environ	env
 launcher	packages/launcher/tests/test_preview.py	test_preview_composes_what_resolve_returns.resolve	name	environ	env
 launcher	packages/launcher/tests/test_preview.py	test_the_context_never_makes_the_launchers_own_handoff_folder	name	folder	handoff_dir
+launcher	packages/launcher/tests/test_preview.py	assert {"identity", "keep_warm", "tools", "mcp_config", "extra_flags"} <= set(rows)	keep	set	set
+launcher	packages/launcher/tests/test_preview.py	assert "session_id" not in rows and len(rows) == len(set(rows))	keep	set	set
 launcher	packages/launcher/tests/test_quiet.py	assert "stale" in reading.first.detail	keep	stale	stale
 launcher	packages/launcher/tests/test_quiet.py	assert session.watches[0].closed	keep	closed	closed
 launcher	packages/launcher/tests/test_quiet.py	assert set(quiet.LIVE_KINDS) | {"shell"} == set(results.AGENT_KINDS)	keep	set	set
@@ -6173,6 +6178,8 @@ memory	packages/memory/tests/test_setup.py	-	name	test_auto_memory_is_offered_wh
 memory	packages/memory/tests/test_table.py	-	name	test_the_store_lives_in_memorys_state_directory	test_the_store_lives_in_memorys_state_dir
 memory	packages/memory/tests/test_ingest.py	FakeLauncher.launch_kind	name	timeout	timeout_s
 memory	packages/memory/tests/test_ingest.py	assert not any("fork" in x for x in texts())	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert not any("chat recall agent" in x for x in texts())	keep	any	any
+memory	packages/memory/tests/test_ingest.py	assert not any(r[2] == t.session_id for r in index_rows("tails"))	keep	any	any
 memory	packages/memory/tests/test_search.py	FakeLauncher.launch_kind	name	timeout	timeout_s
 memory	packages/memory/src/moxi_memory/recall_cli.py	p = verbs.add_parser("subconscious", help="see the subconscious's recalls",	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_cli.py	q = sub.add_parser("list", help="show the log of recalls",	keep	help	help
@@ -6211,6 +6218,7 @@ memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--se
 memory	packages/memory/src/moxi_memory/recall_child.py	parser.add_argument("--recall", help="the recall's id")	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_child.py	help="take over the session's lines whose owner is gone, and exit")	keep	help	help
 memory	packages/memory/src/moxi_memory/recall_child.py	recall.put(record={"holder": me} if me is not None else None, child=child,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_child.py	if recall.record.get("start") == recalls.CHAT:	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "discard"]	keep	find	find
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "find", "late", "discard"]	keep	find	find
 memory	packages/memory/src/moxi_memory/recall_discard.py	__all__ = ["Refused", "turns_session", "find", "late", "discard"]	keep	find	find
@@ -6247,6 +6255,7 @@ memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"st
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "lost": GONE, "error": PAST_BOUND,	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_stream.py	recall.write(record={"state": records.ENDED}, state=recalls.BACK, rounds=rounds,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": end.answer, "at": now,	keep	round	round
+memory	packages/memory/src/moxi_memory/recall_stream.py	rounds.append({"round": round_number, "text": answer, "at": now,	keep	round	round
 memory	packages/memory/src/moxi_memory/recall_take.py	current = records.read(recall.session_id, recall.recall_id) or recall.record	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_take.py	return recalls.is_safe(session_id) and any(	keep	any	any
 memory	packages/memory/src/moxi_memory/recall_take.py	recall.put(record={"state": records.LOST, "reason": recall.line.get("reason"),	keep	record	record
@@ -6303,6 +6312,73 @@ memory	packages/memory/tests/test_recall_slot.py	rounds=[{"round": 1, "text": "-
 memory	packages/memory/tests/test_recall_slot.py	{"round": 2, "lost": "gone", "error": "bound"}])	keep	round	round
 memory	packages/memory/tests/test_recall_slot.py	recall.put(ref=f"{rid}:2", record={"state": records.ENDED, "answered": True})	keep	record	record
 memory	packages/memory/tests/test_recall_start.py	{"round": 1, "text": "Recalled ...:\n- the lock is held by the writer"}]})	keep	round	round
+memory	packages/memory/src/moxi_memory/connector/recall.py	"stale": {"type": "boolean"},	keep	stale	stale
+memory	packages/memory/src/moxi_memory/connector/recall.py	"required": ["id", "for_words", "age_s", "stale", "text"],	keep	stale	stale
+memory	packages/memory/src/moxi_memory/connector/recall.py	if set(args) - set(INPUT["properties"]):	keep	set	set
+memory	packages/memory/src/moxi_memory/connector/recall.py	return self.result.refused(code, text), logged	keep	refused	refused
+memory	packages/memory/src/moxi_memory/connector/recall.py	logged.update(pieces=len(pieces), held_back=unscanned + uncut, waiting=collected.waiting,	keep	waiting	waiting
+memory	packages/memory/src/moxi_memory/connector/recall.py	return self.result(text=text, structured={	keep	text	text
+memory	packages/memory/src/moxi_memory/connector/recall.py	earlier = ", earlier" if piece["stale"] else ""	keep	stale	stale
+memory	packages/memory/src/moxi_memory/recall_chat.py	in this process's memory only (`_held`), so a connector restart frees them.	keep	_held	_held
+memory	packages/memory/src/moxi_memory/recall_chat.py	return {"id": self.id, "for_words": self.for_words, "age_s": round(self.age_s, 1),	keep	round	round
+memory	packages/memory/src/moxi_memory/recall_chat.py	"stale": self.stale, "text": self.text}	keep	stale	stale
+memory	packages/memory/src/moxi_memory/recall_chat.py	_held.setdefault(conversation, set()).update(ids)	keep	set	set
+memory	packages/memory/src/moxi_memory/recall_chat.py	_held.get(conversation, set()).difference_update(ids)	keep	set	set
+memory	packages/memory/src/moxi_memory/recall_chat.py	handed = set(handed_lines(state, now=now))	keep	set	set
+memory	packages/memory/src/moxi_memory/recall_chat.py	piece_id = f"{recall_id}:{entry.get('round')}"	keep	round	round
+memory	packages/memory/src/moxi_memory/recall_chat.py	refusals = ctx.launcher.check(recall_fence.request(ctx.launcher, ctx.spec),	keep	ok	ok
+memory	packages/memory/src/moxi_memory/recall_chat.py	env=ctx.env)	keep	env	env
+memory	packages/memory/src/moxi_memory/recall_chat.py	found = check(ctx)	keep	ok	ok
+memory	packages/memory/src/moxi_memory/recall_chat.py	if not _start_gate.acquire(timeout=-1 if left is None else left):	keep	timeout	timeout
+memory	packages/memory/src/moxi_memory/recall_chat.py	record = recall.record	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_chat.py	recall.put(record={"brief": text_brief}, prefetch_hits=found.count,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_chat.py	recall.put(record={"headless_session": session}, headless_session=session,	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_chat.py	call=recall.record.get("call"))	keep	record	record
+memory	packages/memory/src/moxi_memory/recall_chat.py	chat_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/src/moxi_memory/recall_fence.py	request_id=spec.request_id, session_id=spec.session_id, actor=ACTOR,	keep	actor	actor
+memory	packages/memory/src/moxi_memory/recall_fence.py	composition = launcher.preview(req, env=env)	keep	env	env
+memory	packages/memory/src/moxi_memory/recall_fence.py	command = launcher.prepare(req, composition, env=env)	keep	env	env
+memory	packages/memory/src/moxi_memory/recall_fence.py	child_env = launcher.child_env(req, composition, env=env)	keep	env	env
+memory	packages/memory/src/moxi_memory/recall_fence.py	result = launcher.launch(req, env=env)	keep	env	env
+memory	packages/memory/src/moxi_memory/recall_fence.py	launcher.end_headless(req.request_id, env=env)	keep	env	env
+memory	packages/memory/src/moxi_memory/recall_fence.py	extra, missing = sorted(tools - bound), sorted(set(READ_TOOLS) - tools)	keep	set	set
+memory	packages/memory/tests/test_recall_chat.py	fields = dict(start=recalls.CHAT, text="the kiosk approver", senders=(), settings={},	keep	start	start
+memory	packages/memory/tests/test_recall_chat.py	fields = dict(start=recalls.CHAT, text="the kiosk approver", senders=(), settings={},	keep	text	text
+memory	packages/memory/tests/test_recall_chat.py	assert {"headless_session", "call"} <= set(recalls.LINE_FIELDS)	keep	set	set
+memory	packages/memory/tests/test_recall_chat.py	assert {"context", "call", "headless_session"} <= set(records.RECORD_FIELDS)	keep	set	set
+memory	packages/memory/tests/test_recall_chat.py	held.set()	keep	set	set
+memory	packages/memory/tests/test_recall_chat.py	release.set()	keep	set	set
+memory	packages/memory/tests/test_recall_chat.py	"rounds": [{"round": i + 1, "text": t, "at": at} for i, t in enumerate(texts)]})	keep	round	round
+memory	packages/memory/tests/test_recall_chat.py	return {p.id: p.stale for p in got.pieces}	keep	stale	stale
+memory	packages/memory/tests/test_recall_chat.py	recall_chat.chat_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_recall_chat.py	return recall_chat.Skip("closed")	keep	closed	closed
+memory	packages/memory/tests/test_recall_chat.py	assert recall_chat.why_not(on, checks=checks).reason == "closed"	keep	closed	closed
+memory	packages/memory/tests/test_recall_fence.py	cwd.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_recall_fence.py	presets.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_recall_fence.py	assert not any(w.startswith("tmpl-") for w in words)	keep	any	any
+memory	packages/memory/tests/test_recall_fence.py	return list(compose.launch_additions(cwd=str(fence.chat_dir()), env=os.environ,	keep	env	env
+memory	packages/memory/tests/test_recall_fence.py	project.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_recall_fence.py	assert not any(w.startswith("--allowedTools") for w in words)	keep	any	any
+memory	packages/memory/tests/test_recall_fence.py	assert not any("rm:*" in w for w in argv(spec()))	keep	any	any
+memory	packages/memory/tests/test_recall_fence.py	rows = set(api.settable_rows("claude"))	keep	set	set
+memory	packages/memory/tests/test_recall_fence.py	assert set(req.left_out) | set(req.typed) | {"extra_flags"} == rows	keep	set	set
+memory	packages/memory/tests/test_recall_fence.py	"notes_dir", "project", "scratch"} <= set(req.left_out)	keep	set	set
+memory	packages/memory/tests/test_recall_fence.py	claude.plan(stderr="not signed in", exit=1)	keep	exit	exit
+memory	packages/memory/tests/test_recall_fence.py	fence.chat_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_recall_fence.py	outs = [k.communicate(timeout=60)[0].strip() for k in kids]	keep	timeout	timeout
+memory	packages/memory/tests/test_recall_fence.py	assert api.check(req) == []	keep	ok	ok
+memory	packages/memory/tests/test_recall_headless.py	self.runs.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_recall_tool.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/tests/test_recall_tool.py	"rounds": [{"round": i + 1, "text": t, "at": time.time()}	keep	round	round
+memory	packages/memory/tests/test_recall_tool.py	assert any(noted in note for note in result.structured["notes"])	keep	any	any
+memory	packages/memory/tests/test_recall_tool.py	held.set()	keep	set	set
+memory	packages/memory/tests/test_recall_tool.py	release.set()	keep	set	set
+memory	packages/memory/tests/test_recall_tool.py	assert piece["stale"] is True and piece["for_words"] == "the kiosk approver"	keep	stale	stale
+memory	packages/memory/tests/test_recall_tool.py	assert any("1 piece couldn't be checked for secrets" in n	keep	any	any
+memory	packages/memory/tests/test_recall_tool.py	assert any("1 piece couldn't" in n for n in again.structured["notes"])	keep	any	any
+memory	packages/memory/tests/test_recall_tool.py	home = os.environ["HOME"].rstrip("/")	keep	HOME	HOME
+memory	packages/memory/tests/test_recall_tool.py	assert any("claude isn't there" in n for n in result.structured["notes"])	keep	any	any
+memory	packages/memory/tests/test_recall_tool.py	assert any(recall_tool.NO_CUT in n for n in result.structured["notes"])	keep	any	any
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any
@@ -18393,6 +18469,8 @@ launcher	packages/launcher/tests/test_defaults.py	assert (code, answer["changed"
 launcher	packages/launcher/tests/test_defaults.py	assert [(r["op"], r["by"]) for r in records] == [("set", "ui")]	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (True, [])	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (False, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("permission_mode", "set", "default") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	code = cli.main(["config", "set", "launcher", "defaults.model", "opus", "--json"])	keep	set	set
 launcher	packages/launcher/tests/test_recycle.py	store.end_run(conn, first.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records`: the id's main transcript, whose first records have	keep	find	find
 launcher	packages/launcher/tests/test_relaunch.py	assert "stale" in caught.value.problem and later.asked == [CLEARED]	keep	stale	stale
@@ -18553,6 +18631,10 @@ launcher	packages/launcher/tests/test_replay.py	assert common.replay_env(base, {
 launcher	packages/launcher/tests/test_replay.py	assert common.replay_env({"HOME": "/h"}, {"HOME": "/elsewhere"}) == {"HOME": "/h"}	keep	HOME	HOME
 launcher	packages/launcher/tests/test_exits.py	old, new = FakeSession(exits=(Result("refused", "gone"),)), FakeSession()	keep	refused	refused
 launcher	packages/launcher/tests/test_exits.py	assert old.commands == [("exit", 4)] and new.commands == [] and old.closed == 1	keep	closed	closed
+launcher	packages/launcher/src/moxi_launcher/headless.py	return (launch or api.launch)(request, env=env)	keep	env	env
+launcher	packages/launcher/src/moxi_launcher/headless.py	proc.alive(root) or any(_quiet(item.is_running) for item in below)):	keep	any	any
+launcher	packages/launcher/src/moxi_launcher/headless.py	if posix and (proc.alive(root) or any(_quiet(item.is_running) for item in below)):	keep	any	any
+launcher	packages/launcher/tests/test_headless.py	assert any("go on" in w for w in words) and not any("first brief" in w for w in words)	keep	any	any
 loadout	packages/loadout/src/moxi_loadout/strays.py	harness's `project_folders` entry. A folder that isn't there has nothing in it.	keep	project_folders	project_folders
 loadout	packages/loadout/src/moxi_loadout/strays.py	rel = plan.project_dirs.get(name, {}).get(dir_key)	keep	project_dirs	project_dirs
 loadout	packages/loadout/src/moxi_loadout/strays.py	held = set(place.placed_targets())	keep	set	set

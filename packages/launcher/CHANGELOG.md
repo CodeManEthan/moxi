@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Opening the launch log only to read it (`store.connect(create=False)`) no longer
+  creates its tables in an empty file: a file that holds no launch log yet raises
+  `StoreError`, as a missing one does, and is left as it was. Every reader treats that as
+  no launch log. A log at an older schema version is still brought up to date.
+- `moxi config set` and the launch defaults writer no longer crash on a valid
+  `presets.toml` whose `[defaults.<name>]` table comes before `[defaults]`: the value is
+  written under `[defaults]`, and the file keeps its order and comments.
+- Interface 4, for a caller that runs its own headless agents: a `LaunchRequest`'s
+  `stamps` (a fork's rule), kept in the launch's values; `continue_headless`, a headless
+  resume that replays the stored values and stamps, launched by `by` (the caller's
+  identity when left out); `run_log`, a launch's run log; and
+  `end_headless`, which ends a headless launch's whole process tree on every system and
+  leaves a pid whose start time no longer matches. Two reads that start nothing come with
+  it: `child_env`, the environment a launch's harness would get, and `settable_rows`,
+  every row a request may type or leave out.
 - A handoff waits until its seat takes it. A seat's start no longer marks the handoff it
   points to as picked, so the pointer comes back at every start until the handoff is
   taken, given to a launch, or a newer one of the key is. The pointer now ends "then run:

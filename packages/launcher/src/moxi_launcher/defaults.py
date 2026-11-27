@@ -40,7 +40,8 @@ The write is one `moxi.files.edit_toml` block on `presets.path(env)`, under
 `presets.toml.lock`, which reads the file again inside the lock and keeps every other byte:
 a changed value keeps its place and trailing comment, a new key goes straight after the
 table's last own key, above any `[defaults.<x>]` sub-table (or straight under its header
-when it holds none, so it lands above a comment block that follows the table), a cleared
+when it holds none, so it lands above a comment block that follows the table), the same
+holds when a `[defaults.<x>]` sub-table comes before the `[defaults]` header, a cleared
 key goes with its line, the header stays
 when its last key goes, a file with no `[defaults]` gets one at its end, an inline
 `defaults = {...}` is edited in place, and a missing file is made (0600 on POSIX).
@@ -405,7 +406,7 @@ def _write(doc, name: str, op: str, value: object) -> None:
     """Change key `name` of the document's `[defaults]`, keeping every other byte."""
     if _TABLE not in doc:
         doc[_TABLE] = {}
-    table = doc[_TABLE]
+    table = _own_table(doc)
     if op != "set":
         del table[name]
     elif (name in table or table.as_string().lstrip().startswith("{")
@@ -418,6 +419,18 @@ def _write(doc, name: str, op: str, value: object) -> None:
             body._insert_after(keys[-1], name, value)
         else:
             body._insert_at(0, name, value)
+
+
+def _own_table(doc):
+    """The document's `[defaults]` table to write in. When a `[defaults.<x>]` sub-table
+    comes before the `[defaults]` header, tomlkit hands back one view over every piece of
+    the table, which can't be placed in; the write then goes to the piece under the
+    `[defaults]` header, or to the first piece when no piece has that header."""
+    table = doc[_TABLE]
+    if type(table).__name__ != "OutOfOrderTableProxy":
+        return table
+    pieces = [item for key, item in doc.body if key is not None and key.key == _TABLE]
+    return next((piece for piece in pieces if not piece.is_super_table()), pieces[0])
 
 
 def _own_key(key, item) -> bool:

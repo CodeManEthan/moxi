@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import test from "node:test";
 
 import {
-  answered, caseOf, expired, factOf, joinRunning, KEEP_WARM_PATH, keepWarmTitle, NO_PRESSES, NOT_KEPT, parseRunning,
+  answered, caseOf, expired, factOf, joinRunning, KEEP_ALIVE_DUE, keepAliveWords, KEEP_WARM_PATH, keepWarmTitle,
+  NEXT_KEEP_ALIVE, NO_PRESSES, NOT_KEPT, parseRunning,
   pressBody, pressed, pressNote, PRESS_WAIT_MS, RUNNING_PATH, runningLine, stampOf, valueCame, waitsWords, whereText,
 } from "../src/launched-model.ts";
 
@@ -91,7 +92,7 @@ test("launcher's words: where, the three cases, the fact with est., the lead, th
   assert.equal(one({ cache: null }).fact, null);
   assert.equal(one({ cache: null }).cache, null);
   assert.deepEqual(one({ cache: { state: "cold", until: iso("18:35"), estimated: false } }).cache,
-                   { warm: false, until: Date.parse(iso("18:35")) / 1000, estimated: false, kept: null });
+                   { warm: false, until: Date.parse(iso("18:35")) / 1000, estimated: false, kept: null, next: null });
   assert.equal(whereText({ target: "terminal", slot: null, project_key: null, folder: "notes" }), "terminal · notes");
   assert.equal(whereText({ target: "slot", slot: null, project_key: "p", folder: "f" }), "slot · p");
 });
@@ -120,6 +121,26 @@ test("the model and effort the launch was started with: present, null, or anythi
   // An entry that joins no row gives the page nothing of it.
   const unmatched = joinRunning(running([entry("r1", { identity: "b", model: "opus", effort: "high" })]), [bound("a")], when);
   assert.equal(unmatched.size, 0);
+});
+
+test("the next keep-alive: read as launcher sends it, a time or due, and nothing where it gives none", () => {
+  const covered = { identity: "a", waits: { kind: "agents", count: 1 }, covered: true };
+  const next = (fields) => joinRunning(parseRunning(running([entry("r1", { ...covered, ...fields })])), [bound("a")], when)
+    .get("a").cache.next;
+  assert.equal(next({ next_keep_alive_at: iso("19:49") }), Date.parse(iso("19:49")) / 1000);
+  // null, missing (an older launcher) and a value that is no time are none
+  assert.equal(next({ next_keep_alive_at: null }), null);
+  assert.equal(next({}), null);
+  assert.equal(next({ next_keep_alive_at: "soon" }), null);
+  assert.equal(next({ next_keep_alive_at: 1_790_000_000 }), null);
+  assert.equal(parseRunning(running([entry("r1")])).sessions[0].next_keep_alive_at, null);
+  const at = Date.parse(iso("19:49")) / 1000;
+  assert.equal(keepAliveWords(at, at - 1, when), "next keep-alive 19:49");
+  // the moment itself and after: due, since the next ask nudges
+  assert.equal(keepAliveWords(at, at, when), "next keep-alive due");
+  assert.equal(keepAliveWords(at, at + 600, when), "next keep-alive due");
+  assert.equal(keepAliveWords(null, at, when), null);
+  assert.deepEqual([NEXT_KEEP_ALIVE, KEEP_ALIVE_DUE], ["next keep-alive", "due"]);
 });
 
 test("Keep warm's words, path and wait are launcher's own", async () => {
