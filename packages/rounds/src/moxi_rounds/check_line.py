@@ -38,8 +38,8 @@ now, so lowering it starts nothing beside a running check. A lock file is never 
 The run that holds a place writes its holder record (`write_holder`): the ticket's
 fields less `since`, `check_lock` (which place), its `memory_mib` when declared, the
 run's `run_tag`, then `since`, the time it took the place; it adds `output` (the run's
-output file), and `run_pid` and `run_started` once its command has started
-(`update_holder`), and removes the record when it releases. A reader trusts it as the
+output file, `update_holder`), and `run_pid` and `run_started` once its command has
+started (`name_first`), and removes the record when it releases. A reader trusts it as the
 holder's only while its `pid` and `created` name a live process (`holder`). The doctor's
 check lock row reads all of this without taking any lock (`tickets`, `holder`,
 `lock_pid`, `orphan`).
@@ -273,6 +273,13 @@ def update_holder(lock_path: Path, **fields) -> None:
     found = holder(lock_path)
     if found is not None and found.get("pid") == os.getpid():
         files.atomic_write(holder_file(lock_path), json.dumps({**found, **fields}))
+
+
+def name_first(lock_path: Path, first: proc.ProcId) -> None:
+    """Name the run's first process, `first`, in this process's holder record of the
+    place whose lock file is `lock_path` (`run_pid`, `run_started`): a run's `on_start`
+    for `moxi.proc.run`."""
+    update_holder(lock_path, run_pid=first.pid, run_started=first.started)
 
 
 def remove_holder(lock_path: Path) -> None:
@@ -703,5 +710,5 @@ __all__ = ["LINE_DIR", "LINE_LOCK", "HOLDER_FILE", "SLOT_FILE", "LINE_POLL_S",
            "orphan", "new_tag", "available_mib", "Held", "Decision", "decide", "Taken",
            "NotFree", "slot", "gib",
            "changing", "tickets", "take", "remove", "leave", "remove_dead",
-           "write_holder", "update_holder", "remove_holder", "holder", "lock_pid",
+           "write_holder", "update_holder", "name_first", "remove_holder", "holder", "lock_pid",
            "seconds", "age", "held_by"]

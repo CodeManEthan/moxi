@@ -87,6 +87,7 @@ moved during is caught by step 3.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shlex
@@ -653,7 +654,7 @@ def _check_lock(held: _Held, found: _Look, *,
     runs asked for it (`check_line.slot`), or refused at once where `held.wait` is false
     and no place can be taken now. `memory_mib` is what the run declares it holds at
     most. The block gets the place taken, to name its output and its command in the
-    holder record (`check_line.update_holder`)."""
+    holder record (`check_line.update_holder`, `check_line.name_first`)."""
     path = lock_file(held.env)
     build = found.build
     fields = {**check_line.me(), "round": held.name,
@@ -680,16 +681,12 @@ def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
     with _check_lock(held, found, memory_mib=memory_mib) as taken:
         output = _output_file(found.scratch)
         check_line.update_holder(taken.path, output=str(output))
-
-        def named(first: proc.ProcId) -> None:
-            check_line.update_holder(taken.path, run_pid=first.pid,
-                                     run_started=first.started)
-
         started = time.monotonic()
         try:
             done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
                             cwd=found.worktree, output=output, first_signal="SIGINT",
-                            grace_s=GRACE_S, tag=taken.tag, on_start=named,
+                            grace_s=GRACE_S, tag=taken.tag,
+                            on_start=functools.partial(check_line.name_first, taken.path),
                             end_leftovers=True)
             code: int | None = done.returncode
         except subprocess.TimeoutExpired:
