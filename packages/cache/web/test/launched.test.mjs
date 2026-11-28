@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  answered, caseOf, expired, factOf, KEEP_WARM, KEEP_WARM_HOLDS_TAIL, KEEP_WARM_OFF_TAIL, KEEP_WARM_PATH, keepWarmLine,
-  keepWarmOf, keepWarmStateOf, keepWarmTitle, launchOf, leadOf, NO_PRESSES, NOT_KEPT, OtherRead, parseKeepWarms,
+  answered, caseOf, expired, factOf, KEEP_ALIVE_DUE, keepAliveOf, KEEP_WARM, KEEP_WARM_HOLDS_TAIL, KEEP_WARM_OFF_TAIL, KEEP_WARM_PATH, keepWarmLine,
+  keepWarmOf, keepWarmStateOf, keepWarmTitle, launchOf, leadOf, NEXT_KEEP_ALIVE, NO_PRESSES, NOT_KEPT, OtherRead, parseKeepWarms,
   parseLaunched, PRESS_WAIT_MS, pressBody, pressed, pressNote, RUNNING_PATH, RUNNING_TOPIC, STATE_PATH, STATE_TOPIC,
   valueCame, whereText,
 } from "../src/launched.ts";
@@ -112,6 +112,25 @@ test("the three cases, their facts and the heavy lead are the Sessions page's wo
     ["ordinary", { text: "warm until 19:22", heavy: false }, null],
     ["ordinary", null, null],
   ]);
+});
+
+test("the next keep-alive: its time, due once the time has come, and nothing where launcher gives none", () => {
+  const due = iso(NOW - 120);
+  const later = iso(NOW + 2400);
+  const covered = { waits: { kind: "agents", count: 1 }, covered: true };
+  assert.equal(one({ ...covered, next_keep_alive_at: later }).next_keep_alive_at, later);
+  assert.equal(keepAliveOf(one({ ...covered, next_keep_alive_at: later }), NOW, hhmm), "next keep-alive 19:49");
+  assert.equal(keepAliveOf(one({ ...covered, next_keep_alive_at: due }), NOW, hhmm), "next keep-alive due");
+  // the moment itself is due: the next ask nudges
+  assert.equal(keepAliveOf(one({ ...covered, next_keep_alive_at: iso(NOW) }), NOW, hhmm), "next keep-alive due");
+  assert.equal(keepAliveOf(one({ ...covered, next_keep_alive_at: later }), NOW + 2399, hhmm), "next keep-alive 19:49");
+  // null, missing (an older launcher), and a value that is no time draw nothing
+  assert.equal(keepAliveOf(one({ ...covered, next_keep_alive_at: null }), NOW, hhmm), null);
+  assert.equal(keepAliveOf(one(covered), NOW, hhmm), null);
+  assert.equal(one(covered).next_keep_alive_at, null);
+  assert.equal(keepAliveOf(one({ ...covered, next_keep_alive_at: "soon" }), NOW, hhmm), null);
+  assert.equal(keepAliveOf(one({ ...covered, next_keep_alive_at: 1_790_000_000 }), NOW, hhmm), null);
+  assert.deepEqual([NEXT_KEEP_ALIVE, KEEP_ALIVE_DUE], ["next keep-alive", "due"]);
 });
 
 test("Keep warm is offered at the desk on an uncovered session a press would cover", () => {

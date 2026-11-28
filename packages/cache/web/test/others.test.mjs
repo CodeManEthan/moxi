@@ -85,6 +85,33 @@ test("launcher's case wins while cache's clock counts the row warm", () => {
   assert.equal(isLoud(row("s2", 600), NOW, null), false);
 });
 
+test("a warm row ends in its next keep-alive where launcher gives one, and in nothing stale", () => {
+  const covered = { waits: { kind: "agents", count: 1 }, covered: true };
+  const usage = usageOf({ "claude/s1": 412_000, "claude/s2": 412_000 });
+  const draw = (entries, session = "s1", ago = 600, now = NOW) =>
+    rowModel(row(session, ago), now, new Map(), TODAY, false, UTC, others({ launched: launched(entries), usage }));
+  const later = draw([entry("r-1", "s1", 600, { ...covered, next_keep_alive_at: iso(NOW + 2400) })]);
+  assert.deepEqual([later.fact, later.rest, later.tail],
+                   ["kept warm while 1 agent works", "last request 18:59", "next keep-alive 19:49"]);
+  // a time already come: the nudge goes at the next ask
+  const due = draw([entry("r-1", "s1", 600, { ...covered, next_keep_alive_at: iso(NOW - 60) })]);
+  assert.equal(due.tail, "next keep-alive due");
+  // the same time once the clock passes it
+  assert.equal(draw([entry("r-1", "s1", 600, { ...covered, next_keep_alive_at: iso(NOW + 2400) })], "s1", 600, NOW + 2400).tail,
+               "next keep-alive due");
+  // null, missing and no launcher: the row as before, with no piece and no cost on a covered row
+  assert.equal(draw([entry("r-1", "s1", 600, { ...covered, next_keep_alive_at: null })]).tail, null);
+  assert.equal(draw([entry("r-1", "s1", 600, covered)]).tail, null);
+  assert.equal(draw([]).tail, "about $2.47 to re-read if cold");
+  // a covered launch the page words as ordinary (it waits on holds): the time in place of the cost
+  const holds = draw([entry("r-1", "s1", 600, { waits: { kind: "holds", count: 1 }, covered: true,
+                                                    next_keep_alive_at: iso(NOW + 2400) })]);
+  assert.deepEqual([holds.fact, holds.tail], ["warm until 19:59", "next keep-alive 19:49"]);
+  // cold by cache's clock: its own words and the cost, never a keep-alive
+  const cold = draw([entry("r-1", "s1", 4000, { ...covered, next_keep_alive_at: iso(NOW - 1500) })], "s1", 4000);
+  assert.deepEqual([cold.fact, cold.tail], ["cold since 19:02", "about $2.47 to re-read on its next turn"]);
+});
+
 test("the loud row leads the warm group; the rest keep their order", () => {
   const clocks = [row("soon", 3300), row("loud", 600), row("later", 60), row("gone", 4000)];
   const value = { state: "up", detail: null, today: TODAY, reading: { tick_at: NOW - 2, listed_at: NOW - 2, stale_after: 30 },

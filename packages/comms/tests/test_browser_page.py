@@ -129,6 +129,7 @@ def running_entry(request_id: str, session_id: str, name: str, *, slot_number: s
         "cache": {"state": "warm", "until": iso_in(20 * 60), "estimated": False},
         "waits": {"kind": "agents", "count": waits} if waits else None,
         "covered": covered, "coverable": {"cap": 3} if coverable else None, "activity": None,
+        "next_keep_alive_at": None,
     }
 
 

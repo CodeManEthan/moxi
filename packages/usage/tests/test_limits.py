@@ -112,6 +112,22 @@ def test_claude_picks_the_latest_future_reset_then_the_highest_percent():
     assert five.age_s == 40 * MIN
 
 
+def test_a_lower_percent_hours_after_a_higher_one_with_the_same_reset_wins():
+    # The counter was cleared mid-window and the reset time did not move.
+    put(claude(99.0, 10080, NOW + 2 * DAY, NOW - 15 * HOUR, session_id="old"),
+        claude(5.0, 10080, NOW + 2 * DAY, NOW - MIN, session_id="new"))
+    week = row(limits.limits(harness="claude", now=NOW, pull=False), "claude", "7d")
+    assert (week.used_percent, week.session_id) == (5.0, "new")
+
+
+def test_readings_within_the_tie_window_still_take_the_higher_percent():
+    gap = limits.TIE_WINDOW_S - MIN
+    put(claude(40.0, 10080, NOW + 2 * DAY, NOW - MIN - gap, session_id="ahead"),
+        claude(38.0, 10080, NOW + 2 * DAY, NOW - MIN, session_id="lagging"))
+    week = row(limits.limits(harness="claude", now=NOW, pull=False), "claude", "7d")
+    assert (week.used_percent, week.session_id) == (40.0, "ahead")
+
+
 def test_an_idle_sessions_old_number_cannot_pass_for_fresh():
     put(claude(80.0, 300, NOW - 10 * MIN, NOW - MIN, session_id="idle"),
         claude(12.0, 300, NOW + 4 * HOUR, NOW - 20 * MIN, session_id="busy"))

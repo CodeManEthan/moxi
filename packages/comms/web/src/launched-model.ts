@@ -16,6 +16,11 @@
 // Launcher's cache times are date strings, not epoch seconds: each is parsed as a date and
 // worded by the page's `when`, never mixed with comms' own `until` in one fact.
 //
+// A session keep-warm covers carries when its next keep-alive is due, launcher's
+// `next_keep_alive_at`: the opened `Cache` line says `next keep-alive 19:49`, or `next
+// keep-alive due` once that time has come, since the nudge then goes at keep-warm's next
+// ask. Where launcher gives no such time the piece is not drawn.
+//
 // The `Session` line carries the model and effort the launch was started with, where
 // launcher gives them.
 //
@@ -61,6 +66,8 @@ export interface RunningEntry {
   covered: boolean;
   /** At most `cap` nudges in a row a press would send; null where a press would not cover it. */
   coverable: { cap: number } | null;
+  /** When keep-warm's next nudge is due, as launcher writes it; null where it gives none. */
+  next_keep_alive_at: string | null;
 }
 
 /** The value of launcher's `/api/running`. */
@@ -144,6 +151,7 @@ function parseEntry(value: unknown): RunningEntry | null {
     waits: parseWaits(value.waits),
     covered: value.covered === true,
     coverable: parseCoverable(value.coverable),
+    next_keep_alive_at: word(value.next_keep_alive_at),
   };
 }
 
@@ -226,13 +234,28 @@ export function keepWarmTitle(cap: number): string {
 }
 
 /** The cache line of an opened row, as launcher reads it: its value, and the tail after it
- * (`kept warm while …` when covered). */
+ * (`kept warm while …` when covered, then the next keep-alive). */
 export interface LaunchedCache {
   warm: boolean;
   /** When a warm cache goes cold, or a cold one went cold; null when launcher gives none. */
   until: number | null;
   estimated: boolean;
   kept: string | null;
+  /** When keep-warm's next nudge is due, epoch seconds; null when launcher gives none. */
+  next: number | null;
+}
+
+/** How the `Cache` line's piece of the next keep-alive begins. */
+export const NEXT_KEEP_ALIVE = "next keep-alive";
+/** What it says once the time has come. */
+export const KEEP_ALIVE_DUE = "due";
+
+/** The next keep-alive in words: `next keep-alive <time>`, or `next keep-alive due` at or
+ * after that time (`now`, epoch seconds), since the nudge then goes at keep-warm's next
+ * ask. Null with no time. */
+export function keepAliveWords(next: number | null, now: number, when: (at: number) => string): string | null {
+  if (next === null) return null;
+  return `${NEXT_KEEP_ALIVE} ${next <= now ? KEEP_ALIVE_DUE : when(next)}`;
 }
 
 /** What launcher says of the launch running at an address. `fact` and `where` are its row's
@@ -273,6 +296,7 @@ function launchedOf(entry: RunningEntry, row: RosterRow, when: (at: number) => s
     cache: cache === null ? null : {
       warm: cache.state === "warm", until: stampOf(cache.until), estimated: cache.estimated,
       kept: kind === "covered" ? keptWords(entry.waits as Waits) : null,
+      next: stampOf(entry.next_keep_alive_at),
     },
   };
 }

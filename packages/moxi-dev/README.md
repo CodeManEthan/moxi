@@ -17,7 +17,10 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
   `moxi-dev timed` runs them. A finding whose tests are all timed counts as found, with
   a line that says so. Its last line also gives the tests' seconds, the slowest 5 %'s
   share of them and the change against the newest record on `main` (one record per
-  commit, kept under git's own directory).
+  commit, kept under git's own directory). On Linux it runs in a memory-capped scope of
+  its own (see "The memory cap" below), and its last line says what memory it held.
+- `moxi-dev cap [--] CMD [ARG...]` runs one command in the same kind of memory-capped
+  scope.
 - `moxi_dev.testing` is the test kit every package loads from its root `conftest.py`:
   the fence around each test, the tier markers, the durations each run writes, where a
   run keeps its temp files (see below) and the helpers tests share (`Seam` for a seam
@@ -550,6 +553,49 @@ uv run --locked moxi-dev timed schedule --machine host-a --record-dir ~/moxi-tim
 
 The host needs uv with its Python 3.12, git on its PATH (some timed tests build temporary
 repositories), and linger, so its timer fires while no one is logged in.
+
+## The memory cap
+
+`moxi-dev check` (any form but `--only`) runs its steps in a `systemd-run --user --scope`
+of its own, with MemoryHigh, MemoryMax and no swap, so a check that runs away is
+throttled and then ended alone, and the rest of the machine goes on. The `moxi-dev` you
+started stays outside the scope and watches it once a second.
+
+- **The figures.** By default MemoryHigh is 2496 MiB plus 512 MiB per worker and
+  MemoryMax is 1536 MiB above it: 6592 and 8128 MiB at 8 workers, 10688 and 12224 at 16.
+  Lowering `MOXI_TEST_WORKERS` lowers both. `MOXI_TEST_MEMORY_HIGH_MIB` and
+  `MOXI_TEST_MEMORY_MAX_MIB` (whole MiB, 64 or more, the high below the max) replace
+  them; `MOXI_TEST_MEMORY_MAX_MIB=none` runs the check with no scope. A max set below
+  the default max but above the default high (8128 and 6592 MiB at 8 workers) prints a
+  warning and runs anyway. A max set at or below the default high, with no
+  `MOXI_TEST_MEMORY_HIGH_MIB`, exits 2 before anything runs: MemoryHigh must sit below
+  MemoryMax, and the default high would not. To go that low, set both, the high below
+  the max (`MOXI_TEST_MEMORY_HIGH_MIB=5000 MOXI_TEST_MEMORY_MAX_MIB=6000`).
+- **What counts.** The memory a check can't give back: anonymous, shared and kernel
+  memory, less the slab the kernel can reclaim. Page cache doesn't count.
+- **The end.** The line is 95 % of MemoryHigh. A check that holds at or above its line
+  for 5 s while pressed against MemoryHigh is ended, exit 1, with a line naming the unit
+  and its figures; one that reaches MemoryMax first is killed by the kernel and named the
+  same way. A check that stays under its line is never ended by the cap, however slow.
+- **The last line** gains a memory field: `memory peak 5.7G, held 5.0G, line 6.1G, high
+  6.4G, max 7.9G, stalled 0.4s`. A check that held 90 % of its line, or waited on memory
+  for 10 s or more, prints a warning before it.
+- **No scope** is made off Linux, where `CI` is set, or where there is no systemd user
+  manager with the memory controller; the memory field says `not capped (<why>)`. Where
+  one is expected and can't be made, the check exits 2.
+- **Signals.** Ctrl-C, SIGTERM or SIGHUP prints the scope's memory state at once, stops
+  the scope, and ends the check by the same signal. A process a test left running is
+  ended before the summary.
+
+Once the scope's unit is gone, however the check ended, the `moxi-dev` you started
+sweeps what test runs left (`moxi_dev.temp.sweep`); a unit still there 5 s after the
+end leaves its temp to the next run's own sweep.
+
+`moxi-dev cap -- CMD ...` runs any command the same way and ends with
+`moxi-dev cap: memory ...`; a `moxi-dev check` inside it uses the cap's scope. Its
+command is a check too: its tests keep their temp on disk (`MOXI_TEST_TEMP=ram` reaches
+it as `disk`, with a line saying so), and once the command has ended the cap sweeps,
+with or without a scope.
 
 ## The bound on each package's run
 
