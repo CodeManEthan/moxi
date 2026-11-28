@@ -207,6 +207,8 @@ Before editing, the script classifies each row as `to apply`, `applied`, `not he
 deleted or renamed, or one that is vendored, is not a Python file under `packages/`, or
 does not parse. A dead `name` or `kwonly` row has no definition to rename, and its old
 name is no leftover anywhere; a dead `use` or `keep` row has no line to change or cover.
+A `name` or `kwonly` row whose scope its file no longer has is not dead, but its old name
+is no leftover either.
 Every dead row is listed with its table row, file, kind and names and which of those
 reasons holds, so a branch can drop it or point it at the file's new path; it does not
 change the exit code. The removed-scope `keep` form names no file and is never dead.
@@ -222,14 +224,26 @@ or read in the scope it edits, a nested function, lambda or comprehension with i
 binding of the old name, or a module-level name that is also a function's local. A
 local that another row of the same scope renames away is no collision. A call resolved
 to the standard library or a dependency is outside the repository, so its keyword is
-left alone and is not a leftover. A callee that cannot be resolved is a leftover. For a
-`kwonly` row on `Class.__init__`, resolved `Class(...)` calls reach the constructor and
-the parameter position excludes `self`; an unresolved call named `Class` that passes
-that position is a leftover.
+left alone and is not a leftover. For a `kwonly` row on `Class.__init__`, resolved
+`Class(...)` calls reach the constructor and the parameter position excludes `self`.
 
-The final list also includes unresolved old calls, attributes and keywords, string
-lookups, old citations the script did not rewrite (a parameter's only in its own file),
-and ambiguous moved scopes.
+A row looks for leftovers only where a use could reach what it renamed: the files of its
+own package (`packages/<p>/`, tests included) and the files that import its module. A
+file imports a module when an import statement anywhere in it names the module (each
+dotted prefix of `import a.b.c` counts, as do a from-import's module and its
+`module.name`, relative ones resolved), when one of its names resolves into the module,
+or when it imports a package `__init__` whose own names resolve into the module. In
+reach, an unresolved call by the row's function name that passes the old keyword is a
+leftover, and so is one that passes a `kwonly` row's position (an unresolved `Class(...)`
+for `Class.__init__`); a keyword on any other call is not. An unresolved call or
+attribute, or a string, that uses an old name other than a parameter's or a local's is a
+leftover. A
+bare call to a Python builtin the file never binds is the builtin and no leftover,
+except in the row's own file or a file with a star import.
+
+The final list holds those leftovers in reach, old citations the script did not rewrite
+(a parameter's only in its own file, any other name's in reach), and ambiguous moved
+scopes.
 The command exits 1 while any remains. Settle a real unresolved use with a `use` row and
 an unrelated token with a `keep` row. If several modules have the same qualified scope,
 add a normal row at the definition's real path; that row clears the moved row. Use the

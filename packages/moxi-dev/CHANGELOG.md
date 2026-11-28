@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The renames step looks for a row's leftovers only where a use could reach what it
+  renamed: its own package and the files that import its module, directly, by a dotted
+  import or through a package `__init__` that re-exports from it. In reach, a keyword is
+  a leftover only on a call by the row's function name, a builtin call the file never
+  binds is the builtin, and a row whose scope is gone reports nothing.
 - `moxi-dev check`, with or without `--base`, runs only the packages the change
   touches. A path under `packages/<p>/` touches `p` (one under `packages/moxi-dev/`
   touches `moxi-dev` alone), and a root path the packages whose tests read it: the root

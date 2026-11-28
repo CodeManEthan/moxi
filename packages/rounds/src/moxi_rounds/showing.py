@@ -615,8 +615,8 @@ def command_steps(state: states.State) -> list[str]:
 def check_run(state: states.State, build: builds.Build,
                step: str = checking.CHECK) -> dict | None:
     """The newest run of `step` (the repo's check unless named) recorded for `build`, as
-    data: the step, its commit, exit code, duration, output file and when it was
-    recorded; None with no run."""
+    data: the step, its commit, exit code, duration, output file, when it was recorded
+    and the lane it ran on (None for a run on this machine); None with no run."""
     found = None
     for event in state.history:
         if (event["n"] > build.n and event["type"] == checking.RAN
@@ -629,19 +629,21 @@ def check_run(state: states.State, build: builds.Build,
     if found is None:
         return None
     run = {key: found.get(key) for key in ("step", "commit", "exit_code", "duration_s",
-                                           "output", "at")}
+                                           "output", "at", "lane")}
     if isinstance(run["output"], str):
         run["output"] = places.expand_home(run["output"])
     return run
 
 
 def check_line(run: dict) -> str:
-    """The newest run of a step for a build in words: `check passed at 81c7f5b` or
-    `staging failed (exit 1) at 81c7f5b`."""
+    """The newest run of a step for a build in words: `check passed at 81c7f5b`,
+    `staging failed (exit 1) at 81c7f5b`, or for a run on a lane `check passed at
+    81c7f5b on lane far`."""
     code = run["exit_code"]
     how = ("passed" if code == 0 else "ended at its time limit" if code is None
            else f"failed (exit {code})")
-    return f"{run.get('step') or checking.CHECK} {how} at {str(run['commit'])[:7]}"
+    on = f" on lane {run['lane']}" if run.get("lane") else ""
+    return f"{run.get('step') or checking.CHECK} {how} at {str(run['commit'])[:7]}{on}"
 
 
 def build_line(one: dict) -> str:

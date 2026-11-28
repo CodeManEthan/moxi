@@ -737,6 +737,17 @@ next recall probes again. What no flag turns off: an organization's managed sett
 their policy hooks and mods, and the mods Claude Code builds in, which can let through a
 read the session would deny, still only a read.
 
+**When the launcher refuses.** Before a call starts a chat recall, it asks the launcher
+about the launch. A `claude` the launcher's PATH lookup can't find is `skipped:
+no-harness` (a connector run as a service may have a shorter PATH than your terminal);
+any other refusal, such as a launcher row it won't take or turns' additions failing, is
+`skipped: refused`, with the launcher's words in `notes`. The recall's child asks again
+about the very launch its first round runs, its own brief and notes folders included,
+before the probe. A refusal that depends on the brief, such as a brief past the launch
+log's 64 KiB cap, ends that recall `lost` with reason `denied` and the launcher's words,
+which `moxi memory subconscious list --session chat-<conversation>` prints. A refusal of
+the fence probe's own launch ends it the same way.
+
 **What it can't do** that the terminal recall can. It has no shell, so it can't search
 past sessions again with other words or read around a hit (`moxi memory search`, `moxi
 sessions read`): past sessions reach it only through the first search, at most
@@ -861,7 +872,7 @@ Two sessions share an identity only when comms' qualified names are the same, so
 | `sessions` | the session table's sessions, with an identity, settled, and by launch kind; or that no session has started or been read yet | `warn` when the table can't be opened or read |
 | `links` | whether comms, the launcher and notes load, and what memory does without each | `warn` when one is installed but fails to load |
 | `retention` | each harness's retention, from sessions | `warn` where sessions warns |
-| `subconscious` | how many live sessions have the subconscious on, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line left at the late wait's last limit, with its fork and age, until the first taker after the fork's round ends settles it; for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for a recall still `sending`, with its wait and comms' last refusal (for one comms will never take: `moxi memory subconscious discard RECALL_ID`); for a slot fork memory did not exit that the launcher still runs (its exit held past the exit's wait or answered with anything but `exited`, or its owner gone before it asked for the exit), with its session, its slot where the launcher can say, how its exit came out and its age, which memory leaves running (`moxi launcher exit-session SESSION_ID` ends it once it is quiet); for recalls in the last day whose child could not start (reason `spawn`), with the newest error; for a recall on any route `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write); and for one on the subagent route whose holder still runs past its wait for the fork's id, with its state and age. Last, the chat recall: off, or on with the fence's outcome for the `claude` the launcher would start (passed, or not probed yet); `warn` while it is on and none can start, with the reason (`no-launcher`, `no-harness`, or `fence` with the failed part, which stands until `claude` changes) |
+| `subconscious` | how many live sessions have the subconscious on, and that a recall fork's permission asks are refused; or that none has it on | `warn` for a live session launched with it on where no route can run now, with the reason (fix: `moxi memory subconscious list`); while memory's config is in error, for the recalls it stopped since the config last read cleanly for a recall, with the newest error (fix: `moxi config memory`); for a recall line left at the late wait's last limit, with its fork and age, until the first taker after the fork's round ends settles it; for a recall line whose child and taker are gone, with its age, until the next recall child or session end takes it; for a recall still `sending`, with its wait and comms' last refusal (for one comms will never take: `moxi memory subconscious discard RECALL_ID`); for a slot fork memory did not exit that the launcher still runs (its exit held past the exit's wait or answered with anything but `exited`, or its owner gone before it asked for the exit), with its session, its slot where the launcher can say, how its exit came out and its age, which memory leaves running (`moxi launcher exit-session SESSION_ID` ends it once it is quiet); for recalls in the last day whose child could not start (reason `spawn`), with the newest error; for a recall on any route `starting` or `hurried` 30 seconds on with no fork and no log line naming its child (the child gone before it wrote its line, or with no identity of its own to write); and for one on the subagent route whose holder still runs past its wait for the fork's id, with its state and age. Last, the chat recall: off, or on with the fence's outcome for the `claude` the launcher would start (passed, or not probed yet); `warn` while it is on and none can start, with the reason (`no-launcher`, `no-harness` when the launcher can't find `claude` on its PATH, `refused` with the launcher's refusal, or `fence` with the failed part, which stands until `claude` changes) |
 
 A `config` row fails when memory's config can't be read, and a `record ingest` row shows a
 failed ingest child.
@@ -1039,7 +1050,7 @@ and `text`. A piece is `stale` when a later call of the conversation carried wor
 before the call that hands it: it answers something said before the user's last words,
 and the text part says "earlier:" before it. Beside the pieces: `started` (the new
 recall's id, or null), `skipped` (why none started: `no-words`, `no-keyword`, `off`,
-`busy`, `no-launcher`, `no-harness` or `fence`), `running` (the conversation's recalls
+`busy`, `no-launcher`, `no-harness`, `refused` or `fence`), `running` (the conversation's recalls
 still running) and `notes`. A recall the call starts has no piece in that answer; its
 pieces come at later calls.
 

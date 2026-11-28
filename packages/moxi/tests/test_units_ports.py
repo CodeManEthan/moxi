@@ -131,6 +131,45 @@ def other_process():
         proc.stdout.close()
 
 
+@pytest.fixture
+def unreadable_child():
+    """A child of this process that a reader of the same user can't read: on Linux one
+    that made itself non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`), which hands its `/proc`
+    entries to root, as a setuid program or an agent that guards its memory does."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("non-dumpable is Linux's")
+    if os.geteuid() == 0:
+        pytest.skip("root reads a non-dumpable child, so no child here is unreadable")
+    code =("import ctypes, sys\n"
+            "assert ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) == 0\n"
+            "print('up', flush=True); sys.stdin.read()\n")
+    proc = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline() == "up\n"
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait(PROC_WAIT_S)
+        proc.stdin.close()
+        proc.stdout.close()
+
+
+def unread(pid):
+    """Each process in `pid`'s tree that psutil can't read the sockets of, as
+    `(pid, name, error)`: what a None from `listening` stands on."""
+    import psutil
+
+    found = []
+    top = psutil.Process(pid)
+    for process in (top, *top.children(recursive=True)):
+        try:
+            process.net_connections(kind="tcp")
+        except psutil.Error as exc:
+            found.append((process.pid, exc.name, type(exc).__name__))
+    return found
+
+
 # -- check 1: another home's socket file ---------------------------------------------------
 
 def test_a_tagged_home_is_refused_by_the_default_homes_socket_file(w):
@@ -376,7 +415,27 @@ def test_a_bound_address_covers_what_it_takes(bound, address, covers):
 
 def test_this_process_is_read_as_listening(listener):
     assert _plan.listening(os.getpid(), "127.0.0.1", listener) is True
-    assert _plan.listening(os.getpid(), "127.0.0.2", listener) is False
+
+
+def test_a_tree_read_whole_that_listens_elsewhere_is_read_as_not_listening(other_process):
+    """False needs every process in the tree read, so it is asked of a process with no
+    children, not of this one: the test process's tree holds whatever its other tests
+    left running, which the test neither knows nor can always read."""
+    pid, port = other_process
+    assert _plan.listening(pid, "127.0.0.1", port) is True
+    assert _plan.listening(pid, "127.0.0.2", port) is False, unread(pid)
+
+
+def test_an_unreadable_child_leaves_its_parent_undecided_and_no_other_process(
+        listener, unreadable_child, other_process):
+    """A child this process can't read might listen anywhere: this process listens on
+    127.0.0.1, can't be ruled out on 127.0.0.2, and a process outside its tree still
+    reads as not listening there."""
+    assert unreadable_child in [one for one, _, _ in unread(os.getpid())]
+    assert _plan.listening(os.getpid(), "127.0.0.1", listener) is True
+    assert _plan.listening(os.getpid(), "127.0.0.2", listener) is None
+    pid, port = other_process
+    assert _plan.listening(pid, "127.0.0.2", port) is False, unread(pid)
 
 
 @pytest.mark.honest_ports

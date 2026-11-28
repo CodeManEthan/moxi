@@ -277,8 +277,8 @@ test("a step record's sections in order, with CI red first and green folded", ()
              output: null },
            { step: "check", exit_code: 1, duration_s: 29.4, commit: "0123456789ab", at: "2026-11-21T11:00:00Z",
              output: "/home/u/.cache/check-1.log" },
-           { step: "check.local", exit_code: 0, duration_s: 31, commit: "0123456789ab", at: "2026-11-21T10:00:00Z",
-             output: null }],
+           { step: "check", exit_code: 0, duration_s: 31, commit: "0123456789ab", at: "2026-11-21T10:00:00Z",
+             output: null, lane: "far" }],
     verdicts: [], findings: null, drift: null, gates: null, decisions: null, items: [], settled: [], close: [], fixes: [],
     next: { state: "ready", by: "builder", who: "builder-1", waits: [{ reason: "CI is red", fix: "push a fix" }],
             then: ["moxi rounds check kestrel/a B1"], reads: [], write: null, questions: [] },
@@ -296,7 +296,7 @@ test("a step record's sections in order, with CI red first and green folded", ()
   assert.deepEqual(sections[1].folds.map((one) => one.label), ["1 green job"]);
   assert.equal(sections[2].rows[0].map((one) => one.text).join(""), "check failed (exit 1) in 29 s at 0123456, 11:00");
   assert.equal(sections[2].rows[1][0].text, "~/.cache/check-1.log");
-  assert.equal(sections[2].rows[2].map((one) => one.text).join(""), "local check passed in 31 s at 0123456, 10:00");
+  assert.equal(sections[2].rows[2].map((one) => one.text).join(""), "check passed in 31 s at 0123456 on lane far, 10:00");
   assert.deepEqual(sections[2].folds.map((one) => [one.label, one.rows.length]), [["1 earlier run", 1]]);
   assert.deepEqual(sections[3].wells, ["moxi rounds check kestrel/a B1"]);
   assert.equal(sections[4].rows.length, 4);

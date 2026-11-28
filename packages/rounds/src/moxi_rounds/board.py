@@ -1027,7 +1027,7 @@ def _runs(part_: Part, column: str, stage: str | None) -> list[dict]:
              if one.stage == build.stage and one.n > build.n]
     end = min(later) if later else None
     return [{key: event.get(key) for key in ("step", "exit_code", "duration_s", "commit",
-                                            "at", "output")}
+                                            "at", "output", "lane")}
             for event in state.history
             if event.get("type") == checking.RAN and event.get("stage") == stage
             and event["n"] > build.n and (end is None or event["n"] < end)

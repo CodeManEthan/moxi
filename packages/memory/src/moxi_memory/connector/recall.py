@@ -135,7 +135,7 @@ NO_CUT = ("the sessions installed here doesn't offer the interface memory reads 
           "their local paths can't be cut; moxi doctor connector says why.")
 #: The reasons whose detail goes in `notes`: what the chat itself can't see.
 NOTED = (recall_chat.BUSY, recall_chat.NO_LAUNCHER, recall_chat.NO_HARNESS,
-         recall_chat.FENCE)
+         recall_chat.REFUSED, recall_chat.FENCE)
 
 
 def bad_input(args: Mapping[str, Any]) -> bool:

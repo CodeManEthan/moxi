@@ -690,6 +690,7 @@ function runRows(run: NonNullable<RecordValue["runs"]>[number], ctx: Context): R
     { text: `${checkWord(run.step)} ` },
     { text: what, tone: run.exit_code === null ? undefined : passed ? "done" : "failed" },
     { text: `${took} at ` }, { text: shortCommit(run.commit), mono: true },
+    ...(run.lane ? [{ text: ` on lane ${run.lane}` }] : []),
     { text: `, ${timeWord(run.at, ctx.today, ctx.clock)}` },
   ]];
   if (run.output) rows.push([{ text: tildePath(run.output, ctx.home), mono: true, tone: "dim" }]);
