@@ -18725,3 +18725,62 @@ rounds	packages/rounds/tests/test_queue_local.py	assert (record["round"], record
 rounds	packages/rounds/tests/test_queue_local.py	earlier = check_line.take(lock, {**check_line.me(), "round": "proj-a/earlier",	keep	round	round
 rounds	packages/rounds/tests/test_queue_local.py	record = leftover(out, "record")	keep	record	record
 rounds	packages/rounds/tests/test_check_slots.py	killed.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/cli.py	parser = verbs.add_parser("serve", help=said, description=said)	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="answer the doctor's probe: the payload as read, whether "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	"serve": _serve, "show": _show,	keep	show	show
+rounds	packages/rounds/src/moxi_rounds/frames.py	REFUSED = "refused"	keep	refused	refused
+rounds	packages/rounds/src/moxi_rounds/frames.py	__all__ = ["VERSION", "HEADER_MAX_BYTES", "CHUNK_BYTES", "REQUEST", "BUNDLE", "FILE",	keep	REQUEST	REQUEST
+rounds	packages/rounds/src/moxi_rounds/serving.py	first. `closed` says whether stdin has ended."""	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/serving.py	self.closed = threading.Event()	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/serving.py	self.closed.set()	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/serving.py	self.closed.set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/serving.py	self._ended = False	keep	_ended	_ended
+rounds	packages/rounds/src/moxi_rounds/serving.py	if self._ended:	keep	_ended	_ended
+rounds	packages/rounds/src/moxi_rounds/serving.py	chunk = self._chunks.get(timeout=_READ_POLL_S)	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/serving.py	self._ended = True	keep	_ended	_ended
+rounds	packages/rounds/src/moxi_rounds/serving.py	"""What a near side asks: the build (`round`, `stage`, `step`, `repo`, `branch`),	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/serving.py	round=_text(found, "round"), stage=_text(found, "stage"), step=_text(found, "step"),	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/serving.py	bare.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/serving.py	found = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/serving.py	self._out.send(frames.OUT, chunk)	keep	fail	fail
+rounds	packages/rounds/src/moxi_rounds/serving.py	self._done.set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/serving.py	trees.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/serving.py	fields = {**check_line.me(), "round": request.round, "stage": request.stage,	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/serving.py	bare.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/serving.py	"round", "stage", "repo", "from_host", "since")}})	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/serving.py	eof = lifeline.closed.wait(PROBE_EOF_WAIT_S) and reader.header() is None	keep	closed	closed
+rounds	packages/rounds/tests/test_serve.py	self.writer.send(kind, value or b"")	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	if not self.proc.stdin.closed:	keep	closed	closed
+rounds	packages/rounds/tests/test_serve.py	return self.proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	one.proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	if not one.proc.stdin.closed:	keep	closed	closed
+rounds	packages/rounds/tests/test_serve.py	return {"version": frames.VERSION, "round": "proj-a/lane", "stage": "B1",	keep	round	round
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.BUNDLE, bundle(repo, refs["refs"], tmp_path / f"{name}.bundle"))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.FILE, frames.file_payload(meta, data))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.FILES_END)	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	frames.Writer(broken).send(frames.OUT, b"x")	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, {"version": frames.VERSION + 1})	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, sent)	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", FACTS, "{root}", str(holder)]))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	assert (record["round"], record["stage"], record["step"], record["repo"]) == (	keep	round	round
+rounds	packages/rounds/tests/test_serve.py	first.send(frames.REQUEST, request(work, [PY, "-c", "pass"]))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	second.send(frames.REQUEST, request(work, [PY, "-c", FACTS, "{root}", str(holder)]))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	assert set(refs["refs"]) == {old, work.rev("main")}	keep	set	set
+rounds	packages/rounds/tests/test_serve.py	"round": "other/round", "stage": "B2"})	keep	round	round
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", "pass"], wait=False))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", "pass"]))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", "pass"],	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	busy.send(frames.REQUEST, request(work, [PY, "-c", "pass"], wait=False,	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	waiting.send(frames.REQUEST, request(work, [PY, "-c", probe], shared_lock=str(shared)))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", "import sys; print(sys.argv[1])",	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	"pid": int(dead.stdout), "created": 1.0, "round": "proj-a/lane",	keep	round	round
+rounds	packages/rounds/tests/test_serve.py	run.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	held.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", STUBBORN, str(marker)]))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	code = one.proc.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", "print('done')"]))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	assert one.proc.wait(timeout=PROC_WAIT_S) == 0	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, {"version": frames.VERSION, "preflight": {	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.PROBE, payload)	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, {"version": 0})	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	assert one.proc.wait(timeout=PROC_WAIT_S) == 1	keep	timeout	timeout

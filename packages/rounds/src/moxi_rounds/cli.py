@@ -45,6 +45,7 @@
     moxi rounds next [ROUND] [--json]
     moxi rounds queue [--repo KEY] [--resume] [--as NAME]
     moxi rounds land --repo KEY
+    moxi rounds serve [--probe]
     moxi rounds next --schema design|build|step|majors|retro|answer
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
@@ -2016,6 +2017,27 @@ def _land(args, out) -> int:
     return codes.OK
 
 
+# -- serve -------------------------------------------------------------------------------
+
+def _declare_serve(verbs) -> None:
+    said = ("The far side of a lane: run by another machine over ssh, not by hand. It "
+            "reads one request on stdin, takes a place of this machine's check lock, "
+            "takes the build's commit and brought private files, runs the check in a "
+            "tree of its own and sends its output and result on stdout, in frames. With "
+            "--probe it answers the doctor's round trip instead.")
+    parser = verbs.add_parser("serve", help=said, description=said)
+    parser.add_argument("--probe", action="store_true",
+                        help="answer the doctor's probe: the payload as read, whether "
+                             "stdin's end was seen, this machine's name, memory and "
+                             "check lock, and each preflight line's result")
+
+
+def _serve(args, out) -> int:
+    from . import serving
+
+    return serving.main(probe_only=args.probe)
+
+
 # -- show --------------------------------------------------------------------------------
 
 def _declare_show(verbs) -> None:
@@ -2132,7 +2154,8 @@ _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict
                                   _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_next,
-                                  _declare_queue, _declare_land, _declare_show,
+                                  _declare_queue, _declare_land, _declare_serve,
+                                  _declare_show,
                                   _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
@@ -2142,7 +2165,7 @@ _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict
                                "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "next": _next,
                                "queue": _queue, "land": _land,
-                               "show": _show,
+                               "serve": _serve, "show": _show,
                                "list": _list}
 
 
