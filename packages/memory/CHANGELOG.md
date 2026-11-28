@@ -53,6 +53,16 @@
   say whether it is on and why none can start; the doctor also shows the fence's outcome.
   `recall_start.begin` takes `keep_running` and `lock_s`, each defaulting to what it did
   before.
+- Chat recalls now launch. A recall's child checked its launch with an empty brief,
+  which the launcher refuses, and reported that refusal as `claude` missing from the
+  PATH, so every chat recall was lost before it started. The child now builds the brief
+  first and checks the very launch its first round runs, its brief and notes folders
+  included. A launcher refusal is reported as what it is: `no-harness` only when the
+  launcher's PATH lookup can't find `claude` (or can't read the one it found), and a new
+  `skipped` value and doctor and status reason, `refused`, with the launcher's words,
+  for any other. A refusal the child meets ends the recall `lost` with reason `denied`
+  and the launcher's words, as a round's refused launch does. So does a refusal of the
+  fence probe's own launch, which used to stop the child with an error.
 
 - A recall fork's plain-read test reads the shell text through turns' shell reader
   (`read_shell`) in place of a splitter of its own, after the same character filter. It

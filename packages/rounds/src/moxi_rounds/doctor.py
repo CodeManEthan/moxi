@@ -35,13 +35,25 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   single lock; with more each place is named `check lock k of N`. `ok` while every
   place is free with no live ticket, or while each holder's output was written within
   `check_line.QUIET_S`, naming each holder, how long it has held its place, its output's
-  size and last write, and each waiter in order, a lander's first. When the first in
+  size and last write, and each waiter in order, a lander's first; a holder or waiter
+  that came from another machine (a lane's run, served here) names it. When the first in
   line waits beside held places for memory, the reading and the need. `warn`, per
   place, when the holder's output has not been written for `check_line.QUIET_S` (an
   empty output counts from when the place was taken), for a place held by a live
   process that wrote no holder record, and for an orphan's run, one whose rounds
   process is gone while it still runs (`check_line.orphan`), naming its pid; and for a
   ticket not touched for `check_line.TICKET_STALE_S`.
+- lanes: one row per lane, `lane <name>`, by a real round trip (`sending.probe`): ssh
+  with the lane's own words and options to `<moxi> rounds serve --probe` there, a
+  payload of every byte value, then stdin's end. `ok` when the payload came back as
+  sent with its end seen, git is there and each preflight line of each project that
+  names the lane passes in a scratch folder there, naming the far machine, its version,
+  CPUs, available memory, git, and its check lock's holders (with the machine each came
+  from) and line. Else `warn`, naming the first that failed: no ssh client here, the
+  host not reached, `serve` missing there, of another version or failing to start (with
+  the last lines it wrote to stderr), the session not carrying binary stdin or its end,
+  no git there, a preflight line. It never fails: a lane that is down costs only its
+  own checks.
 - private files: for each project whose `private_files` lists any, `warn` naming each
   entry that is missing at the project's root, is not a file, is tracked at the root's
   `HEAD`, or that git at the root does not read as ignored, each with its fix, as
@@ -103,6 +115,7 @@ def rows() -> Iterator[Row]:
     yield from _queues()
     yield from _locks()
     yield _check_lock()
+    yield from _lanes()
     yield from _private_files()
     yield from _leftovers()
 
@@ -340,19 +353,31 @@ def _memory_words(line, held, *, at_once: int, need_mib: int) -> str:
             f"{check_line.gib(decision.need_mib)} needed")
 
 
-def _holder_words(found) -> str:
+def _origin(found) -> str:
+    """Where a holder or waiter came from, when another machine sent its run."""
+    return f", from {found.get('from_host')}" if found.get("from_host") else ""
+
+
+def _held_words(found) -> str:
+    """The round, stage and repo a holder names, the machine it came from, and for how
+    long it has held its place."""
     from . import check_line
 
-    return (f"pid {found.get('pid')} ({found.get('round')} {found.get('stage')}, repo "
-            f"{found.get('repo')}) for {check_line.age(found.get('since'))}")
+    return (f"({found.get('round')} {found.get('stage')}, repo {found.get('repo')}"
+            f"{_origin(found)}) for {check_line.age(found.get('since'))}")
+
+
+def _holder_words(found) -> str:
+    return f"pid {found.get('pid')} {_held_words(found)}"
 
 
 def _waiter(ticket) -> str:
     from . import check_line
 
     fields = ticket.fields
-    return (f"pid {fields.get('pid')} {fields.get('round')} {fields.get('stage')} for "
-            f"{check_line.age(fields.get('since'))}")
+    came = f" from {fields.get('from_host')}" if fields.get("from_host") else ""
+    return (f"pid {fields.get('pid')} {fields.get('round')} {fields.get('stage')}{came} "
+            f"for {check_line.age(fields.get('since'))}")
 
 
 def _output_stat(found) -> os.stat_result | None:
@@ -397,6 +422,109 @@ def _size(size: int) -> str:
 def _ago(gone_s: float) -> str:
     gone_s = max(gone_s, 0.0)
     return f"{int(gone_s)} s" if gone_s < 120 else f"{int(gone_s // 60)} min"
+
+
+# -- lanes ---------------------------------------------------------------------------------
+
+def _lanes() -> Iterator[Row]:
+    from . import settings as own
+
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        # The settings' own row says what is wrong with them.
+        return
+    for name in settings["lanes"]:
+        lane = own.lane(settings, name)
+        if lane is not None:
+            yield _lane(name, lane, _preflights(settings, name))
+
+
+def _preflights(settings, name: str) -> dict[str, list[str]]:
+    """The preflight lines each project gives the lane `name`, by key, for the projects
+    that name it and give any."""
+    from . import settings as own
+
+    found = {}
+    for repo in settings["projects"]:
+        table = own.project_lanes(settings, repo).get(name)
+        lines = table.get("preflight") if table is not None else None
+        if lines:
+            found[repo] = [str(one) for one in lines]
+    return found
+
+
+def _lane(name: str, lane: dict, preflight: dict[str, list[str]]) -> Row:
+    """The lane `name`'s row, by the doctor's probe."""
+    from . import sending
+
+    row, client = f"lane {name}", lane["ssh"][0]
+    if shutil.which(client) is None:
+        return Row(MODULE, row, "warn", f"no ssh client on PATH: {client!r}, the first of "
+                   f"[lanes.{name}]'s ssh words, is not there, so {lane['host']} can't be "
+                   "reached", f"install OpenSSH's client, or set ssh in [lanes.{name}]")
+    try:
+        found = sending.probe(name, lane, preflight)
+    except sending.LaneError as exc:
+        return Row(MODULE, row, "warn", exc.reason, exc.fix)
+    far = str(found.get("host") or lane["host"])
+    said = _far_words(far, found)
+    differed = _differed(found)
+    if differed:
+        return Row(MODULE, row, "warn", "the ssh session here does not carry binary "
+                   f"stdin or its end: {differed}; {said}",
+                   f"use an ssh client and server for {lane['host']} that pass stdin as "
+                   f"it is and pass on its end, or set ssh in [lanes.{name}]")
+    if not found.get("git"):
+        return Row(MODULE, row, "warn", f"no git on {far}, which a lane's run needs there; "
+                   f"{said}", f"install git on {far}, on the PATH its ssh sessions get")
+    results = found.get("preflight") if isinstance(found.get("preflight"), dict) else {}
+    for repo in preflight:
+        failed = results.get(repo, {"reason": "it gave no result for this project's lines"})
+        if failed:
+            tail = f"; its output ended: {failed['tail']}" if failed.get("tail") else ""
+            return Row(MODULE, row, "warn", f"project {repo}'s preflight fails on {far}: "
+                       f"{failed.get('reason')}{tail}; {said}",
+                       f"fix {far}, or the line in [projects.{repo}.lanes.{name}]'s "
+                       "preflight")
+    passed = (f"; the preflight of {', '.join(preflight)} passes there" if preflight
+              else "")
+    return Row(MODULE, row, "ok", f"{said}; the probe's {len(sending.PROBE_PAYLOAD)} bytes "
+               f"and their end came through{passed}")
+
+
+def _differed(found: dict) -> str:
+    """How the probe's payload as the far side read it differs from what was sent: its
+    length, its bytes, or its end not seen; nothing when it came through."""
+    import hashlib
+
+    from . import sending
+
+    sent = sending.PROBE_PAYLOAD
+    if found.get("length") != len(sent):
+        return f"the far side read {found.get('length')} bytes of the {len(sent)} sent"
+    if found.get("sha256") != hashlib.sha256(sent).hexdigest():
+        return f"the {len(sent)} bytes the far side read differ from those sent"
+    if not found.get("eof"):
+        return "the far side did not see stdin's end after the payload"
+    return ""
+
+
+def _far_words(far: str, found: dict) -> str:
+    """What the probe found of the far machine `far`: its version, CPUs, memory, git,
+    and its check lock's holders and line."""
+    from . import check_line
+
+    lock = found.get("check_lock") if isinstance(found.get("check_lock"), dict) else {}
+    holders = [one for one in lock.get("holders") or () if isinstance(one, dict)]
+    at_once = lock.get("at_once")
+    places = "; ".join(
+        (f"place {one.get('check_lock')} of {at_once} " if at_once != 1 else "")
+        + f"held {_held_words(one)}" for one in holders) or "free"
+    return (f"{far}: version {found.get('version')}, {found.get('cpus')} CPUs, "
+            f"{check_line.gib(found.get('available_mib'))} available, "
+            f"{found.get('git') or 'no git'}; its check lock: {places}, "
+            f"{lock.get('waiting', 0)} waiting")
 
 
 # -- private files -------------------------------------------------------------------------

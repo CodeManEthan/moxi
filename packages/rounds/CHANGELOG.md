@@ -36,6 +36,33 @@
   line in order with a lander's first, and the reading and the need when the first in
   line waits for memory. It warns for each place as before, and for an orphan's run
   still running, naming its pid.
+- Lanes: other machines a check can run on, reached over ssh. `[lanes.<name>]` names
+  one (`host`, `moxi`, `ssh`, `connect_timeout_s`, `shared_lock`), and a project sends
+  checks only to the lanes its `[projects.<key>.lanes.<name>]` tables name, each with its
+  own `command`, `scoped`, `timeout_s`, `memory_mib` and `preflight` if it gives them.
+  `moxi config rounds check` refuses a bad lane table, and prints a project's words and
+  a lane's under each other where the lane gives its own.
+- A check that can't take a place here now runs on the first lane its project names
+  that is free now, else waits here as before. `check --urgent` keeps it here, and
+  `check --lane NAME` sends it to that lane, waiting in its line. Only the repo's
+  declared check goes: a queue project's scoped check and `--full`, a CI project's
+  `--full`, or a plain project's command; the lander's run, a command step and a check
+  by CI stay here. A run on a lane holds no place of this machine's check lock.
+- A lane's run is one ssh session to `moxi rounds serve` there, which takes a place of
+  that machine's own check lock (and its `shared_lock`), takes the build's commit as a
+  git bundle of what it lacks and the build's brought private files, checked by SHA-256,
+  runs the preflight lines and the check in a tree of its own, streams the output back
+  and removes the tree. Nothing else of the worktree is sent. An interrupt here ends the
+  run there; a lane lost mid-run records nothing and never falls back. The output file
+  here trails the run by up to 2 s.
+- `check.ran` for a lane run names `lane`, `lane_host` and `lane_check_lock` in place of
+  `check_lock`. The gate compares it with that lane's words, and counts nothing for a
+  lane the project no longer names. `check`, `show` and the board say `on lane NAME`.
+- The doctor has a `lane <name>` row per lane, a real round trip to `serve --probe`
+  there that warns, never fails, for no ssh client, a host not reached, a `serve` missing,
+  of another version or failing to start, a session that changes bytes or loses the
+  input's end, no git there and a failing preflight line. Its `check lock` row names the
+  machine a holder or waiter came from, when another machine sent it.
 
 ## 0.1.5 (unreleased)
 
