@@ -153,6 +153,23 @@ label = "A leftover must sit unchanged for"
 line = "At least 1."
 unit = "hours"
 
+[check_lock.at_once]
+type = "int"
+default = 1
+doc = "How many runs rounds starts may hold the machine's check lock at once, across every repo: each moxi rounds check run, and a lander's ci.local run. A whole number, at least 1. Above 1, a run starts beside running ones only when it and each of them declare memory_mib and the free memory covers check_lock.need_mib; a run that would be alone never waits on memory."
+read = "use"
+label = "Checks that may run at once"
+line = "At least 1. Above 1, a second check starts only when memory_mib and the free memory allow it."
+
+[check_lock.need_mib]
+type = "int"
+default = 0
+doc = "The free memory, in MiB, a run needs to start beside running ones, read as psutil's available memory. 0 means the sum of the memory_mib of the run and of every run holding the check lock. At least 0. Read only when check_lock.at_once is above 1."
+read = "use"
+label = "Free memory a second check needs"
+line = "0 sums each run's memory_mib."
+unit = "MiB"
+
 [watched_paths_guard.enabled]
 type = "bool"
 default = false
@@ -166,7 +183,7 @@ hurts = { when = "off", says = "turns this guard off", confirm = "From the next 
 [projects]
 type = "table"
 default = {}
-doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check, ci, finish, shared_paths, keep_branch, lock_ref, brief, private_files, checklist, watched_paths and verifier_brief."
+doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check (command, scoped, timeout_s and memory_mib, the most memory one run holds, in MiB), ci, finish, shared_paths, keep_branch, lock_ref, brief, private_files, checklist, watched_paths and verifier_brief."
 read = "use"
 label = "Each project's own settings"
 line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, land, check, finish, checklist, watched_paths, verifier_brief and more."

@@ -1065,3 +1065,142 @@ def test_on_macos_a_launchd_job_does_not_hide_the_harness():
 def test_where_the_walk_cant_go_on_no_harness_is_named(error):
     procs = chain(ME, SHELL, p(["claude"]), *PERSON[1:])
     assert _walk.agent(Table(procs, errors={102: error}), run()) is None
+
+
+# -- the agent test inside a pytest run a test kit names -----------------------------------
+
+CLAUDE = p(["claude"])
+#: Processes that call themselves pytest, each with whether it is a pytest run.
+PYTEST_FORMS = {
+    "exec-a": (p(["pytest", "tests"]), True),
+    "copied-interpreter-c": (p(["/home/ada/tmp/pytest", "-c", "import os"]), True),
+    "python-script": (p([f"{VENV}/python", "/home/ada/tmp/pytest"]), True),
+    "shell-script": (p(["/bin/sh", "/home/ada/tmp/pytest"]), False),
+    "python-m": (p(["python3", "-m", "pytest", "-q"]), True),
+    "python-mpytest": (p(["python3", "-mpytest"]), True),
+    "py.test-script": (p([f"{VENV}/python", f"{VENV}/py.test"]), True),
+}
+NAMED = str(RUN + 1)
+
+
+@pytest.mark.parametrize("form", PYTEST_FORMS)
+def test_a_process_called_pytest_alone_passes_nothing(form):
+    proc, _ = PYTEST_FORMS[form]
+    assert agent_found(ME, proc, CLAUDE, *PERSON[1:]) == "claude"
+
+
+@pytest.mark.parametrize("form", PYTEST_FORMS)
+def test_the_pytest_run_the_value_names_stops_the_climb(form):
+    proc, is_run = PYTEST_FORMS[form]
+    got = agent_found(ME, proc, CLAUDE, *PERSON[1:], test_run_pid=NAMED)
+    assert got == (None if is_run else "claude")
+
+
+def test_on_windows_a_pytest_exe_is_a_pytest_run_without_case():
+    procs = (p([WIN_EXE, WIN_MOXI], image=WIN_EXE), p([r"C:\Users\ada\bin\PYTEST.EXE"]),
+             p([r"C:\Users\ada\bin\claude.exe"]), p([r"C:\WINDOWS\explorer.exe"]))
+    kw = dict(executable=WIN_EXE, argv0=WIN_MOXI)
+    assert _walk.agent(Table(chain(*procs), is_windows=True), run(**kw)) == "claude"
+    assert _walk.agent(Table(chain(*procs), is_windows=True),
+                       run(test_run_pid=NAMED, **kw)) is None
+
+
+def test_a_pytest_run_with_a_tool_mark_names_its_harness_without_the_value():
+    pytest_run = ("python3", "-m", "pytest")
+    assert agent_found(p(list(pytest_run)), *PERSON, orig_argv=pytest_run,
+                       tool_marks=("CLAUDECODE",)) == "claude"
+
+
+@pytest.mark.parametrize("value", ["999", "abc", "", "-101", "101x", " 101", "１０１"])
+def test_a_value_naming_no_pytest_run_in_the_chain_changes_nothing(value):
+    pytest_run = PYTEST_FORMS["python-m"][0]
+    assert agent_found(ME, pytest_run, CLAUDE, *PERSON[1:], test_run_pid=value) == "claude"
+
+
+def test_a_value_naming_a_process_that_is_no_pytest_run_changes_nothing():
+    assert agent_found(ME, SHELL, CLAUDE, *PERSON[1:], test_run_pid=NAMED) == "claude"
+
+
+def test_a_harness_below_the_named_run_is_named_first():
+    pytest_run = PYTEST_FORMS["python-m"][0]
+    above = str(RUN + 2)
+    assert agent_found(ME, CLAUDE, pytest_run, *PERSON[1:], test_run_pid=above) == "claude"
+    # A fake harness a test started, between the run and the named pytest run.
+    fake = p(["/home/ada/tmp/claude", "--print"])
+    assert agent_found(ME, fake, pytest_run, *PERSON[1:], test_run_pid=above) == "claude"
+
+
+def test_a_tool_mark_below_the_named_run_is_named():
+    pytest_run = PYTEST_FORMS["python-m"][0]
+    assert agent_found(ME, pytest_run, *PERSON[1:], test_run_pid=NAMED,
+                       tool_marks=("CLAUDECODE",)) == "claude"
+
+
+def test_the_named_run_itself_names_no_harness_before_its_tool_marks():
+    pytest_run = ("python3", "-m", "pytest")
+    view = Table(chain(p(list(pytest_run)), CLAUDE, *PERSON[1:]))
+    own = dict(orig_argv=pytest_run, tool_marks=("CLAUDECODE",))
+    assert _walk.agent(view, run(test_run_pid_now=str(RUN), **own)) is None
+    assert view.reads == []
+    # Named only in its start environment, it is never met on the climb.
+    assert _walk.agent(view, run(test_run_pid=str(RUN), **own)) == "claude"
+    # Named now, but its command line is no pytest run.
+    assert _walk.agent(view, run(test_run_pid_now=str(RUN), tool_marks=("CLAUDECODE",))) == (
+        "claude")
+    assert agent_found(ME, CLAUDE, *PERSON[1:], test_run_pid_now=str(RUN)) == "claude"
+
+
+def test_an_xdist_worker_stops_at_the_run_that_started_it():
+    worker = ("/usr/bin/python3", "-c", "import sys;exec(eval(sys.stdin.readline()))")
+    pytest_run = PYTEST_FORMS["python-m"][0]
+    assert agent_found(p(list(worker)), pytest_run, CLAUDE, *PERSON[1:], orig_argv=worker,
+                       test_run_pid=NAMED) is None
+    assert agent_found(p(list(worker)), pytest_run, CLAUDE, *PERSON[1:],
+                       orig_argv=worker) == "claude"
+
+
+@pytest.mark.parametrize("procs", [(ME, *PERSON), (ME, PYTEST_FORMS["python-m"][0], CLAUDE,
+                                                   *PERSON[1:]),
+                                   (ME, PYTEST_FORMS["python-m"][0], *PERSON[1:])],
+                         ids=["person", "under-claude", "pytest-alone"])
+def test_the_value_never_changes_the_walk(procs):
+    assert walk(Table(chain(*procs)), run(test_run_pid=NAMED, test_run_pid_now=str(RUN))) == (
+        walk(Table(chain(*procs)), run()))
+
+
+def test_the_run_carries_the_value_noted_at_import_and_the_value_now(monkeypatch):
+    monkeypatch.setattr(_mark, "test_run_pid", "42")
+    monkeypatch.setenv(_mark.TEST_RUN_PID_ENV, "43")
+    here = Run.here()
+    assert (here.test_run_pid, here.test_run_pid_now) == ("42", "43")
+    monkeypatch.delenv(_mark.TEST_RUN_PID_ENV)
+    assert Run.here().test_run_pid_now is None
+
+
+def test_the_terminal_exports_the_cores_copy_of_the_kits_name():
+    from moxi import terminal
+
+    assert terminal.TEST_RUN_PID_ENV == _mark.TEST_RUN_PID_ENV == "MOXI_TEST_RUN_PID"
+
+
+_PRINT_AGENT = "import moxi.terminal as t; print(t.agent())"
+_START = textwrap.dedent("""\
+    import subprocess, sys
+    sys.exit(subprocess.run(sys.argv[1:], timeout=120).returncode)
+    """)
+
+
+def test_live_a_script_named_pytest_under_a_harness_passes_nothing(tmp_path):
+    """A process named `claude` (an interpreter whose first argument says so, as a
+    harness sets its title) starts a Python script named `pytest`, which starts a child
+    that asks the agent test: it names `claude`, whatever value of the test kit's this
+    process passes on."""
+    pytest_script = tmp_path / "pytest"
+    pytest_script.write_text(_START)
+    claude = os.path.join(os.path.dirname(sys.executable), "claude")
+    done = subprocess.run(
+        [claude, "-c", _START, sys.executable, str(pytest_script), sys.executable, "-c",
+         _PRINT_AGENT], executable=sys.executable, env=dict(os.environ),
+        capture_output=True, text=True, timeout=150)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip().splitlines()[-1] == "claude", done.stdout

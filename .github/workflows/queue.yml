@@ -1,19 +1,19 @@
 # The check of a merge queue's candidate: a commit that merges the builds waiting to
 # land onto main's head M, pushed to a branch ci/queue-<M12>-<n>, where M12 is the first
 # 12 hex digits of M and n the batch's number. ci.yml ignores those branches and this
-# workflow runs on them alone. It checks what the candidate changes since M and every
-# package that depends on it, not the whole tree; the full check runs on main after the
-# candidate lands.
+# workflow runs on them alone. It checks the packages the candidate touches since M and
+# every package that depends on one (`--with-dependents`), not the whole tree; the full
+# check runs on main after the candidate lands.
 # No job here is named linux, so no run of this workflow meets the check main waits for
 # (ci.yml's linux job, which the publishing gate and the main branch's rules read).
 # The pick job reads M from the branch's name, prints the packages
-# `moxi-dev check --pick` picks on a line `picked: <JSON list>` of its log, and those
-# it hands the browser jobs on a line `picked for browser (*): <JSON list>` (the browser
-# jobs' name pattern), which is where a reader of the run finds them, and hands them on.
-# The scoped job runs `moxi-dev check --base M`. The web job runs as ci.yml runs it on a
-# ci/ branch, on Linux only. The browser jobs run, in Chromium and Firefox, the browser
-# tests of the picked packages that ci.yml's browser jobs run; with none picked the
-# browser job is skipped.
+# `moxi-dev check --pick --with-dependents` picks on a line `picked: <JSON list>` of its
+# log, and those it hands the browser jobs on a line `picked for browser (*): <JSON list>`
+# (the browser jobs' name pattern), which is where a reader of the run finds them, and
+# hands them on. The scoped job runs `moxi-dev check --with-dependents --base M`. The web
+# job runs as ci.yml runs it on a ci/ branch, on Linux only. The browser jobs run, in
+# Chromium and Firefox, the browser tests of the picked packages that ci.yml's browser
+# jobs run; with none picked the browser job is skipped.
 # A newer push to the same branch cancels its run still going. Every job skips the push
 # that deletes a branch.
 # Actions are pinned to a release commit, with its version beside it.
@@ -74,7 +74,7 @@ jobs:
           BROWSER: ui cache comms launcher usage loadout projects sessions turns services connector rounds
         run: |
           set -o pipefail
-          picked="$(uv run --locked --package moxi-dev moxi-dev check --pick --base "$BASE" | jq -c .packages)"
+          picked="$(uv run --locked --package moxi-dev moxi-dev check --pick --with-dependents --base "$BASE" | jq -c .packages)"
           echo "picked: $picked"
           browser="$(jq -nc --argjson picked "$picked" --arg list "$BROWSER" \
             '[$list | split(" ")[] | select(. as $p | $picked | any(.[]; . == $p))]')"
@@ -98,7 +98,7 @@ jobs:
       - name: check the candidate against main's head
         env:
           BASE: ${{ needs.pick.outputs.base }}
-        run: uv run --locked moxi-dev check --base "$BASE"
+        run: uv run --locked moxi-dev check --with-dependents --base "$BASE"
 
   web:
     if: ${{ !github.event.deleted }}

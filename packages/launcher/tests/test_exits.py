@@ -5,6 +5,7 @@ per exit, and the exit log."""
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ import pytest
 from moxi import proc
 from moxi_dev.testing import PROC_WAIT_S
 
-from moxi_launcher import exits, first, job, store, target
+from moxi_launcher import exits, first, fork, job, store, target
 
 SID = "5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f"
 OTHER = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
@@ -266,6 +267,33 @@ def test_a_person_at_the_pane_holds(conn):
                            pane_activity=None)
     result = go(conn, slots_api=FakeSlots(pane=pane))
     assert (result.data["outcome"], result.run.word) == ("held", "person")
+
+
+def mark_recall_fork(conn, monkeypatch):
+    stamp = "MOXI_MEMORY_SUBCONSCIOUS_FORK"
+    conn.execute("UPDATE launches SET env_json = ?, fork_of = ? WHERE request_id = 'r1'",
+                 (json.dumps({stamp: "recall-1"}), OTHER))
+    memory = SimpleNamespace(ok=True, api=SimpleNamespace(SUBCONSCIOUS_FORK_ENV=stamp))
+    load = fork.moxi_modules.load
+    monkeypatch.setattr(fork.moxi_modules, "load",
+                        lambda name, *a, **k: memory if name == "memory" else load(
+                            name, *a, **k))
+
+
+def test_recent_client_activity_does_not_hold_a_recall_fork(conn, monkeypatch):
+    mark_recall_fork(conn, monkeypatch)
+    pane = SimpleNamespace(pane_id="%9", pane_in_mode=False,
+                           client_activity=time.time() - 5, pane_activity=None)
+    result = go(conn, slots_api=FakeSlots(ended=True, pane=pane))
+    assert result.data["outcome"] == "exited"
+
+
+def test_an_open_turn_still_holds_a_recall_fork(conn, monkeypatch):
+    mark_recall_fork(conn, monkeypatch)
+    session = FakeSession(facts_seq=[facts(turn_open=True)])
+    result = go(conn, session=session)
+    assert (result.data["outcome"], result.run.word) == ("held", "turn")
+    assert session.commands == []
 
 
 @pytest.mark.parametrize("reason", ["busy-turn", "draft", "busy-agents", "stale-turn",
