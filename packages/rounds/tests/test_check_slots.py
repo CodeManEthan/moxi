@@ -201,6 +201,37 @@ def test_no_wait_with_one_place_says_what_it_said_before(fenced, holder):
                      f"held by pid {other.pid}; 0 waiting")
 
 
+def test_a_place_whose_holder_was_killed_reads_free_in_the_waiting_line(fenced, holder):
+    hold(holder, 1, memory_mib=100)
+    killed = hold(holder, 2, memory_mib=100, name="proj-a/killed")
+    killed.kill()
+    killed.wait(timeout=PROC_WAIT_S)
+    assert check_line.lock_pid(check_line.slot_path(lock(), 2)) == killed.pid
+    words = check_line._held_words(lock(), 2, 0)
+    assert words.startswith("waiting for the check lock: 1 of 2 held (proj-a/other B1 for ")
+    assert "killed" not in words and "check lock 2" not in words
+
+
+def test_with_no_place_held_the_waiting_line_has_no_empty_parentheses(fenced):
+    assert check_line._held_words(lock(), 2, 1) == (
+        "waiting for the check lock: 0 of 2 held; 1 ahead of you")
+
+
+def test_back_at_one_place_the_lines_read_as_one_lock_with_check_2_on_disk(fenced, holder):
+    check_line.slot_path(lock(), 2).touch()
+    other = hold(holder, 1, record=False)
+    assert check_line._held_words(lock(), 1, 0) == (
+        f"waiting for the machine's check lock, held by pid {other.pid}; 0 ahead of you")
+    assert refused() == (f"another check holds or waits for the machine's check lock "
+                         f"{lock()}: held by pid {other.pid}; 0 waiting")
+
+
+def test_at_one_place_a_held_place_above_it_keeps_the_count_words(fenced, holder):
+    hold(holder, 2, memory_mib=100)
+    assert check_line._held_words(lock(), 1, 0).startswith(
+        "waiting for the check lock: 1 of 1 held (proj-a/other B1 for ")
+
+
 # -- the line ----------------------------------------------------------------------------
 
 def test_a_landers_ticket_goes_ahead_of_tickets_that_came_first(fenced):
@@ -223,7 +254,8 @@ def test_a_waiter_says_each_reason_once_then_where_it_got_in(fenced, holder):
         assert taken.k == 2
     assert len(said) == 2
     assert said[0] == ("check lock 2 of 2 is free; waiting for memory: 1.0G available, a "
-                       "second check needs 2.0G (proj-a/other B1's 1.0G); read every 0.5 s")
+                       "second check needs 2.0G (yours 1.0G, proj-a/other B1's 1.0G); read "
+                       "every 0.5 s")
     assert said[1].startswith("got check lock 2 of 2 after ")
     assert said[1].endswith(" s, beside proj-a/other B1 (4.0G available, 2.0G needed)")
     assert check_line.tickets(lock()) == []

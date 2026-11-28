@@ -519,32 +519,45 @@ def _names(held) -> str:
                      else one.name for one in held)
 
 
+def _one_lock(lock_path: Path, at_once: int) -> bool:
+    """Whether the lines read as a single lock's: `at_once` is 1 and no place above the
+    first is held, whatever lock files are on disk."""
+    return at_once == 1 and all(_free_now(slot_path(lock_path, k))
+                                for k in places(lock_path, at_once)[1:])
+
+
 def _held_words(lock_path: Path, at_once: int, ahead: int) -> str:
     """The line a waiter says while every place it may take is held, or a run ahead of
     it waits. With one place it reads as a single lock's."""
-    count = places(lock_path, at_once)
-    if len(count) == 1:
+    if _one_lock(lock_path, at_once):
         who = held_by(holder(lock_path), lock_pid(lock_path))
         return f"waiting for the machine's check lock, held by {who}; {ahead} ahead of you"
-    held = [Held(k, holder(slot_path(lock_path, k))) for k in count
+    held = [Held(k, holder(slot_path(lock_path, k))) for k in places(lock_path, at_once)
             if not _free_now(slot_path(lock_path, k))]
-    return (f"waiting for the check lock: {len(held)} of {at_once} held ({_names(held)}); "
+    names = f" ({_names(held)})" if held else ""
+    return (f"waiting for the check lock: {len(held)} of {at_once} held{names}; "
             f"{ahead} ahead of you")
 
 
 def _free_now(path: Path) -> bool:
-    """Whether a place reads free without its lock being taken: its file names no
-    holder and no live holder record."""
-    return holder(path) is None and lock_pid(path) is None and orphan(path) is None
+    """Whether a place reads free without its lock being taken: no live holder record,
+    no orphan's run, and no live process under the pid its file holds (a holder killed
+    outright leaves its pid there)."""
+    pid = lock_pid(path)
+    return (holder(path) is None and (pid is None or proc.identity(pid) is None)
+            and orphan(path) is None)
 
 
-def _why_words(decision: Decision, *, at_once: int) -> str:
-    """The line a first in line says for a wait other than a held lock."""
+def _why_words(decision: Decision, *, at_once: int, own_mib: int | None = None) -> str:
+    """The line a first in line says for a wait other than a held lock; the memory line
+    names the run's own figure (`own_mib`) first, then each holder's."""
     free_k = next((k for k in range(1, at_once + 1)
                    if k not in {one.k for one in decision.held}), at_once)
     place = f"check lock {free_k} of {at_once} is free"
     if decision.reason == "memory":
-        mine = ", ".join(f"{one.name}'s {gib(one.memory_mib)}" for one in decision.held)
+        figures = [] if own_mib is None else [f"yours {gib(own_mib)}"]
+        figures += [f"{one.name}'s {gib(one.memory_mib)}" for one in decision.held]
+        mine = ", ".join(figures)
         return (f"{place}; waiting for memory: {gib(decision.available_mib)} available, a "
                 f"second check needs {gib(decision.need_mib)} ({mine}); read every "
                 f"{LINE_POLL_S:g} s")
@@ -575,7 +588,7 @@ def _got_words(taken: Taken, waited_s: float) -> str:
 def _refusal(lock_path: Path, decision: Decision | None, waiting: int, at_once: int) -> str:
     """Why `--no-wait` takes no place: who holds the lock, how many wait, and the
     reading and the need when memory is short."""
-    if len(places(lock_path, at_once)) == 1:
+    if _one_lock(lock_path, at_once):
         who = held_by(holder(lock_path), lock_pid(lock_path))
     else:
         held = decision.held if decision is not None else ()
@@ -666,7 +679,7 @@ def _wait(lock_path: Path, stack: ExitStack, record: Mapping, *, first: bool, sa
             reason = "held" if decision is None else decision.reason
             if reason != said:
                 say(_held_words(lock_path, at_once, len(ahead)) if reason == "held"
-                    else _why_words(decision, at_once=at_once))
+                    else _why_words(decision, at_once=at_once, own_mib=options["own_mib"]))
                 said = reason
             time.sleep(LINE_POLL_S)
     finally:

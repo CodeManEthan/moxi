@@ -18724,3 +18724,4 @@ rounds	packages/rounds/tests/test_queue_local.py	VALUES = {"round": "queue/proj-
 rounds	packages/rounds/tests/test_queue_local.py	assert (record["round"], record["stage"], record["step"], record["repo"]) == (	keep	round	round
 rounds	packages/rounds/tests/test_queue_local.py	earlier = check_line.take(lock, {**check_line.me(), "round": "proj-a/earlier",	keep	round	round
 rounds	packages/rounds/tests/test_queue_local.py	record = leftover(out, "record")	keep	record	record
+rounds	packages/rounds/tests/test_check_slots.py	killed.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
