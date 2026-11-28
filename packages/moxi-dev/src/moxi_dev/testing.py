@@ -11,7 +11,8 @@ The fence, around every test (the autouse fixture `fence`):
 
 - The environment. Emptied to `PATH`, the locale (`LANG`, `LANGUAGE`, `LC_*`), the
   variables pytest and xdist set for themselves (`PYTEST_CURRENT_TEST`, `PYTEST_VERSION`,
-  `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`) and
+  `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`),
+  `MOXI_TEST_RUN_PID`, the run's name (The run's name, below), and
   `MOXI_TEST_REAL_SUPERVISOR`, which opts a run into the system's real supervisor: a
   test sees it at call time as pytest started with it, and doesn't when it was unset. Then
   every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG
@@ -107,6 +108,17 @@ pytest has registered by then (`-p` plugins, `pytest11` entry points, the confte
 `pytest_plugins`). On Windows names match without case. Nothing else is cleared, and a
 variable a test or fixture sets later is left alone. The launcher's scrub is another rule:
 it keeps the user's Claude sign-in for the session it starts, and a test needs none.
+
+The run's name. The core's agent test (`moxi.terminal.agent`) also walks up the process
+tree for a harness, which no clear removes. So right after the clear, a run's controlling
+process (one that isn't an xdist worker) sets `MOXI_TEST_RUN_PID` (`RUN_PID_ENV`) to its
+own pid, over any value it inherited (`name_run`); a worker keeps its controller's. The
+agent test stops at the pytest run that value names and nowhere else, so every process of
+the run that carries it, the controller, its workers and the children that inherit or
+copy the environment, answers as in CI, where no harness runs above the suite. A child
+whose environment is built from nothing lacks it and answers as it would outside a test;
+pass the name on to it. A pytest run that doesn't load the kit is named by nothing, and
+neither is a process merely called `pytest`.
 
 uv in a child: a test whose subprocess runs uv asks for the `uv_env` fixture and passes
 it as that child's environment. It is the fenced environment plus uv's real cache
@@ -414,10 +426,14 @@ HARNESS_HOMES = {
 #: Scheduler); the core's units fence refuses a real supervisor call under pytest without it.
 REAL_SUPERVISOR_ENV = "MOXI_TEST_REAL_SUPERVISOR"
 
+#: The pid of the pytest run the kit names, which the run's controlling process sets at
+#: its configure: the core's agent test stops at that run (module doc, The run's name).
+RUN_PID_ENV = "MOXI_TEST_RUN_PID"
+
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
             "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID",
-            REAL_SUPERVISOR_ENV)
+            REAL_SUPERVISOR_ENV, RUN_PID_ENV)
 
 #: Whether this is Windows, where the fence also moves the user's folders and keeps the
 #: system's variables, and the run-level clear matches names without case; tests replace
@@ -981,10 +997,20 @@ def clear_run_env(config: pytest.Config) -> list[str]:
     return names
 
 
+def name_run() -> str:
+    """Name this process's pytest run for the core's agent test: set `RUN_PID_ENV` to
+    this process's pid, over any value it inherited, and return it."""
+    os.environ[RUN_PID_ENV] = pid = str(os.getpid())
+    return pid
+
+
 def pytest_configure(config: pytest.Config) -> None:
     # First, before anything reads the environment, and before xdist starts a worker:
-    # every fixture, worker and child this run starts inherits the cleared environment.
+    # every fixture, worker and child this run starts inherits the cleared environment,
+    # and the run's name. A worker keeps its controller's.
     clear_run_env(config)
+    if not hasattr(config, "workerinput"):
+        name_run()
     for name, line in MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {line}")
     config.addinivalue_line("markers", f"{LIFTED}: set by the kit on a tier test this "
@@ -2291,8 +2317,8 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
            "PARENT_GRACE_S", "PARENT_PID_ENV", "PARENT_POLL_S", "PROC_STAT",
-           "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL",
-           "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV",
+           "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "RUN_PID_ENV",
+           "SHUTDOWN_POLL", "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV",
            "TIMED", "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
            "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "arm_stacks", "console_script", "fence",
            "findings_of", "idle", "param_id", "selection", "served", "short_dir",

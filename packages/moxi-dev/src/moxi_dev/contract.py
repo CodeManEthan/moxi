@@ -132,8 +132,9 @@ CORE_SCRIPT = ("moxi", "moxi.cli:main")
 #: Inside these core modules check 5 does not apply.
 CORE_ENV_READERS = frozenset({"moxi.paths", "moxi.config", "moxi.log", "moxi.proc",
                               "moxi.units._fence"})
-#: The core's own plumbing variables, which the core reads where check 5 applies.
-CORE_INTERNAL_ENV = frozenset({"MOXI_CORE_LOCK_FD", "MOXI_STARTED_BY"})
+#: The core's own plumbing variables, and the test kit's run name its agent test reads,
+#: which the core reads where check 5 applies.
+CORE_INTERNAL_ENV = frozenset({"MOXI_CORE_LOCK_FD", "MOXI_STARTED_BY", "MOXI_TEST_RUN_PID"})
 #: What a segment's closure may not import (top-level package names), besides turns.
 SEGMENT_IMPORTS = frozenset({"subprocess", "socket", "multiprocessing", "ctypes", "http",
                              "urllib"})

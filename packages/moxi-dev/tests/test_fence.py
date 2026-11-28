@@ -762,19 +762,46 @@ def test_every_module_s_session_variables_are_cleared_and_no_plugin_keeps_one():
                        for one in inputs), key
 
 
+#: A Python child's report: the names in its environment and the core's agent test.
+CHILD_REPORT = ("import json, os, moxi.terminal as t; "
+                "print(json.dumps({'names': sorted(os.environ), 'agent': t.agent()}))")
+
 RUN_PROBE = """\
 import json, os, subprocess, sys
 import pytest
+from moxi import terminal
 
 CLEARED = {cleared!r}
 KEPT = {kept!r}
-NAMES = "import json, os; print(json.dumps(sorted(os.environ)))"
+REPORT = {report!r}
+#: The harness homes the per-test fence points into the test's tmp.
+HOMES = {homes!r}
+#: Every way a test builds a Python child's environment, with whether it copies this one.
+COPYING = {{"copied": True, "pythonpath": True, "isolated": True, "path": False,
+           "path-and-name": False}}
+AT_COLLECTION = terminal.agent()
 
 
-def names_of_a_child():
-    done = subprocess.run([sys.executable, "-c", NAMES], env=dict(os.environ),
-                          capture_output=True, text=True, check=True)
-    return set(json.loads(done.stdout))
+def child(kind):
+    env, argv = dict(os.environ), [sys.executable, "-c", REPORT]
+    if kind == "pythonpath":
+        env["PYTHONPATH"] = os.getcwd()
+    elif kind == "isolated":
+        argv.insert(1, "-I")
+    elif kind.startswith("path"):
+        env = {{name: os.environ[name] for name in ("PATH", "SYSTEMROOT")
+               if name in os.environ}}
+        if kind == "path-and-name":
+            env[terminal.TEST_RUN_PID_ENV] = os.environ[terminal.TEST_RUN_PID_ENV]
+    done = subprocess.run(argv, env=env, capture_output=True, text=True, check=True)
+    return json.loads(done.stdout)
+
+
+# Each kind of child's report, this scope's own answer, and the names this scope's
+# environment keeps: the run's (a wider fixture's) or the fence's (a test's).
+def children():
+    kept = set(KEPT) & set(os.environ) | {{terminal.TEST_RUN_PID_ENV}}
+    return {{kind: child(kind) for kind in COPYING}}, terminal.agent(), kept
 
 
 @pytest.fixture(scope="session")
@@ -783,14 +810,25 @@ def run_env():
 
 
 @pytest.fixture(scope="module")
-def module_child():
-    return names_of_a_child()
+def module_children():
+    return children()
 
 
-def test_the_run_and_its_children_hold_no_session_variable(run_env, module_child):
-    for seen in (set(run_env), module_child):
-        assert not seen & set(CLEARED), sorted(seen & set(CLEARED))
-        assert set(KEPT) <= seen, sorted(set(KEPT) - seen)
+def test_the_run_and_its_children_hold_no_session_variable_and_ask_as_in_ci(
+        run_env, module_children):
+    assert not set(run_env) & set(CLEARED), sorted(set(run_env) & set(CLEARED))
+    assert set(KEPT) <= set(run_env), sorted(set(KEPT) - set(run_env))
+    assert run_env[terminal.TEST_RUN_PID_ENV] == str(os.getpid())
+    assert AT_COLLECTION is None
+    fenced = set(CLEARED) - set(HOMES)
+    for (seen, own, kept), cleared in ((module_children, set(CLEARED)), (children(), fenced)):
+        assert own is None
+        for kind, copies in COPYING.items():
+            names = set(seen[kind]["names"])
+            assert not names & cleared, (kind, sorted(names & cleared))
+            if copies:
+                assert kept <= names, (kind, sorted(kept - names))
+            assert seen[kind]["agent"] == ("claude" if kind == "path" else None), kind
 """
 
 INPUT_PLUGIN = """\
@@ -803,6 +841,29 @@ def pytest_collection_finish(session):
     print("at collection:", os.environ.get("MOXI_X_INPUT"), os.environ.get("MOXI_X_OTHER"))
 """
 
+#: A Python script that runs its arguments as a command and exits with its status.
+START = """\
+import subprocess, sys
+sys.exit(subprocess.run(sys.argv[1:], timeout=300).returncode)
+"""
+
+
+def under_claude(where: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run pytest in `where`, with `args`, below a Python process named `claude` (its
+    first argument says so, as a harness sets its title), so the core's agent test finds
+    a harness above the run here and in CI alike."""
+    claude = os.path.join(os.path.dirname(sys.executable), "claude")
+    return subprocess.run(
+        [claude, "-c", START, sys.executable, "-mpytest", "-p", "no:cacheprovider",
+         f"--basetemp={where / 'inner'}", *args],
+        executable=sys.executable, cwd=where, env=dict(os.environ), capture_output=True,
+        text=True, timeout=300)
+
+
+def passed(done: subprocess.CompletedProcess[str], count: int) -> None:
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f" {count} passed" in done.stdout.splitlines()[-1], done.stdout
+
 
 def test_a_run_clears_the_session_for_every_scope_and_child_and_keeps_its_inputs(
         pytester, monkeypatch, tmp_path):
@@ -812,13 +873,73 @@ def test_a_run_clears_the_session_for_every_scope_and_child_and_keeps_its_inputs
     for name, value in {**SESSION_SOURCE, **kept}.items():
         if name != "NoDefaultCurrentDirectoryInExePath" or not testing.WINDOWS:
             monkeypatch.setenv(name, value)
+    monkeypatch.setenv(testing.RUN_PID_ENV, "1")         # inherited, and named over
     cleared = sorted(set(SESSION_SOURCE) - {"MOXI_X_INPUT"})
     pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
     pytester.makepyfile(xinput=INPUT_PLUGIN)
-    pytester.makepyfile(test_probe=RUN_PROBE.format(cleared=cleared, kept=sorted(kept)))
-    result = pytester.runpytest_subprocess("-p", "xinput", "-p", "no:cacheprovider", "-s")
-    result.assert_outcomes(passed=1)
-    result.stdout.fnmatch_lines(["*at collection: given None*"])
+    pytester.makepyfile(test_probe=RUN_PROBE.format(
+        cleared=cleared, kept=sorted(kept), report=CHILD_REPORT,
+        homes=sorted(testing.HARNESS_HOMES)))
+    done = under_claude(pytester.path, "-p", "xinput", "-s")
+    passed(done, 1)
+    assert "at collection: given None" in done.stdout
+
+
+XDIST_PROBE = """\
+import json, os, subprocess, sys
+from moxi import terminal
+
+REPORT = {report!r}
+
+
+def test_a_workers_child_asks_as_in_ci(worker_id):
+    assert worker_id != "master"
+    done = subprocess.run([sys.executable, "-c", REPORT], env=dict(os.environ),
+                          capture_output=True, text=True, check=True)
+    assert json.loads(done.stdout)["agent"] is None
+    assert terminal.agent() is None
+
+
+test_a_second_worker_too = test_a_workers_child_asks_as_in_ci
+"""
+
+
+def test_under_xdist_a_worker_and_its_child_ask_as_in_ci(pytester, monkeypatch):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    pytester.makeconftest('pytest_plugins = ["moxi_dev.testing"]\n')
+    pytester.makepyfile(test_probe=XDIST_PROBE.format(report=CHILD_REPORT))
+    passed(under_claude(pytester.path, "-n", "2"), 2)
+
+
+NO_KIT_PROBE = """\
+import json, os, subprocess, sys
+
+REPORT = {report!r}
+
+
+def test_a_child_names_the_harness():
+    done = subprocess.run([sys.executable, "-c", REPORT], env=dict(os.environ),
+                          capture_output=True, text=True, check=True)
+    assert json.loads(done.stdout)["agent"] == "claude"
+"""
+
+
+def test_a_run_without_the_kit_leaves_the_agent_test_as_it_is(tmp_path):
+    (tmp_path / "test_probe.py").write_text(NO_KIT_PROBE.format(report=CHILD_REPORT))
+    passed(under_claude(tmp_path), 1)
+
+
+def test_a_run_s_controller_names_itself_over_what_it_inherited(monkeypatch):
+    monkeypatch.setenv(testing.RUN_PID_ENV, "1")
+    assert testing.name_run() == str(os.getpid()) == os.environ[testing.RUN_PID_ENV]
+
+
+def test_the_fence_keeps_the_run_s_name_and_the_core_reads_the_kit_s():
+    from moxi import terminal
+
+    assert testing.RUN_PID_ENV in testing.KEPT_ENV
+    assert terminal.TEST_RUN_PID_ENV == testing.RUN_PID_ENV
+    assert os.environ[testing.RUN_PID_ENV].isdigit()
 
 
 # --- a pytest run inside a test --------------------------------------------------------
