@@ -103,7 +103,9 @@ A module that keeps an act for the person at the keyboard asks `moxi.terminal.ag
 which names the agent (`claude`, `codex` or `opencode`) whose session started the run, or
 None. It reads the process tree and the marks a harness sets, on Windows, macOS and Linux.
 It is a fence, not a lock: a process that clears its environment and runs outside the
-agent's process tree is not caught.
+agent's process tree is not caught. Inside a pytest run that a test kit names, by its pid,
+in `MOXI_TEST_RUN_PID`, it names no harness, so a test run started in an agent's session
+answers as one in CI; a process merely called `pytest` passes nothing.
 
 ## What it does outside its own folders
 

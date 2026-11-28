@@ -5,7 +5,10 @@ its own: `HOME`, the XDG homes, `XDG_RUNTIME_DIR`, `TMPDIR` and `MOXI_HOME` all 
 `home`, `PYTHONPATH` the `site` directories given (and nothing of this process's), and
 `PATH` and the locale kept, with any `env` a test adds. So the shell, its page servers and
 the `moxi` commands it runs keep every file under `home`, and this process's own
-environment never reaches them. `MOXI_ANCHOR_HOME`, the test kits' stand-in for the
+environment never reaches them. `MOXI_TEST_RUN_PID`, the test kit's name for its pytest
+run, is passed on from this process when set, so the core's agent test answers in the
+shell and everything it starts as it does in the test (no harness inside a run the kit
+names). `MOXI_ANCHOR_HOME`, the test kits' stand-in for the
 account's own folder, which places the core's record of the terminal's environment, is
 passed on from this process (the test kit's fence sets it to the test's home), else set
 under `home`: so the shell reads the record a test wrote with the kit's
@@ -23,7 +26,8 @@ A test reaches it three ways:
 
 **Gateway mode.** `TestShell(home, gateway=True)` runs the shell with its gateway, under
 an environment that sets no Moxi locator variable: no `MOXI_HOME` and no `MOXI_<MODULE>_*`
-(`MOXI_ANCHOR_HOME` is still set; it names no module and moves no root).
+(`MOXI_ANCHOR_HOME` is still set, and `MOXI_TEST_RUN_PID` passed on; neither names a module
+or moves a root).
 `HOME`, the XDG homes, `XDG_RUNTIME_DIR` and the temp directories still put every file
 under `home`, so the shell, `moxi ui gateway pair` and `on`, and the doctor find one
 runtime directory, as they do for a user. On Windows, where the roots come from the known
@@ -52,6 +56,7 @@ from pathlib import Path
 from typing import Any
 
 from moxi.paths import ANCHOR_HOME_ENV, HOME_ENV
+from moxi.terminal import TEST_RUN_PID_ENV
 
 #: Seconds a test shell has to print its ready line.
 START_TIMEOUT = 30.0
@@ -68,9 +73,11 @@ STDERR_LINES = 200
 SESSION_CHECK = "/m/ui/api/modules"
 
 #: The variables passed on from this process, when set. `MOXI_ANCHOR_HOME` is the test
-#: kit's stand-in for the account's folder, so the shell reads the test's record.
+#: kit's stand-in for the account's folder, so the shell reads the test's record;
+#: `MOXI_TEST_RUN_PID` names the kit's pytest run, where the core's agent test names no
+#: harness.
 _KEPT = ("PATH", "LANG", "LANGUAGE", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
-         ANCHOR_HOME_ENV)
+         ANCHOR_HOME_ENV, TEST_RUN_PID_ENV)
 #: The variables that keep a test shell under its home; a test's `env` can't set them.
 _OWNED = frozenset({"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
                     "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", HOME_ENV, "TMPDIR", "TEMP", "TMP",

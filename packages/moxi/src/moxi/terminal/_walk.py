@@ -65,6 +65,25 @@ the harness `TOOL_MARKS` gives it, and a namespace top run from a file descripto
 `claude`, whose Linux sandbox runs so. Where the walk can't go on (a process it can't read,
 past `LIMIT`, a loop) it names no harness. It is a fence, not a lock: a process that clears
 its environment and runs outside the harness's process tree is not caught.
+
+The agent test answers as above for every process but one kind: a process inside a pytest
+run that a test kit has named, by its pid, in `MOXI_TEST_RUN_PID` (`TEST_RUN_PID_ENV`), so
+a test run inside an agent's session answers as one in CI. It stops there two ways, and
+only these:
+
+- the run's own process, when its command line is a pytest run and its environment, as it
+  is when it asks, names its own pid: it names no harness, before its tool marks (the kit
+  sets the value after the process started, so only its current environment holds it);
+- the climb, when the run's start environment named a pid and the walk meets that process
+  before any harness, and that process is a pytest run: it names no harness there. A
+  harness met first is named.
+
+A pytest run is a process whose program, read as the walk reads any program (the script
+an interpreter runs, else the base name of its first argument), is `pytest` or
+`py.test`, or an interpreter run with `-m pytest`. Of an ancestor the stop reads only its
+pid and command line, which every system shows alike. A value that isn't a pid, a pid the
+walk never meets, or a process at that pid that is no pytest run changes nothing, and a
+process named `pytest` that no value names passes nothing.
 """
 
 from __future__ import annotations
@@ -98,6 +117,9 @@ _INTERPRETER = re.compile(r"python[0-9.]*[tw]?|pypy[0-9.]*")
 #: `-V:<tag>`.
 _PY_LAUNCHERS = ("py", "pyw")
 _PY_VERSION = re.compile(r"-[0-9]+(\.[0-9]+)?|-V:\S+")
+#: The programs a pytest run's command line runs: its scripts, or the module `-m` names.
+PYTEST_PROGRAMS = ("pytest", "py.test")
+PYTEST_MODULE = "pytest"
 #: A program run from a file descriptor, as a harness's sandbox may run its own binary.
 FD_PROGRAM = re.compile(r"/proc/self/fd/[0-9]+")
 #: Interpreter options that take the next argument (or the rest of their own) as a value.
@@ -109,8 +131,10 @@ _LONG_VALUED = ("--check-hash-based-pycs",)
 class Run:
     """The run the walk starts from: its pid, `sys.executable`, `sys.argv[0]`, the
     mark's value in the environment it started with (None: it had none),
-    `sys.orig_argv`, the interpreter's own command line, and the harness tool marks the
-    environment it started with holds."""
+    `sys.orig_argv`, the interpreter's own command line, the harness tool marks the
+    environment it started with holds, and `MOXI_TEST_RUN_PID`'s value in the environment
+    it started with (`test_run_pid`) and in its environment as it asks
+    (`test_run_pid_now`), each None when unset."""
 
     pid: int
     executable: str
@@ -118,6 +142,8 @@ class Run:
     started_by: str | None
     orig_argv: tuple[str, ...] = ()
     tool_marks: tuple[str, ...] = ()
+    test_run_pid: str | None = None
+    test_run_pid_now: str | None = None
 
     @classmethod
     def here(cls) -> "Run":
@@ -125,7 +151,8 @@ class Run:
 
         argv = getattr(sys, "argv", None) or [""]
         return cls(os.getpid(), sys.executable or "", argv[0] or "", _mark.started_by,
-                   tuple(getattr(sys, "orig_argv", None) or ()), _mark.tool_marks)
+                   tuple(getattr(sys, "orig_argv", None) or ()), _mark.tool_marks,
+                   _mark.test_run_pid, _mark.current_test_run_pid())
 
 
 @dataclass(frozen=True)
@@ -177,7 +204,8 @@ FD_HARNESS = "claude"
 
 def agent(view=None, run: Run | None = None) -> str | None:
     """The harness whose session `run` (default: this process) was started in, or None
-    (module doc)."""
+    (module doc). Inside the pytest run a test kit names in `MOXI_TEST_RUN_PID`, and only
+    there, it names none; a pytest run's name alone stops nothing."""
     view = _view.default_view() if view is None else view
     run = Run.here() if run is None else run
     windows = bool(getattr(view, "windows", False))
@@ -190,9 +218,13 @@ class _Walk:
         self.seen: set[int] = set()
 
     def harness_above(self) -> str | None:
-        """The agent test: E2's signs alone, from the run's own start environment up."""
+        """The agent test: E2's signs alone, from the run's own start environment up,
+        stopping only at the pytest run `MOXI_TEST_RUN_PID` names (module doc)."""
         from moxi import _mark
 
+        own = self.run.orig_argv or (self.run.executable, self.run.argv0)
+        if _pid(self.run.test_run_pid_now) == self.run.pid and self.pytest_run(own):
+            return None
         for mark in _mark.TOOL_MARKS:
             if mark in self.run.tool_marks:
                 return _mark.TOOL_MARKS[mark]
@@ -200,11 +232,14 @@ class _Walk:
             above = self.view.read(self.run.pid)
         except (Gone, Unread):
             return None
+        named = _pid(self.run.test_run_pid)
         self.seen.add(above.pid)
         above = self.up(above)
         while isinstance(above, Proc):
             if above.argv and (harness := self.harness(above.argv)) is not None:
                 return harness
+            if named is not None and above.pid == named and self.pytest_run(above.argv):
+                return None
             top, above = above, self.up(above)
             if above is None and self.fd_top(top) is not None:
                 return FD_HARNESS
@@ -480,3 +515,24 @@ class _Walk:
 
     def tmux(self, argv) -> bool:
         return "tmux" in self.names(argv)
+
+    def pytest_run(self, argv) -> bool:
+        """Whether a command line is a pytest run: its program, the script an interpreter
+        runs or else the base name of its first argument, is `pytest` or `py.test`, or an
+        interpreter runs `-m pytest`. On Windows `base` drops `.exe` and folds case."""
+        if not argv:
+            return False
+        name = self.base(argv[0])
+        if not self.interpreter(name):
+            return name in PYTEST_PROGRAMS
+        kind, target = self.runs(argv)
+        if kind == "module":
+            return target == PYTEST_MODULE
+        return kind == "script" and self.base(target) in PYTEST_PROGRAMS
+
+
+def _pid(value: str | None) -> int | None:
+    """A variable's value read as a pid: digits alone, else None."""
+    if value is None or not (value.isascii() and value.isdigit()):
+        return None
+    return int(value)
