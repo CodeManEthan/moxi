@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -32,6 +33,25 @@ STANDIN = textwrap.dedent("""
     if sys.argv[1]:
         checking.GRACE_S = float(sys.argv[1])
     sys.exit(cli.main(["serve", *sys.argv[2:]]))
+    """)
+
+#: Runs `serve` down its Windows branch on any system: the interrupt at stdin's end
+#: does nothing, as on Windows it can't reach a main thread blocked in the run's wait,
+#: and each call of `stop_first` writes the lock file it was given to the file named by
+#: the second argument before it stops the run.
+AS_WINDOWS = textwrap.dedent("""
+    import sys
+    from moxi_rounds import serving
+    real = serving.stop_first
+    def stop_first(lock_path):
+        with open(sys.argv[2], "a", encoding="utf-8") as out:
+            out.write(str(lock_path) + "\\n")
+        return real(lock_path)
+    serving._WINDOWS = True
+    serving.stop_first = stop_first
+    if sys.platform != "win32":
+        serving._binary = lambda fd: None
+    sys.exit(serving.serve(interrupt=lambda: None))
     """)
 
 #: A check's command: prints, as its last line, what it finds in its tree.
@@ -63,10 +83,11 @@ def far_env(far_home: Path) -> dict[str, str]:
 class Far:
     """A `serve` process and the near side's end of its pipes."""
 
-    def __init__(self, env: dict, err: Path, *args: str, grace_s: float | None = None):
+    def __init__(self, env: dict, err: Path, *args: str, grace_s: float | None = None,
+                 script: str = STANDIN):
         self.err = err
         self.proc = subprocess.Popen(
-            [PY, "-c", STANDIN, "" if grace_s is None else str(grace_s), *args],
+            [PY, "-c", script, "" if grace_s is None else str(grace_s), *args],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err.open("wb"), env=env)
         self.writer = frames.Writer(self._write)
         self.reader = frames.Reader(self.proc.stdout.read)
@@ -116,14 +137,15 @@ class Far:
 
 @pytest.fixture
 def far(fenced, tmp_path):
-    """`far(*args, grace_s=None)`: a `serve` with its own state and cache folder,
-    `far.env`; killed when the test ends if still running."""
+    """`far(*args, grace_s=None, script=STANDIN)`: a `serve` with its own state and
+    cache folder, `far.env`; killed when the test ends if still running."""
     home = tmp_path / "far"
     env = far_env(home)
     started: list[Far] = []
 
-    def start(*args: str, grace_s: float | None = None) -> Far:
-        one = Far(env, tmp_path / f"serve-{len(started)}.err", *args, grace_s=grace_s)
+    def start(*args: str, grace_s: float | None = None, script: str = STANDIN) -> Far:
+        one = Far(env, tmp_path / f"serve-{len(started)}.err", *args, grace_s=grace_s,
+                  script=script)
         started.append(one)
         return one
 
@@ -566,6 +588,35 @@ def test_the_near_side_gone_ends_a_long_far_command_at_once_on_every_system(
     assert time.monotonic() - started < PROC_WAIT_S
     assert command is None or not proc.alive(command)
     assert holder_record(far) is None and trees(far) == []
+
+
+def test_on_windows_the_near_side_gone_stops_the_far_run_of_the_place_held(
+        far, work, tmp_path):
+    marker = tmp_path / "long.pid"
+    stopped = tmp_path / "stopped.txt"
+    long_run = (f"import os, time; open({str(marker)!r}, 'w').write(str(os.getpid())); "
+                "time.sleep(120)")
+    one = far(str(stopped), script=AS_WINDOWS)
+    one.send(frames.REQUEST, request(work, [PY, "-c", long_run], timeout_s=300))
+    send_all(one, work, tmp_path)
+    one.until(frames.STARTED)
+    wait_for(marker.exists, timeout=PROC_WAIT_S, what="the far command's start")
+    record = wait_for(lambda: (holder_record(far) or {}).get("run_pid") and holder_record(far),
+                      timeout=PROC_WAIT_S, what="the holder record naming the run")
+    place = check_line.slot_path(far.lock, record["check_lock"])
+    command = proc.identity(int(marker.read_text()))
+    try:
+        one.proc.stdin.close()
+
+        # With no interrupt to end it, only the stop ends the run: a serve that isn't
+        # given it on Windows waits out the 120 s command, and this wait fails.
+        one.proc.wait(timeout=PROC_WAIT_S)
+        assert stopped.read_text(encoding="utf-8").splitlines() == [str(place)]
+        assert command is None or not proc.alive(command)
+        assert holder_record(far) is None and trees(far) == []
+    finally:
+        if command is not None and proc.alive(command):
+            os.kill(command.pid, signal.SIGTERM)
 
 
 def test_stop_first_ends_the_run_this_process_holds_a_place_for(fenced):
