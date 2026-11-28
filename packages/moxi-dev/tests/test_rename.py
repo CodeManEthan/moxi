@@ -129,7 +129,7 @@ old()
 thing.old
 lookup = "old"
 ''',
-        "packages/q/src/q/note.py": "# `old`\n",
+        "packages/q/src/q/note.py": "import p.x\n# `old`\n",
     })
     renames = table(tmp_path,
                     row("packages/p/src/p/x.py", "-", "name", "old", "fresh"),
@@ -189,6 +189,27 @@ def test_a_row_whose_scope_is_gone_reports_no_leftover(tmp_path, capsys):
     assert "0 leftovers" in capsys.readouterr().out
 
 
+def test_a_row_reports_leftovers_only_where_a_use_could_reach_it(tmp_path, capsys):
+    path, fake = "packages/p/src/p/impl.py", "packages/p/tests/test_fake.py"
+    root = repo(tmp_path, {
+        path: "def fresh():\n    return 1\n",
+        "packages/p/src/p/__init__.py": "",
+        "packages/p/src/p/api/__init__.py": "from p.impl import fresh\n",
+        fake: "def send(message, *, fail=False):\n    return message\nlink.send(1, 2)\n",
+        "packages/q/src/q/dotted.py": "import p.impl\nvalue = p.impl.old\n",
+        "packages/r/src/r/via.py": "import p.api\np.api.old()\n",
+        "packages/s/src/s/far.py": "link.old()\nlink.send(1, 2)\n# `old`\n",
+    })
+    renames = table(tmp_path, row(path, "-", "name", "old", "fresh"),
+                    row(fake, "send", "kwonly", "fail", "fail"))
+    assert rename.run(root, renames, dry_run=True) == 1
+    out = capsys.readouterr().out
+    assert f"{fake}:3: unresolved send call still passes parameter 'fail' by position" in out
+    assert "packages/q/src/q/dotted.py:2: unresolved attribute still uses 'old'" in out
+    assert "packages/r/src/r/via.py:2: unresolved call still uses 'old'" in out
+    assert "packages/s/" not in out
+
+
 def test_kwonly_constructor_rewrites_resolved_calls_and_flags_unresolved_ones(tmp_path,
                                                                               capsys):
     root = repo(tmp_path, {
@@ -200,7 +221,7 @@ class Cls:
 good = Cls(1, 2)
 ''',
         "packages/q/src/q/use.py": "from p.model import Cls\nother = Cls(3, 4)\n",
-        "packages/q/src/q/unknown.py": "def f(Cls):\n    return Cls(5, 6)\n",
+        "packages/q/src/q/unknown.py": "import p.model\ndef f(Cls):\n    return Cls(5, 6)\n",
     })
     renames = table(tmp_path,
                     row("packages/p/src/p/model.py", "Cls.__init__", "kwonly", "dim", "dim"))
@@ -427,24 +448,28 @@ def test_use_rows_on_one_line_apply_together_and_keep_covers_a_later_keyword_lin
     root = repo(tmp_path, {
         "packages/p/src/p/x.py": "def fn(wait=1, timeout=1):\n    return wait\n",
         "packages/q/src/q/use.py": '''
+import p.x
 fn = load()
 fn(wait=1, timeout=2) or other.wait
-proc.join(1,
-          timeout=3)
+other.fn(1,
+         timeout=3)
 ''',
     })
     line = "fn(wait=1, timeout=2) or other.wait"
-    renames = table(tmp_path,
-                    row("packages/p/src/p/x.py", "fn", "name", "wait", "wait_s"),
-                    row("packages/p/src/p/x.py", "fn", "name", "timeout", "timeout_s"),
-                    row("packages/q/src/q/use.py", line, "use", "wait=", "wait_s="),
-                    row("packages/q/src/q/use.py", line, "use", "timeout=", "timeout_s="),
+    uses = (row("packages/p/src/p/x.py", "fn", "name", "wait", "wait_s"),
+            row("packages/p/src/p/x.py", "fn", "name", "timeout", "timeout_s"),
+            row("packages/q/src/q/use.py", line, "use", "wait=", "wait_s="),
+            row("packages/q/src/q/use.py", line, "use", "timeout=", "timeout_s="))
+    renames = table(tmp_path, *uses,
                     row("packages/q/src/q/use.py", "timeout=3)", "keep", "timeout", "timeout"))
     assert rename.run(root, renames) == 0
     text = (root / "packages/q/src/q/use.py").read_text()
     assert "fn(wait_s=1, timeout_s=2) or other.wait" in text and "timeout=3)" in text
     assert rename.run(root, renames, dry_run=True) == 0
     assert "0 to apply, 5 applied, 0 not here" in capsys.readouterr().out
+    assert rename.run(root, table(tmp_path, *uses), dry_run=True) == 1
+    assert ("packages/q/src/q/use.py:6: unresolved call still passes keyword 'timeout'"
+            in capsys.readouterr().out)
 
 
 def test_a_keep_row_on_a_line_a_use_row_changes_stays_applied(tmp_path, capsys):
@@ -852,8 +877,9 @@ def test_rows_whose_file_is_there_keep_their_meaning(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "2 to apply, 1 applied, 2 not here, 0 dead" in out
     assert "dead:" not in out
-    # A module-level name is still looked for in every file, and a keyword-only
-    # parameter's keyword at every unresolved call.
+    # A module-level name is still looked for where the row reaches (here, its own
+    # package), and a keyword-only parameter's keyword at every unresolved call by its
+    # function's name.
     assert f"{path}:8: unresolved attribute still uses 'stray'" in out
     assert f"{path}:8: string lookup still names 'stray'" in out
     assert f"{path}:7: unresolved call still passes keyword 'b'" in out

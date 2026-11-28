@@ -8303,6 +8303,7 @@ moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row("p
 moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "Clock", "name", "age_seconds", "age_s"),	keep	age_seconds	age_seconds
 moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "launch", "name", "environ", "env"),	keep	environ	environ
 moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "show", "name", "e", "exc"))	keep	show	show
+moxi-dev	packages/moxi-dev/tests/test_rename.py	renames = table(tmp_path, row(path, "stale", "name", "folder", "folder_dir"))	keep	folder	folder
 moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/model.py", "Clock", "name", "age_seconds", "age_s"))	keep	age_seconds	age_seconds
 moxi-dev	packages/moxi-dev/tests/test_rename.py	row("packages/p/src/p/paths.py", '"""The home is `HOME`, or `HOME`\'s value."""',	keep	HOME	HOME
 moxi-dev	packages/moxi-dev/tests/test_rename.py	row(path, "-", "name", "folder", "work_dir_fixture"),	keep	folder	folder

@@ -1123,6 +1123,51 @@ def transformed(project: Project, edits: dict[str, list[Edit]], rows: Sequence[R
 _BUILTINS = frozenset(dir(builtins))
 
 
+def _package_dir(path: str) -> str | None:
+    """The `packages/<p>` folder a file is in."""
+    parts = PurePosixPath(path).parts
+    return "/".join(parts[:2]) if len(parts) > 2 and parts[0] == "packages" else None
+
+
+def _homes(source: Source) -> set[str]:
+    """The modules a file's settled names point into."""
+    found = set()
+    for value in source.aliases.values():
+        if value.startswith("mod:"):
+            found.add(value[4:])
+        elif value.startswith("sym:"):
+            found.add(value.split(":", 2)[1])
+    return found
+
+
+def _imported(project: Project, source: Source, homes: dict[str, set[str]]) -> set[str]:
+    """The modules a file imports, read from its import statements wherever they sit:
+    every dotted prefix of an `import a.b.c`, a from-import's module (resolved when
+    relative) and that module's `.name`, and the modules its settled names point into.
+    A package `__init__` it imports adds every module its own names point into. `homes`
+    caches those per module."""
+    found: set[str] = set()
+    for node in source.nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                found.update(".".join(parts[:end]) for end in range(1, len(parts) + 1))
+        elif isinstance(node, ast.ImportFrom):
+            module = _relative(source.module, node.level, node.module,
+                               package=source.path.endswith("/__init__.py"))
+            found.add(module)
+            found.update(f"{module}.{alias.name}" for alias in node.names
+                         if alias.name != "*")
+    found |= _homes(source)
+    for module in list(found):
+        other = project.modules.get(module)
+        if other is not None and other.path.endswith("/__init__.py"):
+            if module not in homes:
+                homes[module] = _homes(other)
+            found |= homes[module]
+    return found
+
+
 def _bound(source: Source) -> set[str]:
     """Every bare name the file binds anywhere, `*` for a star import among them."""
     return {name for one in source.nodes for name in _binds(one)}
@@ -1170,16 +1215,31 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
     kwonly = [(row, target, _function_name(row)) for row, target in targets
               if row.kind == "kwonly"]
     # A parameter's or a local's name means something only in its function, so a cite of
-    # it is looked for in its own file; any other old name is looked for everywhere.
+    # it is looked for in its own file; any other old name is looked for where the row
+    # reaches.
     inner = ("parameter", "local")
-    everywhere = {row.old for row, target in targets if target.kind not in inner}
     own: dict[str, set[str]] = {}
+    by_package: dict[str, set[str]] = {}
+    by_module: dict[str, set[str]] = {}
     for row, target in targets:
         if target.kind in inner and row.old != row.new:
             own.setdefault(row.path, set()).add(row.old)
+        elif target.kind not in inner:
+            by_package.setdefault(_package_dir(row.path) or "", set()).add(row.old)
+            by_module.setdefault(project.sources[row.path].module, set()).add(row.old)
+    homes: dict[str, set[str]] = {}
     for source in project.sources.values():
         def is_covered(line: int) -> bool:
             return (source.path, source.line_text(line).strip()) in covered
+
+        # A row's test runs in a file only if the row reaches it: the file is in the
+        # row's package or imports the row's module.
+        here = _package_dir(source.path)
+        imported = _imported(project, source, homes)
+
+        def reach(row: Row) -> bool:
+            return (here is not None and _package_dir(row.path) == here) \
+                or project.sources[row.path].module in imported
 
         bound = _bound(source)
         star = "*" in bound
@@ -1190,10 +1250,11 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                 # function's name.
                 passed = [keyword for keyword in node.keywords if any(
                     target.kind in ("parameter", "field") and _calls(row, name)
-                    for row, target in by_old.get(keyword.arg, ()))]
+                    and reach(row) for row, target in by_old.get(keyword.arg, ()))]
                 # A call never reaches a parameter outside its function.
                 named = [(row, target) for row, target in by_old.get(name, ())
-                         if row.kind == "name" and target.kind not in inner] if name else []
+                         if row.kind == "name" and target.kind not in inner
+                         and reach(row)] if name else []
                 # A builtin the file never binds is the builtin, but in the row's own
                 # file, where the rename took its definition away, or past a star import.
                 if (named and isinstance(node.func, ast.Name) and name in _BUILTINS
@@ -1205,6 +1266,7 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                 positional = [(row, target, function_name)
                               for row, target, function_name in kwonly
                               if name == function_name and target.position is not None
+                              and reach(row)
                               and (len(node.args) > target.position or any(
                                   isinstance(argument, ast.Starred)
                                   for argument in node.args[:target.position + 1]))]
@@ -1239,8 +1301,8 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                                        f"unresolved call still uses {name!r}"))
             elif isinstance(node, ast.Attribute):
                 # A parameter or a local is never an attribute; any other old name can be.
-                if not any(target.kind not in inner
-                           for _row, target in by_old.get(node.attr, ())):
+                if not any(target.kind not in inner and reach(row)
+                           for row, target in by_old.get(node.attr, ())):
                     continue
                 if is_covered(node.lineno):
                     continue
@@ -1249,13 +1311,17 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                     found.add(Leftover(source.path, node.lineno,
                                        f"unresolved attribute still uses {node.attr!r}"))
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if not any(target.kind not in inner
-                           for _row, target in by_old.get(node.value, ())):
+                if not any(target.kind not in inner and reach(row)
+                           for row, target in by_old.get(node.value, ())):
                     continue
                 if not is_covered(node.lineno):
                     found.add(Leftover(source.path, node.lineno,
                                        f"string lookup still names {node.value!r}"))
-        cited = everywhere | own.get(source.path, set())
+        cited = set(own.get(source.path, ()))
+        if here is not None:
+            cited |= by_package.get(here, set())
+        for module in imported:
+            cited |= by_module.get(module, set())
         if not cited or "`" not in source.text:
             continue
         cite = re.compile(r"`(" + "|".join(re.escape(old) for old in
