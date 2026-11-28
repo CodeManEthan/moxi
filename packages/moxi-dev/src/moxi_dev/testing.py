@@ -322,7 +322,9 @@ from typing import Any, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from moxi.files import LOCK_FD_ENV
 from moxi.paths import ANCHOR_HOME_ENV, HOME_ENV
+from moxi.proc import LIFELINE_ENV, RUN_TAG_ENV
 from moxi.terminal import STARTED_BY_ENV
 
 from moxi_dev import temp
@@ -456,8 +458,10 @@ MOXI_ENV_PREFIX = "MOXI_"
 #: check` and `moxi-dev timed` set for each run they start.
 TEST_PREFIX_ENV = "MOXI_TEST_"
 #: The Moxi names the clear keeps by name: the start mark, which the check sets in CI
-#: too, and the one home for every module's roots.
-KEPT_MOXI_ENV = (STARTED_BY_ENV, HOME_ENV)
+#: too, the one home for every module's roots, and what the core sets for a child it
+#: starts: the tag that names a run so its every process can be ended, the lifeline's
+#: descriptor and the core lock's descriptor.
+KEPT_MOXI_ENV = (STARTED_BY_ENV, HOME_ENV, RUN_TAG_ENV, LIFELINE_ENV, LOCK_FD_ENV)
 #: The locators the clear keeps besides `MOXI_HOME`: a module's root, `MOXI_<NAME>_HOME`
 #: (`MOXI_ANCHOR_HOME` among them), or its runtime directory.
 KEPT_LOCATOR = re.compile(r"MOXI_[A-Z0-9_]+_(?:HOME|RUNTIME_DIR)")

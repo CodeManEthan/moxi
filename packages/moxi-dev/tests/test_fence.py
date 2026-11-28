@@ -685,6 +685,7 @@ RUN_SOURCE = {
     "MOXI_TEST_WORKERS": "2", "MOXI_TEST_TEMP": "disk", "MOXI_STARTED_BY": "moxi-dev",
     "MOXI_HOME": "/m", "MOXI_COMMS_HOME": "/m/comms", "MOXI_ANCHOR_HOME": "/home/you",
     "MOXI_COMMS_STATE_HOME": "/m/s", "MOXI_COMMS_RUNTIME_DIR": "/run/m",
+    "MOXI_RUN_TAG": "check-7", "MOXI_LIFELINE_FD": "5", "MOXI_CORE_LOCK_FD": "6",
 }
 
 
@@ -869,7 +870,7 @@ def test_a_run_clears_the_session_for_every_scope_and_child_and_keeps_its_inputs
         pytester, monkeypatch, tmp_path):
     kept = {"MOXI_TEST_WORKERS": "2", "MOXI_STARTED_BY": "moxi-dev",
             "MOXI_HOME": str(tmp_path / "m"), "MOXI_COMMS_HOME": str(tmp_path / "c"),
-            "MOXI_X_INPUT": "given"}
+            "MOXI_X_INPUT": "given", "MOXI_RUN_TAG": "check-7"}
     for name, value in {**SESSION_SOURCE, **kept}.items():
         if name != "NoDefaultCurrentDirectoryInExePath" or not testing.WINDOWS:
             monkeypatch.setenv(name, value)

@@ -6,6 +6,7 @@
   to the shell, its page servers and the `moxi` commands they run, so inside a test run
   the core's agent test answers there as it does in the test: a save that turns a timer
   on is judged the same inside an agent's session and in CI.
+  ui now needs `moxi>=0.1.12`, the core that exports the name.
 - The Settings page draws a table a module keeps in a file of its own (the core's
   `CONFIG_TABLES`; the launcher's launch defaults) as one open block after the module's
   other settings and their `More` line: its title (`table_title`), its line

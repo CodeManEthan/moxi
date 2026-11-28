@@ -25,7 +25,9 @@
   worker, what an agent's session stamps into the run's environment: every name
   starting `CLAUDE`, `CODEX_` or `OPENCODE`, `AI_AGENT`, `GIT_EDITOR`,
   `COREPACK_ENABLE_AUTO_PIN`, `NoDefaultCurrentDirectoryInExePath`, and every `MOXI_` name
-  but the kit's `MOXI_TEST_` names, `MOXI_STARTED_BY`, the locators and the run's inputs.
+  but the kit's `MOXI_TEST_` names, `MOXI_STARTED_BY`, the locators, what the core sets
+  for a child it starts (`MOXI_RUN_TAG`, `MOXI_LIFELINE_FD`, `MOXI_CORE_LOCK_FD`) and the
+  run's inputs. The kit now needs `moxi>=0.1.12`.
   A pytest plugin declares the inputs it reads in a module-level `RUN_INPUT_ENV` tuple,
   which the kit keeps, and the contract check (check 5) refuses a `MOXI_` read in a
   module's plugin file that its `RUN_INPUT_ENV` doesn't name.
