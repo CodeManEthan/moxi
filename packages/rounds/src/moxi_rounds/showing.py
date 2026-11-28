@@ -295,11 +295,17 @@ def _history(found: Shown) -> list:
     return list(found.state.history)
 
 
-def history_of(event: dict) -> str | None:
+def history_of(event: dict, *, here: bool = False) -> str | None:
     """What an event of the history is of, in a word or a few: the id it gave or
     names, its stage, for a change of flow the flow left and the one taken up, for a
     change of lead the lead before and the new one, or for a change to a stage what
-    changed."""
+    changed. A folder a finish left is given as the record holds it (`~` for the home
+    folder), or with `here` as the place it names on this machine, as the build's own
+    lines give it."""
+
+    def place(where: object) -> object:
+        return places.expand_home(where) if here and isinstance(where, str) else where
+
     of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
@@ -323,13 +329,14 @@ def history_of(event: dict) -> str | None:
         landed = ("" if event.get("landing") is None
                   else f", landing {str(event.get('landing'))[:12]}")
         kept = event.get("kept")
-        kept = (f", kept {kept.get('where')}: {kept.get('why')}"
+        kept = (f", kept {place(kept.get('where'))}: {kept.get('why')}"
                 if isinstance(kept, Mapping) else "")
         of = (f"{event.get('stage')} {event.get('id')}: {event.get('state')}{landed}"
               f"{kept}")
     if event.get("type") == finish_actions.KEPT:
-        of = (f"{event.get('stage')} {event.get('what')} {event.get('where')}: "
-              f"{event.get('why')}")
+        where = (event.get("where") if event.get("what") == finish_actions.BRANCH
+                 else place(event.get("where")))
+        of = f"{event.get('stage')} {event.get('what')} {where}: {event.get('why')}"
     if event.get("type") == "lock.cleared":
         of = f"{event.get('ref')}, held by {event.get('holder')}"
     if event.get("type") == sizing.SIZED:
@@ -346,7 +353,7 @@ def history_of(event: dict) -> str | None:
 def _history_lines(events: list) -> list[str]:
     lines = [f"history: {len(events)} event{'' if len(events) == 1 else 's'}"]
     for event in events:
-        of = history_of(event)
+        of = history_of(event, here=True)
         lines.append(f"  {event.get('n')}  {event.get('at')}  {event.get('actor')}  "
                      f"{event.get('type')}{f'  {of}' if of else ''}")
     return lines

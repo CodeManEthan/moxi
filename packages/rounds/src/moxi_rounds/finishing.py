@@ -554,12 +554,12 @@ def _clean_up(state: states.State, name: str, build: builds.Build, tip: str,
         cleaned, unread = sweeping.remove_build_dirs(
             name, commissioned, (removal.SCRATCH,), stage=build.stage,
             settings=settings, env=env, after_gate=True)
-        stays_why = ("no merge action put the work on the target, so the worktree and "
-                     "the branch stay")
+        branch = _is_branch(root, build.branch)
+        stays_why = _no_merge_why(worktree=removal.WORKTREE in there, branch=branch)
         stays = tuple(removal.Kept(there[kind], "no merge", stays_why, kind=kind)
                       for kind in there if kind == removal.WORKTREE)
         return _Cleaned(cleaned.removed, stays + cleaned.kept, unscanned=unread,
-                        branch_kept=stays_why if _is_branch(root, build.branch) else None)
+                        branch_kept=stays_why if branch else None)
     try:
         now = Git(root).branch(build.branch)
         why = (f"the branch {build.branch} is gone" if now is None else
@@ -595,6 +595,15 @@ KEEP_BRANCH = "the repo's keep_branch setting keeps it"
 
 def _kept_branch(cleaned: removal.Removed, why: str, unread: tuple[str, ...]) -> _Cleaned:
     return _Cleaned(cleaned.removed, cleaned.kept, f"kept: {why}", unread, branch_kept=why)
+
+
+def _no_merge_why(*, worktree: bool, branch: bool) -> str:
+    """Why what a finish with no merge leaves stays, naming only what is there: the
+    worktree, the branch, or both."""
+    stays = [one for one, there in (("the worktree", worktree), ("the branch", branch))
+             if there]
+    return (f"no merge action put the work on the target, so {' and '.join(stays)} "
+            f"{'stay' if len(stays) > 1 else 'stays'}")
 
 
 def _is_branch(root: Path, branch: str) -> bool:

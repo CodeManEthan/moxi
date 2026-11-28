@@ -894,7 +894,7 @@ def event_step(event: Mapping) -> tuple[str | None, str | None]:
 def _event(event: Mapping) -> dict:
     return {"n": event.get("n"), "at": event.get("at"), "by": event.get("actor"),
             "type": event.get("type"), "words": type_words(event.get("type")),
-            "of": showing.history_of(dict(event))}
+            "of": showing.history_of(dict(event), here=True)}
 
 
 def events_of(part_: Part, column: str | None, stage: str | None) -> list[dict]:

@@ -123,9 +123,14 @@ def test_a_push_with_no_merge_pushes_the_branch_at_the_tip(ready, repo, configur
     assert actions_of(path) == [("push", "ok")] and ended(path) == builds.FINISHED
 
 
+def kept_of(path: Path) -> list[tuple[str, str]]:
+    return [(one["what"], one["why"]) for one in log.read_round(path)
+            if one["type"] == finishing.KEPT]
+
+
 def test_with_no_merge_the_cleanup_removes_only_the_scratch_dir(ready, repo,
                                                                    configure):
-    _path, tree = ready
+    path, tree = ready
     configure('{ do = "push", remote = "origin" }')
 
     done = finishing.finish(ROUND, "B1", by="coder")
@@ -134,6 +139,25 @@ def test_with_no_merge_the_cleanup_removes_only_the_scratch_dir(ready, repo,
     assert not scratch.exists() and tree.root.is_dir()
     assert [(one.check, one.kind) for one in done.kept] == [("no merge", "worktree")]
     assert done.branch is None and repo.rev("work") == tree.rev()
+    why = ("no merge action put the work on the target, so the worktree and the "
+           "branch stay")
+    assert done.kept[0].why == why
+    assert kept_of(path) == [("worktree", f"no merge: {why}"), ("branch", why)]
+
+
+def test_with_no_merge_and_the_worktree_gone_only_the_branch_is_said_to_stay(
+        ready, repo, configure):
+    path, tree = ready
+    configure('{ do = "push", remote = "origin" }')
+    tip = tree.rev()
+    repo.git("worktree", "remove", "--force", str(tree.root))
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert ended(path) == builds.FINISHED and repo.rev("work") == tip
+    assert [one.kind for one in done.kept] == []
+    assert kept_of(path) == [
+        ("branch", "no merge action put the work on the target, so the branch stays")]
 
 
 def test_a_push_git_refuses_is_recorded_failed(ready, repo, configure):

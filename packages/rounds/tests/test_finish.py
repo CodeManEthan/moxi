@@ -704,6 +704,28 @@ def test_show_lists_what_a_finish_kept_a_merge_checkout_included(
         ("checkout", str(place)), ("worktree", made["worktree"]), ("branch", "work")]
 
 
+def test_show_s_history_gives_a_kept_worktree_as_the_place_it_names_here(
+        ready, repo, monkeypatch, capsys):
+    path, tree = ready
+    ignored_file_in(repo, tree)
+    # The worktree is under the home folder, so its record holds it from `~`.
+    monkeypatch.setenv("HOME", str(tree.root.parent))
+    monkeypatch.setenv("USERPROFILE", str(tree.root.parent))
+    finishing.finish(ROUND, "B1", by="coder")
+    (worktree, branch) = of_type(path, "finish.kept")
+    assert worktree["where"] == "~" + os.sep + tree.root.name
+    capsys.readouterr()
+
+    assert main(["show", ROUND]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    (kept,) = [line for line in lines if f"  {worktree['n']}  " in line
+               and "finish.kept" in line]
+    assert kept.endswith(f"finish.kept  B1 worktree {tree.root}: {worktree['why']}")
+    (stays,) = [line for line in lines if f"  {branch['n']}  " in line
+                and "finish.kept" in line]
+    assert stays.endswith(f"finish.kept  B1 branch work: {branch['why']}")
+
+
 def kept_write_locked(monkeypatch, holder, name: str = ROUND) -> None:
     """Make the write of what a finish left find the round's lock held by another
     process: it waits a short while and fails, and the lock goes once it has."""

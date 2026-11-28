@@ -70,7 +70,9 @@
   merge added and could not remove is recorded in the merge's own record. The build
   still finishes. A queue landing records them the same way.
 - `moxi rounds show` lists what each build's finish left, under the build, and `--json`
-  gives them as the build's `kept`. A round's card on the page counts them.
+  gives them as the build's `kept`. A round's card on the page counts them. Show's
+  history and the page's events give a kept folder as the place it names on this
+  machine, as the build's lines do; the record and the round's note keep it from `~`.
 
 ## 0.1.5 (unreleased)
 
