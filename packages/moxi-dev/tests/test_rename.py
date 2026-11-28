@@ -124,7 +124,7 @@ def test_each_leftover_kind_is_reported(tmp_path, capsys):
         "packages/p/src/p/x.py": '''
 def fresh(timeout):
     pass
-unknown(timeout=1)
+thing.fresh(timeout=1)
 old()
 thing.old
 lookup = "old"
@@ -139,6 +139,54 @@ lookup = "old"
     for phrase in ("unresolved call still passes keyword", "unresolved call still uses",
                    "unresolved attribute", "string lookup", "comment still cites"):
         assert phrase in out
+
+
+def test_a_keyword_is_a_leftover_only_on_a_call_by_its_function_name(tmp_path, capsys):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: '''
+def fn(wait):
+    return wait
+class Base:
+    def __init__(self, wait):
+        self.wait_s = wait
+class Child(Base):
+    def __init__(self):
+        super().__init__(wait=1)
+other.fn(wait=2)
+parser.add(wait=3)
+'''})
+    renames = table(tmp_path, row(path, "fn", "name", "wait", "wait_s"),
+                    row(path, "Base.__init__", "name", "wait", "wait_s"))
+    assert rename.run(root, renames, dry_run=True) == 1
+    out = capsys.readouterr().out
+    assert f"{path}:9: unresolved call still passes keyword 'wait'" in out
+    assert f"{path}:10: unresolved call still passes keyword 'wait'" in out
+    assert f"{path}:11:" not in out
+
+
+def test_a_builtin_call_is_a_leftover_only_where_the_name_can_be_the_row_s(tmp_path,
+                                                                           capsys):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {
+        path: "def put(value):\n    return value\nset()\n",
+        "packages/p/src/p/y.py": "items = set()\n",
+        "packages/p/src/p/z.py": "def go(load):\n    set = load()\n    return set(1)\n",
+    })
+    renames = table(tmp_path, row(path, "-", "name", "set", "put"))
+    assert rename.run(root, renames, dry_run=True) == 1
+    out = capsys.readouterr().out
+    assert f"{path}:3: unresolved call still uses 'set'" in out
+    assert "packages/p/src/p/z.py:3: unresolved call still uses 'set'" in out
+    assert "y.py" not in out
+
+
+def test_a_row_whose_scope_is_gone_reports_no_leftover(tmp_path, capsys):
+    path = "packages/p/src/p/x.py"
+    root = repo(tmp_path, {path: "def fresh(folder_dir):\n    return folder_dir\n"
+                                 "name = 'folder'\n"})
+    renames = table(tmp_path, row(path, "stale", "name", "folder", "folder_dir"))
+    assert rename.run(root, renames, dry_run=True) == 0
+    assert "0 leftovers" in capsys.readouterr().out
 
 
 def test_kwonly_constructor_rewrites_resolved_calls_and_flags_unresolved_ones(tmp_path,

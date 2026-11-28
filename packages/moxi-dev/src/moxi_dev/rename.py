@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 import io
 import re
 import subprocess
@@ -674,27 +675,34 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.
            ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 
+def _binds(one: ast.AST) -> Sequence[str]:
+    """The bare names node `one` binds: an argument, an assigned or loop name, a def or
+    class, an import, an except or match name, a global or nonlocal."""
+    if isinstance(one, ast.Name):
+        return () if isinstance(one.ctx, ast.Load) else (one.id,)
+    if isinstance(one, ast.arg):
+        return (one.arg,)
+    if isinstance(one, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return (one.name,)
+    if isinstance(one, ast.alias):
+        return (one.asname or one.name.split(".")[0],)
+    if isinstance(one, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return (one.name,) if one.name else ()
+    if isinstance(one, (ast.Global, ast.Nonlocal)):
+        return one.names
+    return ()
+
+
 def _names(node: ast.AST, name: str, *, stored: bool = False) -> list[ast.AST]:
-    """The nodes under `node` that bind `name` as a bare name (an argument, an assigned
-    or loop name, a def or class, an import, an except or match name, a global or
-    nonlocal), and, unless `stored`, those that read it. `node`'s own name is not one:
-    the scope around it binds that."""
+    """The nodes under `node` that bind `name` as a bare name (any `_binds` finds), and,
+    unless `stored`, those that read it. `node`'s own name is not one: the scope around
+    it binds that."""
     found = []
     for one in ast.walk(node):
         if isinstance(one, ast.Name) and one.id == name:
             if not stored or not isinstance(one.ctx, ast.Load):
                 found.append(one)
-        elif isinstance(one, ast.arg) and one.arg == name:
-            found.append(one)
-        elif (isinstance(one, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-              and one.name == name and one is not node):
-            found.append(one)
-        elif isinstance(one, ast.alias) and (one.asname or one.name.split(".")[0]) == name:
-            found.append(one)
-        elif isinstance(one, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) \
-                and one.name == name:
-            found.append(one)
-        elif isinstance(one, (ast.Global, ast.Nonlocal)) and name in one.names:
+        elif one is not node and name in _binds(one):
             found.append(one)
     return found
 
@@ -1112,6 +1120,35 @@ def transformed(project: Project, edits: dict[str, list[Edit]], rows: Sequence[R
     return texts
 
 
+_BUILTINS = frozenset(dir(builtins))
+
+
+def _bound(source: Source) -> set[str]:
+    """Every bare name the file binds anywhere, `*` for a star import among them."""
+    return {name for one in source.nodes for name in _binds(one)}
+
+
+def _scope_gone(project: Project, row: Row) -> bool:
+    """Whether a `name` or `kwonly` row names a scope its file no longer has: it has no
+    target left to reach."""
+    return row.scope != "-" and row.scope not in project.sources[row.path].scopes
+
+
+def _function_name(row: Row) -> str:
+    """The name a call of a row's function goes by: the last part of its scope, the
+    class's for an `__init__`."""
+    if row.scope.endswith(".__init__"):
+        return row.scope.rsplit(".", 2)[-2]
+    return row.scope.rsplit(".", 1)[-1]
+
+
+def _calls(row: Row, name: str | None) -> bool:
+    """Whether a call named `name` may be one of the row's function: by its name, or as
+    `super().__init__(...)` for an `__init__`."""
+    return name == _function_name(row) or (name == "__init__"
+                                            and row.scope.endswith(".__init__"))
+
+
 def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
     found: set[Leftover] = set()
     covered = {(row.path, row.scope) for row in rows if row.kind in ("use", "keep")}
@@ -1123,19 +1160,15 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
             uses.setdefault((row.path, row.scope), []).append(row)
     covered |= {(path, _used(scope, group)) for (path, scope), group in uses.items()}
     # A dead row's target has no kind, which would read as a name used everywhere: its
-    # old name is no leftover anywhere.
+    # old name is no leftover anywhere. So is a row's whose scope its file no longer has.
     targets = [(row, _target(project, row)) for row in rows
-               if row.kind in ("name", "kwonly") and not _dead(project, row)]
+               if row.kind in ("name", "kwonly") and not _dead(project, row)
+               and not _scope_gone(project, row)]
     by_old: dict[str, list[tuple[Row, Target]]] = {}
     for row, target in targets:
         by_old.setdefault(row.old, []).append((row, target))
-    kwonly = []
-    for row, target in targets:
-        if row.kind == "kwonly":
-            function_name = row.scope.rsplit(".", 1)[-1]
-            if row.scope.endswith(".__init__"):
-                function_name = row.scope.rsplit(".", 2)[-2]
-            kwonly.append((row, target, function_name))
+    kwonly = [(row, target, _function_name(row)) for row, target in targets
+              if row.kind == "kwonly"]
     # A parameter's or a local's name means something only in its function, so a cite of
     # it is looked for in its own file; any other old name is looked for everywhere.
     inner = ("parameter", "local")
@@ -1148,14 +1181,25 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
         def is_covered(line: int) -> bool:
             return (source.path, source.line_text(line).strip()) in covered
 
+        bound = _bound(source)
+        star = "*" in bound
         for node in source.nodes:
             if isinstance(node, ast.Call):
                 name = _call_name(node)
+                # A keyword reaches a parameter or a field only on a call by its
+                # function's name.
                 passed = [keyword for keyword in node.keywords if any(
-                    target.kind != "local" for _row, target in by_old.get(keyword.arg, ()))]
+                    target.kind in ("parameter", "field") and _calls(row, name)
+                    for row, target in by_old.get(keyword.arg, ()))]
                 # A call never reaches a parameter outside its function.
                 named = [(row, target) for row, target in by_old.get(name, ())
                          if row.kind == "name" and target.kind not in inner] if name else []
+                # A builtin the file never binds is the builtin, but in the row's own
+                # file, where the rename took its definition away, or past a star import.
+                if (named and isinstance(node.func, ast.Name) and name in _BUILTINS
+                        and name not in bound and not star):
+                    named = [(row, target) for row, target in named
+                             if row.path == source.path]
                 # A star at or before the position may reach it however few arguments
                 # the call spells.
                 positional = [(row, target, function_name)
