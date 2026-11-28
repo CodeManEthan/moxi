@@ -336,8 +336,8 @@ def test_when_a_message_would_be_read_held_for_a_cold_cache_live_for_a_warm_one(
     expect(root.locator('[data-part="box"] [data-line="deliver"]')).to_have_text("at its next turn")
 
 
-def test_on_the_small_install_every_message_is_read_live(page_shell, rig, ui_contexts,
-                                                          monkeypatch):
+def test_on_the_small_install_a_message_is_delivered_unchecked(page_shell, rig, ui_contexts,
+                                                               monkeypatch):
     cache_absent(monkeypatch)
     cold_shim(rig, PLANNER)
     rig.shim(**REVIEWER)
@@ -350,8 +350,10 @@ def test_on_the_small_install_every_message_is_read_live(page_shell, rig, ui_con
         expect(agent(root, name)).not_to_have_attribute("fact", re.compile(r"."))
         expect(agent(root, name)).not_to_have_attribute("where", re.compile(r"."))
     agent(root, P).locator('[data-action="message"]').click()
+    # With no cache to read, comms delivers it now but can't say the cache is warm.
     expect(root.locator('[data-line="dry"]')).to_contain_text(
-        "Delivered. planner reads it at its next turn boundary.")
+        "Delivered, unchecked: comms can't read planner's cache, so this may wake it from a "
+        "cold cache.")
     expect(root.locator('[data-part="box"] [data-action="deliver"]')).to_have_count(0)
     expect(root.locator('[data-part="box"] [data-line="deliver"]')).to_have_count(0)
 
