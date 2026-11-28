@@ -486,14 +486,14 @@ def test_a_descendant_no_scan_saw_is_killed_though_the_child_dies_at_once(tmp_pa
         grandchild = int(child.stdout.readline())
         watch = _watch.Watch(child.pid, proc.identity(child.pid).started)
         assert watch.watched == {}
-        send = watch._send
+        send = _watch._send
 
-        def send_and_let_the_child_die(signum):
-            send(signum)
+        def send_and_let_the_child_die(processes, signum):
+            send(processes, signum)
             if signum == signal.SIGTERM:
                 assert wait_for(lambda: watch.child() is None)
 
-        monkeypatch.setattr(watch, "_send", send_and_let_the_child_die)
+        monkeypatch.setattr(_watch, "_send", send_and_let_the_child_die)
         watch.stop(grace=0.2)
         assert child.wait(timeout=30) == -signal.SIGTERM
         assert wait_for(lambda: gone(grandchild))

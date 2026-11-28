@@ -103,7 +103,9 @@ A module that keeps an act for the person at the keyboard asks `moxi.terminal.ag
 which names the agent (`claude`, `codex` or `opencode`) whose session started the run, or
 None. It reads the process tree and the marks a harness sets, on Windows, macOS and Linux.
 It is a fence, not a lock: a process that clears its environment and runs outside the
-agent's process tree is not caught.
+agent's process tree is not caught. Inside a pytest run that a test kit names, by its pid,
+in `MOXI_TEST_RUN_PID`, it names no harness, so a test run started in an agent's session
+answers as one in CI; a process merely called `pytest` passes nothing.
 
 ## What it does outside its own folders
 
@@ -127,6 +129,15 @@ behalf, and `moxi uninstall` removes what it wrote:
   after the move puts the file back. `moxi.place.move_aside` moves a path no placement
   holds into the same `displaced/` folder the same way, for a module that clears one.
 - Whatever the module's own setup does, which its README describes.
+
+A module that runs a command with `moxi.proc.run(..., end_leftovers=True)` has every
+process that command started ended when it ends, however it ends: the command's process
+group, and every process carrying its `tag` in `MOXI_RUN_TAG`, one that started a session
+of its own included. On Windows the command's Job Object ends its tree, also when the
+module's process dies. A process started with an environment built from scratch that also
+left the group is not reached. This holds with the command's output to a file (`output=`),
+or once its pipes close: with `capture=True`, a leftover that keeps stdout open keeps the
+run waiting until its timeout.
 
 A shortcut (`moxi shortcut`) is a small script written beside the `moxi` on PATH.
 
@@ -181,4 +192,4 @@ shortcut file, or reinstall.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-v0.1.11/packages/moxi/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-v0.1.12/packages/moxi/LICENSE).

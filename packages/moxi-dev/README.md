@@ -6,11 +6,17 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
 - `moxi-dev check` runs the checks a change must pass before it merges: the lock, the
   tag, comment-reference, naming and Ruff checks, the renames step (about 45 s here; see
   below), the release step (see below), the contract's import rules (import-linter and
-  deptry) and the tests of the packages the change reaches, each package's run
-  ending at a bound (see "The bound on each package's run" below). A test in the `slow`,
-  `browser` or `build` tier runs when a path its `touches` mark names changed; `--full`
-  runs every package and every tier but `live`; `--finding L<n>` runs only the tests
-  marked with that finding (see "The tag check" below); `--static` runs only the
+  deptry) and the tests of the packages the change touches, each package's run ending
+  at a bound (see "The bound on each package's run" below). A root file touches the
+  packages whose tests read it, and one no table lists touches every package; no
+  dependent is added. `--with-dependents` picks as CI does: the touched packages, every
+  package that depends on one, and every package when the lock or another root file
+  changes. Outside `--full`, the lock and the static steps run first, and a failed static
+  step stops the check before the packages' steps; a failed import rule stops it before
+  any test runs. A test in the `slow`, `browser` or `build` tier runs when a path its
+  `touches` mark names changed; `--full` runs every package and every tier but `live`,
+  and stops at no static or lint failure; `--finding L<n>` runs only the tests marked
+  with that finding (see "The tag check" below); `--static` runs only the
   whole-tree static steps (see "The code checks" below); `--pick` prints the packages
   the change picks and runs nothing (see below). It runs no `timed` test, in any
   form: it holds each one back and its last line counts them as `timed held <n>`;
@@ -22,9 +28,10 @@ repository's `uv sync` installs it, and no Moxi module depends on it at run time
 - `moxi-dev cap [--] CMD [ARG...]` runs one command in the same kind of memory-capped
   scope.
 - `moxi_dev.testing` is the test kit every package loads from its root `conftest.py`:
-  the fence around each test, the tier markers, the durations each run writes, where a
-  run keeps its temp files (see below) and the helpers tests share (`Seam` for a seam
-  with two implementations among them).
+  the fence around each test, the run-level clear (see "A test run inside an agent's
+  session" below), the tier markers, the durations each run writes, where a run keeps
+  its temp files (see below) and the helpers tests share (`Seam` for a seam with two
+  implementations among them).
 - `moxi_dev.contract` holds the module contract check each package's
   `tests/test_contract.py` runs. `moxi-dev contract [--staged] [PATH]` runs it from a
   shell over any module's directory, inside the repository or not; `--staged` judges
@@ -160,13 +167,15 @@ stamps, web compare, sync, lint or tests, and nothing that needs the network. It
 about 80 to 140 s on this repository, the renames step about 60 s of it, so it suits a
 gate run before a push.
 
-`moxi-dev check --pick [--base REV]` reads the workspace and the changed paths as the
-check does, picks the packages the same way, prints one line, the JSON object
+`moxi-dev check --pick [--with-dependents] [--base REV]` reads the workspace and the
+changed paths as the check does, picks the packages the same way the check with the same
+flags does (the touched packages, or with `--with-dependents` those and their
+dependents), prints one line, the JSON object
 `{"packages": [...]}` with the picked packages' folders under `packages/` in the
 workspace's order, and runs no step. It exits 0, or 2 with the reason on stderr and
 nothing on stdout when the workspace or the base can't be read. The repository's
-`queue.yml` workflow reads it to check a merge queue's candidate: its browser jobs run
-only for the picked packages.
+`queue.yml` workflow reads it, with `--with-dependents`, to check a merge queue's
+candidate: its browser jobs run only for the picked packages.
 
 Run one step without the lock, release, package, lint or test steps with
 `moxi-dev check --only refs [PATH...]`, `moxi-dev check --only names [PATH...]`,
@@ -264,9 +273,12 @@ the text is. A line lets that exact text through in that one file and nowhere el
 A finding is one reported issue: a bug, say, given a name of the form `L<n>`, an L and a
 number. A test that covers it carries the mark `@pytest.mark.finding("L<n>")` with that
 name, and `moxi-dev check --finding L<n>` runs only the tests carrying it in the
-packages the check picks (every package with `--full`), so a fix can be checked against
-just the tests written for it. A finding's name is let through inside the mark's
-arguments and refused everywhere else, like any other id.
+packages the check picks (the touched packages, those and their dependents with
+`--with-dependents`, every package with `--full`), so a fix can be checked against just
+the tests written for it. When no picked package holds such a test, its line says so and
+names `--with-dependents`, since a test in a dependent package may carry it. A
+finding's name is let through inside the mark's arguments and refused everywhere else,
+like any other id.
 
 ## The release step
 
@@ -307,6 +319,36 @@ stopped by one. To install it, put this in `.git/hooks/pre-commit` and make it e
 #!/bin/sh
 exec uv run --locked moxi-dev stamp --staged
 ```
+
+## A test run inside an agent's session
+
+A test run started in an agent's session sees what a run in CI sees, in two parts.
+
+**The run-level clear.** The fence empties each test's environment, but a fixture of
+wider scope, collection and the processes they start see the run's own. So when a run
+starts, before collection, any fixture or any xdist worker, the test kit removes from its
+own environment what a harness or a Moxi module stamps into an agent's session: every
+name starting `CLAUDE`, `CODEX_` or `OPENCODE`, the harness names outside those prefixes
+(`AI_AGENT`, `GIT_EDITOR`, `COREPACK_ENABLE_AUTO_PIN`,
+`NoDefaultCurrentDirectoryInExePath`), and every `MOXI_` name but the kit's own
+`MOXI_TEST_` names, the start mark `MOXI_STARTED_BY`, the locators (`MOXI_HOME`, a
+`MOXI_<NAME>_HOME` or `MOXI_<NAME>_RUNTIME_DIR`) and the run's inputs. A run's input is a
+name the command starting the run sets for a pytest plugin of the run: the plugin lists
+it in a module-level tuple, `RUN_INPUT_ENV`, and the kit keeps every name a plugin loaded
+by then lists. The contract check refuses a `MOXI_` read in a module's plugin file
+(a `src/` file that defines a top-level `pytest_*` function) that its `RUN_INPUT_ENV`
+doesn't name. On Windows names match without case. A variable a test or fixture sets
+later is left alone.
+
+**The run's name.** The core's agent test (`moxi.terminal.agent`) also walks up the
+process tree for a harness. So right after the clear, the run's controlling process sets
+`MOXI_TEST_RUN_PID` to its own pid (an xdist worker keeps its controller's), and the
+fence passes it to each test. The agent test stops at the pytest run that variable names
+and nowhere else: every process of the run that carries it, the children that inherit or
+copy the environment included, answers as in CI, where no harness runs above the suite.
+A child whose environment a test builds from nothing lacks it and answers as it would
+outside a test; pass `MOXI_TEST_RUN_PID` on to it. A pytest run that doesn't load the
+kit, and a process merely called `pytest`, answer as they would anywhere else.
 
 ## Where tests keep their temp files
 

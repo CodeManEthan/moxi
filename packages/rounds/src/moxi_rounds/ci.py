@@ -149,7 +149,9 @@ class Workflow:
 @dataclass(frozen=True)
 class Declared:
     """A repo's `ci` setting: the `workflows`, the words of the `local` command as
-    written (None for `none`) and its `local_timeout_s`, the `remote` to push to, the
+    written with `{memory_mib}` filled from its table (None for `none`), its
+    `local_timeout_s` and `local_memory_mib` (None when it declares none), the
+    `remote` to push to, the
     `ref` template (None where the tip goes to the build's own branch name), the
     `full_ref` template (None for none), the `status`, `ids` and `jobs` commands, and
     `status_timeout_s`."""
@@ -164,6 +166,7 @@ class Declared:
     ref: str | None = None
     jobs: tuple[str, ...] = JOBS
     full_ref: str | None = None
+    local_memory_mib: int | None = None
 
     @property
     def templates(self) -> tuple[str, ...]:
@@ -208,8 +211,10 @@ def declared(settings, repo: str) -> Declared | None:
     is_command = isinstance(local, Mapping)
     return Declared(
         workflows=tuple(_workflow(one) for one in found.get("workflows") or ()),
-        local=tuple(shlex.split(local["command"])) if is_command else None,
+        local=(tuple(own.fill_memory(shlex.split(local["command"]), local)) if is_command
+               else None),
         local_timeout_s=local.get("timeout_s") if is_command else None,
+        local_memory_mib=own.memory_mib(local) if is_command else None,
         remote=found.get("remote"),
         status=tuple(found.get("status") or STATUS),
         ids=tuple(found.get("ids") or IDS),

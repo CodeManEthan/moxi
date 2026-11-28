@@ -56,8 +56,8 @@ uv run moxi-dev check
 
 `uv sync` sets up one environment at the root with every package installed from its
 directory, plus the contributor tools. `moxi-dev check` runs the checks a change must
-pass before it merges. A package's own tests also run from its directory with
-`uv run pytest`.
+pass on the packages it touches; CI also checks every package that depends on them. A
+package's own tests also run from its directory with `uv run pytest`.
 
 A module's web page is TypeScript under `packages/<name>/web/`, built with Node 22 and
 committed as built files, so installing or testing Moxi never needs Node. To change a
