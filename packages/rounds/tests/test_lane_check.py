@@ -272,14 +272,22 @@ def test_a_lane_lost_after_its_place_records_nothing_and_never_falls_back(
     path, _tree, _made = build
     lanes.configure(ssh=[PY, "-c", GONE])
     held = holder(checking.lock_file())
+    said: list[str] = []
+
+    def say(line: str) -> None:
+        # Nothing is said on the way to the lost lane; a line here means the check
+        # passed the lane over or waits in line, so this machine's lock is let go and
+        # the check runs here, and the test fails rather than waits for ever.
+        said.append(line)
+        held.stdin.close()
 
     with pytest.raises(Refused) as caught:
-        checking.check(ROUND, "B1", by="coder")
+        checking.check(ROUND, "B1", by="coder", say=say)
     held.stdin.close()
 
     [unmet] = caught.value.unmet
     assert "was lost mid-run" in unmet.reason and "it may have run there" in unmet.fix
-    assert ran(path) == []
+    assert ran(path) == [] and said == []
 
 
 def test_lane_naming_a_lane_the_project_does_not_send_to_is_refused(build, lanes):
