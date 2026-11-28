@@ -459,12 +459,14 @@ reads adds to it when installed:
 
 - **launcher**, read from its `/api/running`: where each session it runs works, its
   `Session` line with the model and effort the launch was started with, launcher's cache
-  words, the row for a warm session waiting on other agents with nothing keeping it warm,
-  and `Keep warm` on it when launcher can keep it warm. A press is disabled until launcher
-  answers and its next reading comes, or for 20 s; a refusal leads line three with `Not
-  kept warm: <why>` until then. Without launcher, or while its read fails: none of these,
-  the cache fact from comms alone, and the empty state gives the command instead of
-  `Launch one from Home`.
+  words, the next keep-alive at the end of a warm `Cache` line where launcher gives one
+  (`kept warm while 1 agent works, next keep-alive 19:49`, or `next keep-alive due` once
+  that time has come), the row for a warm session waiting on other agents with nothing
+  keeping it warm, and `Keep warm` on it when launcher can keep it warm. A press is
+  disabled until launcher answers and its next reading comes, or for 20 s; a refusal leads
+  line three with `Not kept warm: <why>` until then. Without launcher, or while its read
+  fails: none of these, the cache fact from comms alone, and the empty state gives the
+  command instead of `Launch one from Home`.
 - **connector**: the words `Claude's apps, through the connector` as the where of the
   name the connector's binding holds. Without it, that row has no where.
 - **cache**: the cache fact, `Deliver`, the `held until its next turn` words and the

@@ -1,6 +1,6 @@
 """memory's provider for the connector, the public MCP host: `search_memory`, past
-sessions searched in the Claude apps, made safe for a chat. Offered through one entry
-point:
+sessions searched in the Claude apps, made safe for a chat, and `recall`, a chat's
+subconscious (`recall`). Offered through one entry point:
 
     [project.entry-points."moxi.connector.providers"]
     memory = "moxi_memory.connector:PROVIDER"
@@ -13,15 +13,16 @@ memory names the host's package. When that load fails, importing this package ra
 
 * The tool redacts through secrets' `chat_redact` alone and refuses `redaction-off` when
   it can't, or when memory's `redact.sets` lacks `credentials` or `broad` (`redaction`).
-* At most two calls run at once, each in a thread of its own, ended at 20 seconds: the
-  host's `Limit`, one for the provider. The walk stops itself 16 seconds after the call
-  began (`tool.WALK_S`).
+* At most two calls of each tool run at once, each in a thread of its own, ended at 20
+  seconds: the host's `Limit`, one per tool, so a slow search never delays a `recall`.
+  The walk stops itself 16 seconds after the call began (`tool.WALK_S`); a `recall`'s
+  own work has `recall.CALL_BUDGET_S`.
 * `start(env)` keeps the environment memory's config and index are read with, and never
   raises: a missing index or set shows in `status()`, and the tool refuses per call.
   Until it runs the provider holds no environment: the tool refuses `not-started` and
   the `search` row says it isn't checked yet, so nothing reads the index with the
   environment of the process that imported it.
-* `status()` gives the `search` row and the `redaction` row. The tool refuses
+* `status()` gives the `search` row, the `redaction` row and the `recall` row. The tool refuses
   `no-sessions`, and the `search` row fails saying why, when the sessions installed
   doesn't offer the interface memory reads it at.
 """
@@ -29,11 +30,13 @@ memory names the host's package. When that load fails, importing this package ra
 from __future__ import annotations
 
 import functools
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from moxi import modules
 
+from . import recall as recall_mod
 from . import tool as tool_mod
 from .redaction import Gate, sets_missing
 
@@ -55,16 +58,21 @@ def _interface():
 
 class Memory:
     """The provider's state for one connector process. `gate` opens each call's
-    redaction; `searcher` keyword arguments (`sessions`, `clock`) go to the tool's work
-    (a test hands in its own)."""
+    redaction; `searcher` keyword arguments (`sessions`, `clock`) go to
+    `search_memory`'s work and `recaller` ones (`budget_s`, `spawn`) to `recall`'s (a
+    test hands in its own)."""
 
-    def __init__(self, api, *, gate: Gate | None = None, **searcher: Any):
+    def __init__(self, api, *, gate: Gate | None = None,
+                 recaller: Mapping[str, Any] | None = None, **searcher: Any):
         self.api = api
         self.gate = gate or Gate()
         self.limit = api.Limit()
+        self.recall_limit = api.Limit()
         self.env: dict[str, str] | None = None
         self.searcher = tool_mod.Searcher(api.Result, self.gate, lambda: self.env,
                                           **searcher)
+        self.recaller = recall_mod.Recaller(api.Result, self.gate, lambda: self.env,
+                                            **dict(recaller or {}))
 
     async def start(self, env: Mapping[str, str]) -> None:
         self.env = dict(env)
@@ -74,7 +82,8 @@ class Memory:
 
     def status(self):
         return [self.api.StatusRow(*search_row(self.env, sessions=self.searcher.sessions)),
-                self.api.StatusRow(*self.gate.row())]
+                self.api.StatusRow(*self.gate.row()),
+                self.api.StatusRow(*recall_mod.status_row(self.env))]
 
     async def search_memory(self, args: Mapping[str, Any], ctx) -> Any:
         started = self.searcher.clock()
@@ -83,11 +92,31 @@ class Memory:
         ctx.log(refusal=result.refusal, **logged)
         return result
 
+    async def recall(self, args: Mapping[str, Any], ctx) -> Any:
+        started = time.monotonic()
+        handing = recall_mod.Handing()
+        try:
+            out = await self.recall_limit.run(
+                functools.partial(self.recaller, dict(args), started, handing))
+        except BaseException:
+            handing.abandon()
+            raise
+        result, logged = out if isinstance(out, tuple) else (out, {})
+        if result.is_error:
+            handing.abandon()
+        else:
+            ctx.after_answer(recall_mod.settler(handing))
+        ctx.log(refusal=result.refusal, **logged)
+        return result
+
     def provider(self):
         api = self.api
         tools = (api.Tool("search_memory", tool_mod.DESCRIPTION, tool_mod.INPUT,
                           self.search_memory, output_schema=tool_mod.OUTPUT,
-                          annotations=dict(tool_mod.ANNOTATIONS), title="Search memory"),)
+                          annotations=dict(tool_mod.ANNOTATIONS), title="Search memory"),
+                 api.Tool("recall", recall_mod.DESCRIPTION, recall_mod.INPUT, self.recall,
+                          output_schema=recall_mod.OUTPUT,
+                          annotations=dict(recall_mod.ANNOTATIONS), title="Recall"))
         return api.Provider(tools=tools, start=self.start, stop=self.stop,
                             status=self.status)
 

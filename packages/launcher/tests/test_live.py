@@ -41,7 +41,7 @@ import pytest
 from moxi import config, modules, paths
 from moxi_dev.testing import short_dir, wait_for
 
-from moxi_launcher import (api, catalog, compose, first, handoffs, presets, startup,
+from moxi_launcher import (api, catalog, compose, first, handoffs, presets, seed, startup,
                            store, targets)
 
 pytestmark = [pytest.mark.live,
@@ -106,6 +106,16 @@ def needs_slots() -> None:
         pytest.skip("tmux is not on PATH")
 
 
+def trust_stand_in() -> Path:
+    """The file a launch in this process seeds folder trust in: Claude Code's config file
+    under the fence's own `CLAUDE_CONFIG_DIR`, made empty when missing."""
+    path = Path(os.environ["CLAUDE_CONFIG_DIR"]) / seed.CONFIG_FILE
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+    return path
+
+
 @pytest.fixture
 def own_slots(live_env, monkeypatch):
     """slots on a tmux server of its own, for one test; yields the server's socket.
@@ -116,8 +126,15 @@ def own_slots(live_env, monkeypatch):
     `TMUX_TMPDIR` points into the dir too. On an editable install slots' server is not
     started on demand, so the fixture starts `moxi-slots-server` as the supervisor would
     (tmux's absolute path recorded, `tmux_conf` /dev/null), as slots' own server fixture
-    does, and after the test kills the server, its process group and its socket."""
+    does, and after the test kills the server, its process group and its socket.
+
+    A Claude slot launch seeds its folder's trust in Claude Code's config file, which the
+    launch's real home puts outside the fence. Here the seed writes a stand-in under the
+    fence's own `CLAUDE_CONFIG_DIR` instead (`trust_stand_in`), so the session, reading
+    the real file, shows the folder-trust screen and the launcher answers it."""
     needs_slots()
+    stand_in = trust_stand_in()
+    monkeypatch.setattr(seed, "config_file", lambda env: stand_in)
     with short_dir("mxs-") as home:
         for name in [n for n in os.environ if n.startswith("MOXI_SLOTS_")] + [
                 "TMUX", "TMUX_PANE"]:
@@ -385,10 +402,15 @@ def test_a_slot_launch_without_turns_has_the_brief_as_its_opening_prompt(
             answered = [(e.detail["screen"], e.detail["outcome"])
                         for e in store.events(conn, result.request_id)
                         if e.kind == startup.EVENT]
+            seeds = [e.detail for e in store.events(conn, result.request_id)
+                     if e.kind == seed.EVENT]
         finally:
             conn.close()
         assert answered == ([("CLAUDE_TRUST_DIR", "gone")] if harness == "claude"
                             else []), answered
+        # The seed went to the stand-in in the test's tmp, never the real file.
+        assert seeds == ([{"folder": str(work.resolve()), "file": str(trust_stand_in()),
+                           "outcome": seed.SEEDED}] if harness == "claude" else []), seeds
         # The slot it took now reads occupied by this launch, and a second launch that
         # names it is refused as taken, naming this one.
         [taken] = api.check(api.LaunchRequest(

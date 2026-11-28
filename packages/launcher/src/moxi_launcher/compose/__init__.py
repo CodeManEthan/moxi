@@ -241,7 +241,7 @@ def build(request, resolved, *, env: Mapping[str, str] | None = None,
                   preset_kind=getattr(resolved, "preset_kind", None),
                   preset_name=getattr(resolved, "preset_name", None),
                   env=env, child_env=child_env, modules=modules,
-                  create=create, replay=replay)
+                  create=create, replay=replay if replay is not None else _stamped(request))
     return compose(values, ctx)
 
 
@@ -258,6 +258,14 @@ def _replay(request) -> dict[str, object] | None:
             "resume": bool(getattr(request, "resume_of", None)),
             "fork_of": getattr(request, "fork_of", None) or None,
             "relaunched": relaunched, "extra_stamps": stamped}
+
+
+def _stamped(request) -> dict[str, object] | None:
+    """The `Context` field a fresh request's `stamps` set, or None when it gives none."""
+    stamps = getattr(request, "stamps", None)
+    if not stamps:
+        return None
+    return {"extra_stamps": {str(k): str(v) for k, v in dict(stamps).items()}}
 
 
 def _read(row: str, name: object) -> str | None:

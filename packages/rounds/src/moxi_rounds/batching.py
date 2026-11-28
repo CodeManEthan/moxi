@@ -25,7 +25,9 @@ a local branch of the same name. A push the publishing scan refuses ejects each 
 whose joined tip or changed path the refusal names, and the batch ends to be rebuilt
 without them. A refusal that names none (the scan's own, the network, a ruleset) is
 tried again at the next pass, and a second pauses the queue with it as the reason. Then
-`ci.local` runs at the candidate; a failure there counts as a red job `local`. A batch
+`ci.local` runs at the candidate, holding a place of the machine's check lock like a
+check's run, its ticket ahead of every check's in line (`queue_ci.QueueCi.local`); a
+failure there counts as a red job `local`. A batch
 pushed with no local run recorded (a lander killed during it) has it run at the next
 pass, before its CI is read, so nothing lands without it. A repo with no `ci` setting
 has no CI to read a candidate by: the queue pauses, saying so.
@@ -54,7 +56,7 @@ the checkout is not clean, `waiting` is recorded once and the landing is tried a
 at the next pass. Otherwise the checkout is fast-forwarded to the candidate (`git merge
 --ff-only`). Still under the lock, each member in batch order gets its check records at
 `T` naming the candidate (`ci.read` and, where `ci.local` ran, `check.ran` under
-`check.local`) and is finished by `finishing.finish_member`. Then the lock is released,
+`check.local`, naming the check lock's place the run held) and is finished by `finishing.finish_member`. Then the lock is released,
 each member is recorded `landed` at its own merge commit, and the batch ends. Every
 member the candidate holds lands at the tip it had there, whatever its queue state
 reads: one that left, or joined again at a new tip, after the fast-forward has its
@@ -148,6 +150,9 @@ PUSH_FAILED, READ_FAILED = "push failed", "read failed"
 FAILURES, EXCUSED = "failures", "excused"
 #: A target's head whose pushes showed no run, no longer waited for.
 GAVE_UP = "gave up"
+#: What a local run's event, and the `check.ran` written from it, say of the place of
+#: the machine's check lock the run held (`checking.lock_fields`).
+LOCK_FIELDS = ("check_lock", "available_mib", "need_mib")
 #: Why a head is given up with no push: the `ci` setting names no ref to push it to.
 NO_REF_WHY = "no ref"
 #: How many reads of a candidate's CI may fail in a row before the queue pauses.
@@ -216,7 +221,10 @@ class _Pass:
         self.ci = candidate_ci
         if self.ci is None and found is not None:
             self.ci = queue_ci.QueueCi(
-                found, local_log=queue_file.queue_dir(repo, env) / "local.log")
+                found, local_log=queue_file.queue_dir(repo, env) / "local.log",
+                at_once=checking.lock_setting(settings, "at_once"),
+                need_mib=checking.lock_setting(settings, "need_mib"), env=env,
+                say=lambda line: say(f"lander of {repo}: {line}"))
         self.ref_template = None if found is None else found.ref
         self.has_local = found is not None and found.local is not None
 
@@ -392,7 +400,8 @@ class _Pass:
 
     def run_local(self, batch: queue_file.Batch, commit: str, *,
                   head: bool = False) -> dict | None:
-        """Run `ci.local` at `commit` in the lander's worktree and record it: as the
+        """Run `ci.local` at `commit` in the lander's worktree, holding a place of the
+        machine's check lock first in line, and record it with the place it held: as the
         batch's, or, with `head`, as the target's at `commit`. The event; None when
         there is no local run."""
         if QueueGit(self.place).head() != commit:
@@ -405,7 +414,7 @@ class _Pass:
         if local is None:
             return None
         fields = {"kind": LOCAL, "argv": list(local.argv), "exit_code": local.exit_code,
-                  "duration_s": local.duration_s, "output": local.output}
+                  "duration_s": local.duration_s, "output": local.output, **local.held}
         if head:
             return queue_file.append(self.repo, {"event": queue_file.RUN, "head": commit,
                                                  **fields}, self.env)
@@ -1089,7 +1098,8 @@ class _Pass:
                 **same, "step": ci.LOCAL, "argv": checking.recorded_argv(local["argv"]),
                 "exit_code": local.get("exit_code"),
                 "duration_s": local.get("duration_s"),
-                "output": places.contract_home(str(local.get("output") or ""))}))
+                "output": places.contract_home(str(local.get("output") or "")),
+                **{key: local[key] for key in LOCK_FIELDS if key in local}}))
 
         def event(view, _result):
             done = ci.newest(view.state, stage, tip)

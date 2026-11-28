@@ -116,7 +116,7 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND --restamp --record PTR` | re-stamp the design's current version with the digest of its frozen copy, when an edit outside the round rewrote the copy and `design.md` alike; changes no standing, and an ended round takes it too |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, copy the repo's `private_files` into the worktree (see Config), and record the build; `--existing` builds on a branch that is there, one strictly inside or around another open build's branch included, and refuses one that overlaps another open build's or that a recorded landing already brought onto the target. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
-| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group gets SIGINT and 30 s later SIGKILL. One check runs at a time on the machine, and the runs take the check lock (`check.lock` in rounds' folder of lock files) in the order they asked for it: a run that must wait takes a ticket in the lock's line (`check.line/` beside it) and says who holds the lock and how many are ahead of it; a waiter that dies loses its place at the next poll, on every system. With `--no-wait` it is refused while another run holds the lock or waits for it. The run holding the lock names its round, stage, step, repo and output file in `check.holder.json` beside it, which the doctor's `check lock` row reads. Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
+| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group and every process carrying its tag get SIGINT and 30 s later SIGKILL, and an interrupt does the same. Each run holds a place of the machine's check lock while anything it started runs (see The machine's check lock): one run at a time by default, the runs taking places in the order they asked, a lander's first. A run that must wait takes a ticket in the lock's line (`check.line/` beside `check.lock` in rounds' folder of lock files) and says why, once for each reason: the places held and how many are ahead of it, memory short with the reading and the need, or a run with no `memory_mib`; then which place it got. A waiter that dies loses its place at the next poll, on every system. With `--no-wait` it is refused while no place can be taken now, naming each holder, how many wait and, when memory is short, the reading and the need. The run holding a place names its round, stage, step, repo, output file, the place, its `memory_mib`, and its command's tag and first process in the place's holder record (`check.holder.json` for the first place), which the doctor's `check lock` row reads; the run's record names the place it held (`check_lock`) and, for a run started beside others, the reading and the need it met (`available_mib`, `need_mib`). Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
 | `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Whatever the cleanup leaves is recorded on the round's log, a `finish.kept` event for each thing: the worktree or scratch folder the rule kept, and the branch whenever it stays (`keep_branch`, a kept worktree, a branch git won't delete, no merge, or a branch that moved), each with where it is and why, in the words finish prints; a checkout of the target the merge added and could not remove is recorded in the merge's own record, as its `kept`. The build is finished all the same, and a later sweep or a removal by hand records nothing more. Before anything is written, finish is refused while a process of yours uses the build's scratch folder (its working folder, an open file, an argument or an environment value), naming the process: end it or leave the folder, then finish again. A scratch folder a process came to use after that read is not moved and is left for the sweep, named with the process. Where the processes can't be read, finish says the scratch gate was not run and goes on. Last, it removes from the remote CI's own refs of the build (see `ref` and `full_ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
 | `moxi rounds show ROUND [--json]` | one round: status, lead, flow, the step it is at, what its close waits for, its design and stages, its builds (for a build not finished, the newest record of each finish action at its head, with its state and landing; for every build, what its finish left behind, each as `kept worktree`, `kept scratch`, `kept branch` or `kept merge checkout` with where it is, why and its line, and in `--json` under the build's `kept`), questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended; each row of `--json` also has the round's `lead` |
@@ -914,8 +914,8 @@ builds onto the target together and runs CI once on the result.
 
 **The check.** In a queue project `moxi rounds check` runs the check's `scoped` command
 in the build's worktree, `{base}` filled in with the merge-base of the tip and the
-target: the check of the packages the build touched and their dependents. It pushes
-nothing and reads no CI. `check --full` runs the repo's `check.command` there instead and
+target: the check of the packages the build touched (the candidate's CI run adds every
+package that depends on them). It pushes nothing and reads no CI. `check --full` runs the repo's `check.command` there instead and
 records it, as in any other project, reading and changing nothing of `land`; the check
 step, the join's gate 3 and finish's are met by either check passing at the tip, so a
 build finished by hand after `land` is flipped to `finish` needs no other run. The merge-base of the tip and the target does not change as the target
@@ -965,7 +965,9 @@ the target's head on a branch `queue-<M12>-<n>` in its own worktree, `<worktree_
 <repo>/.queue`. A member that conflicts is ejected with the member before it that it
 conflicts with, one a commit hook refuses with the hook's output, and one whose branch
 moved or whose build ended leaves. It pushes the candidate to its own ref (the `ci.ref`
-template filled with that branch), runs `ci.local` at it, and reads its CI each minute,
+template filled with that branch), runs `ci.local` at it, holding a place of the
+machine's check lock like a check's run, its ticket ahead of every check's in line, and
+reads its CI each minute,
 by the `ci.workflows` marked `reads_candidates`, or by all of them where none is.
 A red, cancelled or absent reading counts only once the `status` command reads every
 run it names `completed`: until then the read is pending, nothing is rerun or pushed
@@ -991,10 +993,10 @@ queue file and git.
 that runs only what the members change, while the full run still follows each landing.
 In moxi, `ci.yml` ignores the branches `ci/queue-*`, and `queue.yml` runs on them: its
 `pick` job reads the target's head from the 12 hex digits in the branch's name, prints
-the packages `moxi-dev check --pick` picks on a `picked:` line and those it hands the
+the packages `moxi-dev check --pick --with-dependents` picks on a `picked:` line and those it hands the
 browser matrix on a `picked for browser (*):` line, and hands them on; the matrix runs
-only theirs and is skipped when there are none; `scoped` runs `moxi-dev check --base`
-that head; `web` runs as on any `ci/` branch. No job of it is named `linux`, so a
+only theirs and is skipped when there are none; `scoped` runs `moxi-dev check
+--with-dependents --base` that head; `web` runs as on any `ci/` branch. No job of it is named `linux`, so a
 candidate's run never meets the check `main` waits for. The project reads it with a
 second entry, whose `stands_for` says that the scoped job's failures are compared with
 the full run's `linux` job:
@@ -1246,6 +1248,8 @@ fails before it writes: put a test in `packages/rounds/tests` and run pytest fro
 | `defaults.idle_days` | `14` | days a build's head may go without a commit before the read API's `builds` gives the build as idle |
 | `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow`, `trace` and `idle_days` for that project, and its own `checklist`, `watched_paths` and `verifier_brief` (see A project's checklist) |
 | `watched_paths_guard.enabled` | `false` | run the watched-paths guard (see A project's checklist); the install asks |
+| `check_lock.at_once` | `1` | how many runs may hold the machine's check lock at once, across every repo; at least 1 (see The machine's check lock) |
+| `check_lock.need_mib` | `0` | the free memory, in MiB, a run needs to start beside running ones; 0 sums their `memory_mib` |
 
 ```toml
 [projects.alpha]
@@ -1265,7 +1269,9 @@ commission block for a build in it, and `check`, `{ command = "...", timeout_s =
 the command `moxi rounds check` runs at a build's tip. The command is split as a shell
 would split it and run with no shell; its words may hold `{round}`, `{stage}`,
 `{repo}`, `{root}`, `{branch}`, `{tip}` and `{into}`, filled in for the build. With no
-`timeout_s` the run has no time limit.
+`timeout_s` the run has no time limit. `check` and `ci.local` may each hold
+`memory_mib`, the most memory one run of that command holds (see The machine's check
+lock).
 
 A project whose build branches run CI may also declare `ci`, so that a green CI run at
 the tip, with a short local run of what CI can't do, stands in for the full check:
@@ -1441,6 +1447,65 @@ after the one the step names for the pass (`model` for a full pass, `recheck_mod
 for a re-check, or `model` when the step has none), the verdict is recorded with the
 flag `model-below-tier`. The flag is shown with the verdict and refuses nothing. A
 model in no tier gets no flag.
+
+### The machine's check lock
+
+Every run rounds starts that runs a check holds a place of the machine's check lock for as
+long as anything it started still runs: each `moxi rounds check` run (the check,
+`--full`, the scoped check, the local part of a check by CI, a command step) and a
+lander's `ci.local` run. A check's or a command step's run keeps its place until its
+record is appended, or refused. `check_lock.at_once` says how many places there are; with the
+default, 1, one run holds the lock at a time. The first place is `check.lock` in rounds'
+folder of lock files and the k-th `check-<k>.lock`, each with its holder record beside it
+(`check.holder.json`, `check-<k>.holder.json`). Runs take places in the order they asked
+for them, but a lander's run goes ahead of every check waiting, landers among
+themselves in their order.
+
+A run that would be alone takes the first place and reads no memory. A run starts beside
+others only when its command's table and every running one declare `memory_mib`, and the
+free memory, read then as psutil's available memory, is at least `check_lock.need_mib`,
+or, with 0, the sum of its `memory_mib` and theirs. It takes the lowest free place;
+otherwise it stays first in line and reads again every half second. Every held place
+counts, whatever `at_once` says now, so lowering it starts nothing beside a running
+check: setting it back to 1 is the way back, and nothing running is stopped.
+
+```toml
+[check_lock]
+at_once = 2
+
+[projects.alpha]
+check = { command = "make check MAX_MIB={memory_mib}", memory_mib = 8192 }
+```
+
+`memory_mib`, in a project's `check` and in its `ci.local`, is the most memory one run of
+that command holds, a whole number of MiB of at least 64. `{memory_mib}` in that table's
+command lines is filled with it, so the command can hand the same figure to a memory
+cap; where the table declares none, the placeholder stays as written. Left out, the
+command runs only alone. rounds counts the figure and enforces nothing: only a check that
+runs under a cap of that size, such as a systemd scope's `MemoryMax` on Linux, keeps it;
+anywhere else it is your promise, and admission trusts it. Inside a container with a
+memory limit, psutil reads the host's free memory, not the limit, so keep `at_once` at 1
+there.
+
+While rounds lives, a run ends whole. rounds runs the command with a tag of the run's
+own in its environment (`MOXI_RUN_TAG`) and names its first process in the holder
+record; on a normal end, a timeout and an interrupt it ends the command's process group
+and every process carrying the tag (the first signal, the grace, then SIGKILL) before it
+lets the place go. When the rounds process itself dies, the place stays taken while the
+run's first process, by its pid and start time, or any process carrying its tag still
+runs: an orphan, which the waiting lines and the doctor name. A process whose
+environment was built from scratch, without the tag, is seen only through the process
+group, and only while rounds lives. On Windows the run's job ends the whole tree when
+the rounds process dies, so there is no orphan.
+
+Since 0.1.6, with one place too:
+
+- a lander's `ci.local` run takes the check lock, so landing waits for a running check;
+- a run's leftover processes are ended before the lock frees, on every end, where only a
+  timeout ended them before;
+- the lock stays taken while an orphaned run still runs, where a dead holder freed it at
+  once;
+- on Windows a check ends when the rounds process that started it dies.
 
 ### A project's checklist
 
@@ -1705,7 +1770,7 @@ its call raises as a `moxi_rounds.errors.RoundsError`, with `reason`, `fix` and
 | `index` | warns when the index says something else than the logs do; `moxi rounds list` brings it up to them |
 | `ci <repo>` | for each repo that declares `ci`: warns when the commands that read CI are not on PATH, or, with the default `gh` commands, when `gh auth status` does not exit 0, with `check --full` as the way through; says so when the repo meets the check gate on CI alone |
 | `finish locks` | warns for each finish lock older than an hour in a project's repo, with its holder and the one git command that clears it, for you to run after asking the holder |
-| `check lock` | the machine's check lock, read without taking a lock: who holds it, for how long, its output file's size and last write, and each check waiting in line, in order; warns when the holder's output has not been written for 30 minutes (it may be hung: end it, and the next in line takes the lock), for a waiter's ticket not touched for a minute (a waiter stopped or suspended, passed over until it runs again), and for a lock held with no holder record |
+| `check lock` | the machine's check lock, read without taking a lock: each of its places (`check lock k of N` when there is more than one, a held place above `check_lock.at_once` included), who holds it, for how long, its output file's size and last write, or the orphaned run that keeps it taken; each run waiting in line, in order, a lander's first; and when the first in line waits beside running checks for memory, the reading and the need. Warns, for each place, when the holder's output has not been written for 30 minutes (it may be hung: end it, and the next in line takes the place), for a place held with no holder record, and for an orphan, a run whose rounds process is gone while it still runs, naming its pid; and for a waiter's ticket not touched for a minute (a waiter stopped or suspended, passed over until it runs again) |
 | `leftovers` | the sweep's dry run: warns with each folder an ended build left on this machine, whether it would go or the check that keeps it, and the command that removes what would go |
 
 The doctor only reads.
@@ -1739,4 +1804,4 @@ lists the other modules.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.5/packages/rounds/LICENSE).
+MIT. See [LICENSE](https://github.com/CodeManEthan/moxi/blob/moxi-rounds-v0.1.6/packages/rounds/LICENSE).

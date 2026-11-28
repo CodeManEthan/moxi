@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+- `moxi-dev check`, with or without `--base`, runs only the packages the change
+  touches. A path under `packages/<p>/` touches `p` (one under `packages/moxi-dev/`
+  touches `moxi-dev` alone), and a root path the packages whose tests read it: the root
+  `pyproject.toml` `moxi` and `moxi-dev`; `LICENSE`, `.gitignore`, `.gitattributes`,
+  `.public-paths`, `.refs-allow` and `.residue-allow` `moxi-dev`; `uv.lock` and
+  `SECURITY.md` nothing; `README.md`, the workflows, `docs/` and `CONTRIBUTING.md` as
+  before. A root path no table lists picks every package. No dependent is added.
+- `--with-dependents` picks as the check did before: the touched packages, every package
+  that depends on one, and every package when the lock, the check itself or another root
+  file changes. It goes with `--base`, `--finding` and `--pick`; with `--full`, `--static`
+  or `--only` it is a usage error. The merge queue's pick and scoped check and `ci.yml`'s
+  check of a pushed branch pass it, so CI picks what it picked before. `--pick` prints
+  what the check with the same flags runs, and `--finding`'s line for a pick with no test
+  carrying the finding names `--with-dependents`.
+- Outside `--full`, a failed static step stops the check before the stamps, sync, lint
+  and tests, and a failed import rule (import-linter, deptry) stops it before any test
+  runs; each stop prints one line, and the steps it skips read `not run` in the summary.
+  Every static step still runs, so one check shows each static failure. `--full` runs
+  every step as before.
+- The test kit clears, when a run starts and before collection, any fixture or xdist
+  worker, what an agent's session stamps into the run's environment: every name
+  starting `CLAUDE`, `CODEX_` or `OPENCODE`, `AI_AGENT`, `GIT_EDITOR`,
+  `COREPACK_ENABLE_AUTO_PIN`, `NoDefaultCurrentDirectoryInExePath`, and every `MOXI_` name
+  but the kit's `MOXI_TEST_` names, `MOXI_STARTED_BY`, the locators, what the core sets
+  for a child it starts (`MOXI_RUN_TAG`, `MOXI_LIFELINE_FD`, `MOXI_CORE_LOCK_FD`) and the
+  run's inputs. The kit now needs `moxi>=0.1.12`.
+  A pytest plugin declares the inputs it reads in a module-level `RUN_INPUT_ENV` tuple,
+  which the kit keeps, and the contract check (check 5) refuses a `MOXI_` read in a
+  module's plugin file that its `RUN_INPUT_ENV` doesn't name.
+- The test kit names its run in `MOXI_TEST_RUN_PID` (`RUN_PID_ENV`): the run's
+  controlling process sets it to its own pid when the run starts, xdist workers keep it,
+  and the fence passes it to each test. The core's agent test names no harness inside
+  the run it names, so a run started in an agent's session answers as one in CI. A child
+  whose environment a test builds from nothing lacks it and answers as outside a test.
+- `moxi-dev check` (any form but `--only`) runs its steps in a memory-capped
+  `systemd-run --user --scope` of its own: MemoryHigh 2496 MiB plus 512 MiB per worker,
+  MemoryMax 1536 MiB above it, no swap (`MOXI_TEST_MEMORY_HIGH_MIB` and
+  `MOXI_TEST_MEMORY_MAX_MIB` replace them; `none` runs uncapped). A check that holds its
+  unreclaimable memory at 95 % of MemoryHigh for 5 s at MemoryHigh is ended with exit 1
+  and a line saying why; a kernel kill at MemoryMax is named the same way. The summary
+  line gains a `memory` field before `total`. No scope is made off Linux, in CI, or
+  without a systemd user manager with the memory controller; where one is expected and
+  can't be made, the check exits 2. A caller's SIGINT, SIGTERM or SIGHUP prints the
+  scope's memory state, stops the scope and ends the check by the same signal.
+  Once the scope's unit is gone, however the check in it ended, the outer sweeps what
+  test runs left (`moxi_dev.temp.sweep`).
+- `moxi-dev cap [--] CMD [ARG...]` runs one command in the same kind of scope. The
+  command's tests keep their temp on disk, as a check's do, and the cap says so on one
+  line when it changed a memory choice; after the command, and once its unit is gone
+  where it made one, the cap sweeps what test runs left, on every system.
+- `python -m moxi_dev` runs the `moxi-dev` command.
 - `moxi-dev check` bounds each package's test run at 900 s of wall clock, or the
   seconds `MOXI_TEST_SUITE_BOUND_S` gives. A run past it is ended with every process
   under it (the process group on Linux and macOS, a job on Windows), and the check
