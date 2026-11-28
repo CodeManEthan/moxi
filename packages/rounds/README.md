@@ -1541,7 +1541,7 @@ the words that run there in place of the check's own, with the same placeholders
 and `preflight`. `moxi config rounds check` refuses a lane with no `host`, a number out
 of range and a project lane naming a lane `[lanes]` lacks, and prints the project's
 words and the lane's under each other wherever a lane gives its own, since the two
-copies can drift.
+copies can drift; `set` and `unset` print them too, and the doctor doesn't.
 
 **Which checks go.** Only the repo's declared check, as this machine would run it: in a
 queue project the scoped check and `--full`; in a project with CI that isn't queued,

@@ -26,7 +26,9 @@ gives one with its defaults filled in. A project sends checks only to the lanes 
 (`project_lanes`): each may give the words the check runs there (`command`, `scoped`),
 its time limit and `memory_mib` there, and the `preflight` lines run there before each
 run. `check_text` prints, after its check, a note for each lane table that gives its own
-words, with the project's words beside them (`lane_notes`): the two copies can drift.
+words, with the project's words beside them (`lane_notes`): the two copies can drift. It
+prints them for `moxi config` (check, set and unset), not for the doctor, which runs the
+same check for its settings row and gives rows, not notes (`_under_doctor`).
 
 A project's table is `[projects.<key>]`, and its name finds the project the way the
 projects list finds one: ignoring case. So `project_table` gives the same table for
@@ -76,8 +78,24 @@ def check_text(text: str) -> None:
     from moxi import config
 
     checked = check(config.check_text(MODULE, schema(), text))
+    if _under_doctor():
+        return
     for line in lane_notes(checked):
         print(line, file=sys.stderr)
+
+
+def _under_doctor() -> bool:
+    """Whether this call came from the core's doctor (`moxi.doctor`), which runs a
+    module's `CONFIG_CHECK` for its settings row."""
+    import inspect
+
+    frame = inspect.currentframe()
+    while frame is not None:
+        name = str(frame.f_globals.get("__name__", ""))
+        if name == "moxi.doctor" or name.startswith("moxi.doctor."):
+            return True
+        frame = frame.f_back
+    return False
 
 
 def check(settings):

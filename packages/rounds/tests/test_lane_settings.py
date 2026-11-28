@@ -1,10 +1,14 @@
 """A lane's settings: `[lanes.<name>]`, a project's `[projects.<key>.lanes.<name>]`, their
 refusals and defaults, and the note `config check` prints where a lane gives its own
-words."""
+words, which the doctor does not print."""
 
 from __future__ import annotations
 
+import json
+import sys
+
 import pytest
+from moxi import cli as core_cli
 from moxi import config
 
 from moxi_rounds import settings
@@ -130,3 +134,22 @@ def test_config_check_says_nothing_of_a_lane_that_gives_no_words(capsys):
     settings.check_text('[lanes.far]\nhost = "h"\n' + PROJECT
                         + "[projects.proj-a.lanes.far]\ntimeout_s = 60\n")
     assert capsys.readouterr().err == ""
+
+
+#: A lane whose ssh words are a stand-in that fails at once, as a host not reached, so
+#: the doctor's lane row reaches no machine.
+UNREACHED = (f'[lanes.far]\nhost = "h"\nssh = [{json.dumps(sys.executable)}, "-c", '
+             '"raise SystemExit(255)"]\n')
+
+
+def test_the_note_prints_for_config_check_and_not_for_the_doctor(write_config, capsys):
+    write_config(UNREACHED + PROJECT
+                 + '[projects.proj-a.lanes.far]\ncommand = "env W=4 make check"\n')
+
+    assert core_cli.main(["config", "rounds", "check"]) == 0
+    assert "on lane far these replace the project's" in capsys.readouterr().err
+
+    core_cli.main(["doctor", "rounds"])
+    found = capsys.readouterr()
+    assert "settings" in found.out
+    assert "replace the project's" not in found.err + found.out
