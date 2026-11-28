@@ -255,6 +255,43 @@ def test_a_new_key_goes_among_the_tables_own_keys_above_any_sub_table(before, af
     assert text() == after
 
 
+#: A valid file whose `[defaults.<x>]` sub-table comes before the `[defaults]` header.
+OUT_OF_ORDER = ('# mine\n[defaults.foo]\nbar = 1  # kept\n\n[seat.a]\nx = 1\n\n'
+                '[defaults]\npermission_mode = "plan"  # mine\n\n# Seats below\n\n'
+                '[seat.b]\ny = 2\n')
+
+
+def test_a_sub_table_before_the_defaults_header_is_written_in_place():
+    write(OUT_OF_ORDER)
+    assert change("model", "set", "opus") == (True, [])
+    now = OUT_OF_ORDER.replace('"plan"  # mine\n', '"plan"  # mine\nmodel = "opus"\n')
+    assert text() == now
+    assert change("permission_mode", "set", "default") == (True, [])
+    now = now.replace('"plan"  # mine', '"default"  # mine')
+    assert text() == now
+    assert change("permission_mode", "unset")[0] is True
+    now = now.replace('permission_mode = "default"  # mine\n', '')
+    assert text() == now
+    assert rows()["model"]["value"] == "opus"
+    assert presets.read().defaults == {"foo": {"bar": 1}, "model": "opus"}
+
+
+def test_moxi_config_set_writes_a_file_whose_sub_table_comes_first(capsys):
+    write(OUT_OF_ORDER)
+    code = cli.main(["config", "set", "launcher", "defaults.model", "opus", "--json"])
+    answer = json.loads(capsys.readouterr().out)
+    assert (code, answer["changed"], answer["problem"]) == (0, True, None)
+    assert text() == OUT_OF_ORDER.replace('"plan"  # mine\n',
+                                          '"plan"  # mine\nmodel = "opus"\n')
+
+
+def test_a_sub_table_before_an_empty_defaults_header_takes_the_key_under_it():
+    write('[defaults.foo]\nbar = 1\n\n[defaults]\n# a note\n\n[seat.a]\nx = 1\n')
+    assert change("model", "set", "opus") == (True, [])
+    assert text() == ('[defaults.foo]\nbar = 1\n\n[defaults]\nmodel = "opus"\n# a note\n\n'
+                      '[seat.a]\nx = 1\n')
+
+
 def test_a_file_without_defaults_gets_the_table_at_its_end():
     write('[seat.a]\nharness = "claude"\n')
     change("effort", "set", "low")

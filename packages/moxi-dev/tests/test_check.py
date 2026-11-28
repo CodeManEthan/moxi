@@ -1376,6 +1376,7 @@ LINE = re.compile(
     r"(?P<durations>durations none|durations \d+\.\d+s, slowest 5% \d+%, delta "
     r"(none|[+-]\d+\.\d+s vs [0-9a-f]{12}( \([^)]+\))?)) \| "
     r"(?P<temp>temp (disk|PYTEST_DEBUG_TEMPROOT|not run)( \([^|]+\))?) \| "
+    r"memory (?P<memory>[^|]+) \| "
     r"total \d+\.\d+s \| exit (?P<code>\d)$")
 
 

@@ -4603,6 +4603,8 @@ launcher	packages/launcher/tests/test_live.py	file.parent.mkdir(parents=True, ex
 launcher	packages/launcher/tests/test_live.py	server.wait(timeout=10)	keep	timeout	timeout
 launcher	packages/launcher/tests/test_live.py	test_codex_trusts_the_launch_directory_from_the_trust_row_even_with_a_dot_in_it	name	folder	project_dir
 launcher	packages/launcher/tests/test_live.py	words = row.tokens(mode, value=True, cwd=str(cwd))	keep	value=	value=
+launcher	packages/launcher/tests/test_live.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+launcher	packages/launcher/tests/test_live.py	assert seeds == ([{"folder": str(work.resolve()), "file": str(trust_stand_in()),	keep	folder	folder
 launcher	packages/launcher/tests/test_live_acts.py	[listed] = [e for e in resume.sessions(turns=None).data["sessions"]	keep	sessions	sessions
 launcher	packages/launcher/tests/test_live_acts.py	done = "cleared" if command == "clear" else "compacted"	keep	compacted	compacted
 launcher	packages/launcher/tests/test_live_acts.py	needs_claude_with_turns	name	error	exc
@@ -18175,6 +18177,22 @@ moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	record.parent.mkdir(pare
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	assert fakes.active() == set()	keep	set	set
 moxi-dev	packages/moxi-dev/src/moxi_dev/schedule.py	return any(Path(line.removeprefix("worktree ")).resolve() == want	keep	any	any
 moxi-dev	packages/moxi-dev/tests/test_timed_schedule.py	stale = tmp_path / "stale"	keep	stale	stale
+moxi-dev	packages/moxi-dev/src/moxi_dev/cli.py	help="cap [--] CMD [ARG...]: run one command in a memory scope of its "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	"show", "--property=ActiveState,Result,MemoryPeak,MemoryMax", self.unit)	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = self.system.systemctl("show", "--property=ActiveState", "--value",	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, group = self.system.systemctl("show", "--property=ControlGroup", "--value",	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, group = system.systemctl("show", "--property=ControlGroup", "--value")	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = system.systemctl("show", "--property=Version", "--value")	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	code, said = self.system.systemctl("show", "--property=ControlGroup",	keep	show	show
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	ended: set[int] = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/scope.py	self._done.set()	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_check_scope.py	assert any("pytest" in cmd for cmd, _, _ in in_repo.calls)	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_scope.py	assert not any(word.startswith("MemoryHigh=") for word in argv)	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_scope.py	assert rig.said == [] and rig.waiter.closed	keep	closed	closed
+moxi-dev	packages/moxi-dev/tests/test_scope.py	self.closed = False	keep	closed	closed
+moxi-dev	packages/moxi-dev/tests/test_scope.py	self.closed = True	keep	closed	closed
+moxi-dev	packages/moxi-dev/tests/test_scope_live.py	assert not any("ended for memory" in line for line in out), out	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_scope_live.py	shown = subprocess.run(["systemctl", "--user", "show", "--property=Result", unit],	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/ci.py	and not any(one.get("job") == LOCAL_JOB for one in found.get("excused") or ())):	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/ci.py	return any(one.jobs is not None for one in self.workflows)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/ci.py	or any(part.startswith(".") or part.endswith(".lock")	keep	any	any
@@ -18451,6 +18469,8 @@ launcher	packages/launcher/tests/test_defaults.py	assert (code, answer["changed"
 launcher	packages/launcher/tests/test_defaults.py	assert [(r["op"], r["by"]) for r in records] == [("set", "ui")]	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (True, [])	keep	set	set
 launcher	packages/launcher/tests/test_defaults.py	assert change("model", "set", "opus") == (False, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	assert change("permission_mode", "set", "default") == (True, [])	keep	set	set
+launcher	packages/launcher/tests/test_defaults.py	code = cli.main(["config", "set", "launcher", "defaults.model", "opus", "--json"])	keep	set	set
 launcher	packages/launcher/tests/test_recycle.py	store.end_run(conn, first.run_id, "compacted")	keep	compacted	compacted
 launcher	packages/launcher/tests/test_relaunch.py	"""sessions' `find` and `records`: the id's main transcript, whose first records have	keep	find	find
 launcher	packages/launcher/tests/test_relaunch.py	assert "stale" in caught.value.problem and later.asked == [CLEARED]	keep	stale	stale

@@ -249,7 +249,7 @@ def test_importing_the_core_loads_no_metadata_machinery():
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
                          text=True, check=True)
     assert {"moxi", "moxi._mark"} <= set(out.stdout.split()) <= {
-        "moxi", "moxi._mark", "__future__", "collections.abc"}
+        "moxi", "moxi._mark", "__future__"}
     code = ("import sys; import moxi.modules, moxi.names, moxi.paths, moxi.config; "
             "print('importlib.metadata' in sys.modules, 'tomllib' in sys.modules)")
     out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
