@@ -35,8 +35,11 @@ on the launcher's `PATH` is a change and is probed again. One probe runs at a ti
 
 The rest of memory asks this module only whether a chat recall may start (`verdict`,
 which starts no process), and with what request (`request`); the probe runs in a recall's
-child (`ensure`). Adding a tool or an MCP server the fence allows by name is a change
-here alone. Standard library at import; the core and the launcher are reached at use.
+child (`ensure`). A refusal the launcher gives on the way is reported as what it is
+(`refusal_verdict`): `no-harness` only when the launcher's PATH lookup finds no `claude`
+(the refusal's code `not-found`) or can't read the one it found, and `refused`, naming
+the refusal, for any other. Adding a tool or an MCP server the fence allows by name is a
+change here alone. Standard library at import; the core and the launcher are reached at use.
 """
 
 from __future__ import annotations
@@ -103,7 +106,12 @@ PARTS = (FLAGS, TOOLS, MCP)
 
 #: Why `verdict` says a chat recall can't start.
 NO_HARNESS = "no-harness"
+REFUSED = "refused"
 FENCE = "fence"
+#: The code of the launcher's refusal when its PATH lookup finds no command.
+NOT_FOUND = "not-found"
+#: The code every launcher refusal has unless its kind gives its own.
+PLAIN_REFUSAL = "refused"
 
 
 def chat_dir(env: Mapping[str, str] | None = None) -> Path:
@@ -190,16 +198,14 @@ class Binary:
         return {"path": self.path, "size": self.size, "mtime_ns": self.mtime_ns}
 
 
-def binary(launcher: Any, req: Any, *, env: Mapping[str, str] | None = None) -> Binary | None:
+def binary(launcher: Any, req: Any, *, env: Mapping[str, str] | None = None) -> Binary:
     """The binary `req`'s composition starts, as the launcher's `PATH` finds it, read
-    with one stat; None when the launcher finds none. Starts no process."""
-    try:
-        composition = launcher.preview(req, env=env)
-        command = launcher.prepare(req, composition, env=env)
-        path = os.path.realpath(command)
-        st = os.stat(path)
-    except (launcher.Refusal, OSError):
-        return None
+    with one stat. Raises what the launcher's `preview` or `prepare` raised, or the
+    `OSError` of the stat. Starts no process."""
+    composition = launcher.preview(req, env=env)
+    command = launcher.prepare(req, composition, env=env)
+    path = os.path.realpath(command)
+    st = os.stat(path)
     return Binary(path, st.st_size, st.st_mtime_ns)
 
 
@@ -267,8 +273,9 @@ def _write_outcome(outcome: Outcome) -> None:
 @dataclass(frozen=True)
 class Verdict:
     """Whether a chat recall may start: `reason` None when it may (`outcome` the
-    binary's passed outcome, or None when its child probes first), else `no-harness` or
-    `fence`, with `detail` naming the failed part."""
+    binary's passed outcome, or None when its child probes first), else `no-harness`,
+    `refused` or `fence` (or `no-outcome`, from `ensure`), with `detail` saying why: the
+    launcher's words, or the failed part."""
 
     reason: str | None
     detail: str = ""
@@ -280,14 +287,34 @@ class Verdict:
         return self.reason is None
 
 
+def refusal_verdict(exc: BaseException) -> Verdict:
+    """The verdict for what the launcher raised, told apart by its `code`: `no-harness`
+    for code `not-found`, which only the launcher's PATH lookup raises, or for an
+    `OSError` reading the binary it found; `refused` for any other, naming its code when
+    it has one of its own (a launch log refusal has none)."""
+    code = getattr(exc, "code", None)
+    if code == NOT_FOUND:
+        return Verdict(NO_HARNESS, str(exc))
+    if isinstance(exc, OSError):
+        where = exc.filename if exc.filename is not None else "claude"
+        why = exc.strerror or str(exc)
+        return Verdict(NO_HARNESS, f"the launcher found {where} but can't read it: {why}")
+    named = f" ({code})" if isinstance(code, str) and code and code != PLAIN_REFUSAL else ""
+    return Verdict(REFUSED, f"the launcher refused this launch{named}: {exc}")
+
+
 def verdict(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None) -> Verdict:
-    """Whether a chat recall of `spec` may start on this machine: the launcher finds
-    `claude` (else `no-harness`), and the record holds no failed outcome for it (else
-    `fence`). A binary the record holds no outcome for may start: its child probes
-    before its first round. Starts no process."""
-    found = binary(launcher, request(launcher, spec), env=env)
-    if found is None:
-        return Verdict(NO_HARNESS, "the launcher can't find claude on its PATH")
+    """Whether a chat recall of `spec` may start on this machine: the launcher takes its
+    launch and finds `claude` (else `refusal_verdict`'s `no-harness` or `refused`), and
+    the record holds no failed outcome for it (else `fence`). A binary the record holds
+    no outcome for may start: its child probes before its first round. Starts no
+    process."""
+    from moxi.store import StoreError
+
+    try:
+        found = binary(launcher, request(launcher, spec), env=env)
+    except (launcher.Refusal, StoreError, OSError) as exc:
+        return refusal_verdict(exc)
     outcome = recorded(found)
     if outcome is not None and not outcome.passed:
         return Verdict(FENCE, f"{outcome.part}: {outcome.detail}", found, outcome)
@@ -300,9 +327,10 @@ def ensure(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None,
            wait_s: float = PROBE_MAX_S) -> Verdict:
     """The verdict a recall's child goes on by: `verdict`, after probing the binary when
     the record holds no outcome for it. One probe runs at a time; a child that waits for
-    another's (at most `wait_s`) reads its outcome. A probe with no outcome (no
-    `system/init` for a reason the fence doesn't judge) records nothing, and the verdict
-    is `no-outcome` with what happened."""
+    another's (at most `wait_s`) reads its outcome. A probe with no outcome records
+    nothing, and the verdict is the probe's: `no-outcome` with what happened (no
+    `system/init` for a reason the fence doesn't judge), or `refusal_verdict`'s when the
+    launcher refuses the probe's own request."""
     from moxi import files
 
     first = verdict(launcher, spec, env=env)
@@ -314,9 +342,9 @@ def ensure(launcher: Any, spec: Spec, *, env: Mapping[str, str] | None = None,
             found = first.binary
             outcome = recorded(found)
             if outcome is None:
-                outcome, why = probe(launcher, spec, found, env=env)
-                if outcome is None:
-                    return Verdict(NO_OUTCOME, why, found)
+                outcome = probe(launcher, spec, found, env=env)
+                if isinstance(outcome, Verdict):
+                    return replace(outcome, binary=found)
                 _write_outcome(outcome)
     except files.LockTimeout:
         return Verdict(NO_OUTCOME, f"another probe ran past {wait_s:.0f} s", first.binary)
@@ -330,27 +358,32 @@ NO_OUTCOME = "no-outcome"
 
 
 def probe(launcher: Any, spec: Spec, found: Binary, *,
-          env: Mapping[str, str] | None = None) -> tuple[Outcome | None, str]:
-    """Probe `found` with `spec`'s own request: its outcome, or None and why there is
-    none. Records nothing on the fence record."""
+          env: Mapping[str, str] | None = None) -> Outcome | Verdict:
+    """Probe `found` with `spec`'s own request: its outcome, or the verdict when there
+    is none, `no-outcome` with why, or `refusal_verdict`'s when the launcher refuses the
+    probe's request. Records nothing on the fence record."""
     from moxi import proc
+    from moxi.store import StoreError
 
     req = probe_request(launcher, spec)
-    composition = launcher.preview(req, env=env)
-    child_env = launcher.child_env(req, composition, env=env)
+    try:
+        composition = launcher.preview(req, env=env)
+        child_env = launcher.child_env(req, composition, env=env)
+    except (launcher.Refusal, StoreError) as exc:
+        return refusal_verdict(exc)
     now = time.time()
     try:
         ran = proc.run([found.path, "--version"], timeout_s=VERSION_S, env=child_env,
                        cwd=spec.cwd)
         version = _version((ran.stdout or b"").decode("utf-8", "replace"))
     except Exception as exc:  # noqa: BLE001 - a version that can't be read is no outcome
-        return None, f"claude --version failed: {exc}"
+        return Verdict(NO_OUTCOME, f"claude --version failed: {exc}")
     if version is None:
-        return None, "claude --version printed no version"
+        return Verdict(NO_OUTCOME, "claude --version printed no version")
     if _older(version, FENCE_MIN_VERSION):
         return Outcome(found, version, passed=False, part=FLAGS,
                        detail=f"Claude Code {version} is older than {FENCE_MIN_VERSION}, "
-                              "the first that takes every fence flag", at=now), ""
+                              "the first that takes every fence flag", at=now)
     prompt = getattr(composition, "prompt_file", None)
     try:
         ran_to = _run_to_init(launcher, req, env)
@@ -358,13 +391,12 @@ def probe(launcher: Any, spec: Spec, found: Binary, *,
         if prompt is not None:
             Path(prompt.path).unlink(missing_ok=True)
     if isinstance(ran_to, str):
-        return None, ran_to
+        return Verdict(NO_OUTCOME, ran_to)
     init, text, exited = ran_to
     part, detail = judge(init, text, exited=exited, allows_web=spec.allows_web)
     if part is None and init is None:
-        return None, detail
-    return Outcome(found, version, passed=part is None, part=part, detail=detail,
-                   at=now), ""
+        return Verdict(NO_OUTCOME, detail)
+    return Outcome(found, version, passed=part is None, part=part, detail=detail, at=now)
 
 
 def probe_request(launcher: Any, spec: Spec) -> Any:
@@ -486,8 +518,8 @@ def _older(version: str, floor: str) -> bool:
 
 __all__ = ["ACTOR", "BUDGET_USD", "CHAT_DIR", "END_TOOL", "FENCE", "FENCE_LOCK", "FENCE_MIN_VERSION",
            "FENCE_RECORD", "FLAGS", "HARMLESS_TOOLS", "HARNESS", "JSON_OUTPUT", "MCP", "NO_HARNESS", "NO_MCP",
-           "NO_OUTCOME", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
+           "NO_OUTCOME", "NOT_FOUND", "PLAIN_REFUSAL", "REFUSED", "PARTS", "PERMISSION_MODE", "PROBE_OUTPUT_FLAGS", "PROBE_PROMPT",
            "PROBE_END_S", "PROBE_MAX_S", "PROBE_S", "READ_TOOLS", "TARGET", "TOOLS", "WEB_TOOLS", "Binary", "Outcome",
            "Spec", "Verdict", "binary", "chat_dir", "ensure", "fence_flags",
-           "fence_tools", "judge", "probe", "probe_request", "recorded", "request",
-           "verdict"]
+           "fence_tools", "judge", "probe", "probe_request", "recorded", "refusal_verdict",
+           "request", "verdict"]
