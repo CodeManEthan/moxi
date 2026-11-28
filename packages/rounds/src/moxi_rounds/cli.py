@@ -175,9 +175,11 @@ the build's worktree, which must be clean with the build's branch checked out, o
 build that has work, with no shell, stdin closed, no `GIT_` variable, its output in
 `check-<n>.log` in the build's scratch folder, and its whole process tree ended at the
 check's `timeout_s` (or `--timeout-s`, else 3600 s): SIGINT, then SIGKILL 30 s later.
-One check runs at a time on the machine: a run waits in line for the check lock, taking
-it in the order the runs asked, or with `--no-wait` is refused while another holds it or
-waits for it. The run is recorded with its commit, that
+Up to `check_lock.at_once` runs at a time on the machine (one by default) hold a place
+of the check lock: a run waits in line, taking a place in the order the runs asked (a
+lander's first) and beside others only when memory allows, or with `--no-wait` is
+refused while no place can be taken now. Everything the run started is ended before its
+place frees. The run is recorded with its commit, the place it held, that
 commit's merge-base with the target, the argv as it ran, its exit code and its
 duration; when the tip moved or the worktree changed while it ran, nothing is
 recorded. Run with no round in a build's worktree, it checks that build. A check
@@ -1454,8 +1456,9 @@ def _declare_check(verbs) -> None:
                              "of the check's or the step's own timeout_s (3600 when "
                              "neither is set)")
     parser.add_argument("--no-wait", action="store_true", dest="no_wait",
-                        help="refuse at once when another check on this machine holds "
-                             "or waits for the check lock, in place of waiting in line")
+                        help="refuse at once when no place of this machine's check "
+                             "lock can be taken now (every place held, a run waiting in "
+                             "line, or too little memory), in place of waiting in line")
     _writes(parser)
 
 

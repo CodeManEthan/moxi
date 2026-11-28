@@ -470,6 +470,22 @@ def test_the_holder_record_names_the_run_and_its_output(build, declare):
     assert not check_line.holder_file(checking.lock_file()).exists()
 
 
+def test_the_place_is_held_until_the_run_s_record_is_appended(build, declare,
+                                                               monkeypatch):
+    from moxi_rounds import write
+
+    declare(PASS)
+    seen = []
+    monkeypatch.setattr(write, "ON_APPEND", (
+        *write.ON_APPEND,
+        lambda done: seen.append(check_line.holder(checking.lock_file()))))
+
+    checking.check(ROUND, "B1", by="coder")
+
+    assert len(seen) == 1 and seen[0] is not None and seen[0]["pid"] == os.getpid()
+    assert not check_line.holder_file(checking.lock_file()).exists()
+
+
 def test_with_no_round_the_check_finds_the_build_from_its_worktree(
         build, declare, monkeypatch, capsys):
     path, _tree, made = build
