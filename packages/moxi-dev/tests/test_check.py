@@ -799,7 +799,9 @@ def test_a_package_run_past_its_bound_is_ended_with_its_tree_and_fails_alone(
 
 
 #: A check whose cache package's run is a process that starts a sleeping child, notes
-#: both pids in the file its second argument names, and sleeps.
+#: both pids in the file its second argument names, and sleeps. A third and fourth
+#: argument, a signal's name and a disposition's (SIG_DFL, SIG_IGN), set that signal's
+#: handling before the check starts, as a parent that ignores it would leave it.
 SIGNALLED = """\
 import os, sys
 from pathlib import Path
@@ -822,7 +824,7 @@ def run(cmd, cwd, env, /, *, timeout_s=None):
 
 if len(sys.argv) > 3:
     import signal
-    signal.signal(getattr(signal, sys.argv[3]), signal.SIG_IGN)
+    signal.signal(getattr(signal, sys.argv[3]), getattr(signal, sys.argv[4]))
 result = check.check(Path(sys.argv[1]), run=run, full=True, env=dict(os.environ),
                      plan=lambda package, work, members: [])
 sys.exit(result.code)
@@ -830,20 +832,26 @@ sys.exit(result.code)
 
 
 @pytest.mark.skipif(sys.platform == "win32",
-                    reason="Windows has no SIGTERM to send: os.kill there ends the process "
-                           "outright, which the test kit's parent watch covers")
+                    reason="Windows has no SIGHUP, and no SIGTERM to send: os.kill there "
+                           "ends the process outright, which the test kit's parent watch "
+                           "covers")
 @pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
 def test_a_check_ended_by_a_signal_ends_the_package_run_under_way(repo, tmp_path, name):
     import signal
 
     pids_file = tmp_path / "pids"
-    checker = subprocess.Popen([sys.executable, "-c", SIGNALLED, str(repo), str(pids_file)],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    signum = getattr(signal, name)
+    before = signal.signal(signum, signal.SIG_IGN)
+    try:
+        checker = subprocess.Popen(
+            [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), name, "SIG_DFL"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        signal.signal(signum, before)
     try:
         wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
                  testing.PROC_WAIT_S, what="the package run to start")
         run_pid, child = (int(one) for one in pids_file.read_text().split())
-        signum = getattr(signal, name)
         checker.send_signal(signum)
         assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signum
         wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
@@ -870,7 +878,7 @@ def test_a_check_started_ignoring_sighup_survives_it_and_its_run_goes_on(repo, t
 
     pids_file = tmp_path / "pids"
     checker = subprocess.Popen(
-        [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), "SIGHUP"],
+        [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), "SIGHUP", "SIG_IGN"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
