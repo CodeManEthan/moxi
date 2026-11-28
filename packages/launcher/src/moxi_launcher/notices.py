@@ -363,9 +363,8 @@ def hold_line(by: str, recipient: str, session: str | None, *,
         row = None if conn is None else store.resolve(conn, session)
     if row is None or not row.endpoint or store.endpoint_gone(row.endpoint):
         return None
-    # Imported here: relaunch imports this module. job comes first, as the launcher's
-    # own entries load it: relaunch imported before it meets fork half loaded.
-    from . import job, presets, relaunch  # noqa: F401  (job: the import order)
+    # Imported here: relaunch imports this module.
+    from . import presets, relaunch
 
     comms = presets.comms_api()
     if comms is None:
