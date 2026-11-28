@@ -98,6 +98,47 @@ def test_a_store_from_a_newer_launcher_is_refused(tmp_path):
     assert caught.value.exit_code == 3
 
 
+def test_an_empty_file_is_not_a_store_to_a_connect_that_may_not_create(tmp_path):
+    db = tmp_path / "launcher.db"
+    db.touch()
+    with pytest.raises(core_store.StoreError, match="holds no launch log yet") as caught:
+        store.connect(db, create=False)
+    assert not isinstance(caught.value, core_store.StoreTooNew)
+    assert db.stat().st_size == 0
+
+    conn = store.connect(db)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.STEPS)
+    finally:
+        conn.close()
+    store.connect(db, create=False).close()
+
+
+def test_an_older_store_is_still_moved_forward_by_a_connect_that_may_not_create(
+        tmp_path, monkeypatch):
+    db = tmp_path / "launcher.db"
+    with monkeypatch.context() as patched:
+        patched.setattr(store, "STEPS", store.STEPS[:1])
+        store.connect(db).close()
+    conn = store.connect(db, create=False)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == len(store.STEPS)
+    finally:
+        conn.close()
+
+
+def test_the_readers_see_an_empty_file_as_no_launch_log(tmp_path):
+    env = {**os.environ, "MOXI_LAUNCHER_HOME": str(tmp_path / "launcher")}
+    db = store.path(env)
+    assert tmp_path in db.parents
+    db.parent.mkdir(parents=True)
+    db.touch()
+    with store.reading(env=env) as conn:
+        assert conn is None
+    assert store.log_lines(env=env) == []
+    assert db.stat().st_size == 0
+
+
 def test_the_default_path_is_the_declared_store():
     assert store.path() == Layout("launcher").state_dir() / "launcher.db"
 

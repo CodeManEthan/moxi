@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- `moxi-dev check` (any form but `--only`) runs its steps in a memory-capped
+  `systemd-run --user --scope` of its own: MemoryHigh 2496 MiB plus 512 MiB per worker,
+  MemoryMax 1536 MiB above it, no swap (`MOXI_TEST_MEMORY_HIGH_MIB` and
+  `MOXI_TEST_MEMORY_MAX_MIB` replace them; `none` runs uncapped). A check that holds its
+  unreclaimable memory at 95 % of MemoryHigh for 5 s at MemoryHigh is ended with exit 1
+  and a line saying why; a kernel kill at MemoryMax is named the same way. The summary
+  line gains a `memory` field before `total`. No scope is made off Linux, in CI, or
+  without a systemd user manager with the memory controller; where one is expected and
+  can't be made, the check exits 2. A caller's SIGINT, SIGTERM or SIGHUP prints the
+  scope's memory state, stops the scope and ends the check by the same signal.
+  Once the scope's unit is gone, however the check in it ended, the outer sweeps what
+  test runs left (`moxi_dev.temp.sweep`).
+- `moxi-dev cap [--] CMD [ARG...]` runs one command in the same kind of scope. The
+  command's tests keep their temp on disk, as a check's do, and the cap says so on one
+  line when it changed a memory choice; after the command, and once its unit is gone
+  where it made one, the cap sweeps what test runs left, on every system.
+- `python -m moxi_dev` runs the `moxi-dev` command.
 - `moxi-dev check` bounds each package's test run at 900 s of wall clock, or the
   seconds `MOXI_TEST_SUITE_BOUND_S` gives. A run past it is ended with every process
   under it (the process group on Linux and macOS, a job on Windows), and the check

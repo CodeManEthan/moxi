@@ -18,7 +18,9 @@ The steps, in this process (no job: the exit is over before the verb returns):
    job. One open run per launch, so the exit loses at insert to any other act on the
    launch, and every other act loses to it while it lasts.
 3. The quiet read. Anything holding (a turn, a subagent, a draft, a person, a read that
-   failed) ends the run `held` with its word: nothing was done.
+   failed) ends the run `held` with its word: nothing was done. A recall's slot fork is
+   the system's own session, so recent client activity does not count as a person for
+   it; every other hold still does.
 4. The background shells. A background shell or Monitor the session runs (`claude`'s
    child shell, `background_shells`) holds the exit, word `shells`, unless the session
    has been idle an hour or more: cache's age of its last request, as a clear on expiry
@@ -67,7 +69,7 @@ from typing import Any
 from moxi import exit as codes
 from moxi import proc
 
-from . import catalog, first, job, quiet, recycle, relaunch, slots, store, target
+from . import catalog, first, fork, job, quiet, recycle, relaunch, slots, store, target
 
 #: What each verdict exits with.
 EXIT_CODES = {"exited": codes.OK, "held": codes.TEMPFAIL, "at-dialog": codes.ERROR,
@@ -148,11 +150,12 @@ def _exit(conn: sqlite3.Connection, found: target.Target, api: Any, env: Mapping
     in_slot = host is None and row.target == "slot" and bool(row.slot) and _slots_here(api)
     data = {"session_id": sid, "request_id": row.request_id, "slot": row.slot}
     person_s = float(current["relaunch.person_s"])
+    count_activity = mode != "park" and not fork.recall_fork(row)
     if dry_run:
         relaunch._no_open_run(conn, row, api)
         reading = quiet.read(found.session, slot=row.slot if in_slot else None,
                              slots_api=api if in_slot else None, person_s=person_s,
-                             count_activity=mode != "park")
+                             count_activity=count_activity)
         hold = _held(reading, shells, found.session, count_shells=mode != "park")
         if hold is not None:
             return Result(codes.TEMPFAIL, (f"held: {hold}; nothing would be done now",),
@@ -289,6 +292,8 @@ class ExitRun(job.RelaunchJob):
         self.parking = run.mode == "park"
         self.deadline = deadline
         self.count_activity = not self.parking
+        if fork.recall_fork(self.row):
+            self.count_activity = False
         self.count_shells = not self.parking
         # The exit starts at once: there is no wait for a stop to end.
         self.acting = True

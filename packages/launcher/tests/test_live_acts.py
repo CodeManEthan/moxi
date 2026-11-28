@@ -274,7 +274,9 @@ def arming_brief(handoff: Path, exported: str, passed: str) -> tuple[str, str]:
 
 def test_a_self_relaunch_of_claude_in_a_slot_comes_back_with_its_handoff_alone(
         live_env, work, own_slots, tmp_path):
-    """The session arms its own relaunch. The run ends `relaunched`; the new launch is in
+    """The session, launched with `recycle_at_limit = relaunch` and a notes directory so
+    it may recycle itself, writes its handoff in its handoff folder and arms its own
+    relaunch. The run ends `relaunched`; the new launch is in
     the same pane, its handoff arrives as its first turn, and its environment holds the
     new launch's stamp, not the old one's, and no variable the arming shell exported but
     the one `relaunch.pass_env` names."""
@@ -283,9 +285,12 @@ def test_a_self_relaunch_of_claude_in_a_slot_comes_back_with_its_handoff_alone(
     exported, passed = f"LIVE_ARMED_{tag}", f"LIVE_PASSED_{tag}"
     config.set_value("launcher", "relaunch.pass_env", [passed], by="launcher live test")
     config.set_value("launcher", "relaunch.person_s", 5, by="launcher live test")
-    handoff = tmp_path / "handoff.md"
+    notes_dir = tmp_path / "notes"
+    notes_dir.mkdir()
+    handoff = handoffs.handoff_dir(work, notes_dir=str(notes_dir), create=True) / "handoff.md"
     brief, answer = arming_brief(handoff, exported, passed)
-    result, row = claude_in_slot(work, live_env, brief, **BASH_ALLOWED)
+    result, row = claude_in_slot(work, live_env, brief, recycle_at_limit="relaunch",
+                                 notes_dir=str(notes_dir), **BASH_ALLOWED)
     new = None
     try:
         assert result.state in ("started", "first-sent"), result.line
@@ -494,9 +499,11 @@ def test_a_director_relaunch_of_claude_in_a_slot(live_env, work, own_slots, tmp_
 
 def test_exit_session_ends_claude_through_the_exit_dialog_and_its_background_shell(
         live_env, work, own_slots):
-    """The session starts a background shell and answers. exit-session exits it through
-    turns and answers Claude's exit dialog through slots: the verdict is `exited`, the
-    exit log holds it, the pane is dead, and the background shell is gone."""
+    """The session starts a background shell and answers. A background shell holds an
+    exit until the session has been idle an hour, so cache's read is a stand-in that
+    reads it idle past the hour. exit-session exits it through turns and answers Claude's
+    exit dialog through slots: the verdict is `exited`, the exit log holds it, the pane is
+    dead, and the background shell is gone."""
     needs_claude_with_turns(work, live_env)
     config.set_value("launcher", "relaunch.person_s", PERSON_S, by="launcher live test")
     seconds = 900 + secrets.randbelow(90000)
@@ -511,7 +518,8 @@ def test_exit_session_ends_claude_through_the_exit_dialog_and_its_background_she
                  what=lambda: f"{answer} and {marker}; saw "
                               f"{pane_text(own_slots, row.pane_id, live_env)[-2000:]}")
         settled(row)
-        done = exits.exit_session(row.session_id, caller_env=live_env)
+        done = exits.exit_session(row.session_id, caller_env=live_env,
+                                  cache=Cache("cold", 4000.0))
         assert (done.exit_code, done.data["outcome"]) == (0, "exited"), done.lines
         assert pane_dead(own_slots, row.pane_id, live_env)
         wait_for(lambda: not processes_running(marker), timeout=30, interval=0.5,
