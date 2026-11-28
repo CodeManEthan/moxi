@@ -381,6 +381,53 @@ def test_a_computed_key_is_refused_and_a_constant_is_read(repo):
     assert "reads MOXI_ALPHA_MODE" in found[1]
 
 
+def test_a_plugin_must_name_each_moxi_variable_it_reads_in_its_run_inputs(repo):
+    repo.src("module.py", announcement(INTERNAL_ENV="{'MOXI_ALPHA_NAMES': 'the run sets it', "
+                                                    "'MOXI_ALPHA_MORE': 'the run sets it'}"))
+    repo.src("check_plugin.py", """\
+        import os
+        NAMES_ENV = "MOXI_ALPHA_NAMES"
+        RUN_INPUT_ENV = (NAMES_ENV,)
+        def pytest_collection_finish(session):
+            os.environ.get(NAMES_ENV)
+            os.environ.get("MOXI_ALPHA_MORE")
+            os.environ.get("MOXI_TEST_WORKERS")
+            os.environ.get("MOXI_STARTED_BY")
+            os.environ.get("MOXI_ALPHA_HOME")
+            os.environ.get("MOXI_ALPHA_RUNTIME_DIR")
+        """)
+    found = [f for f in repo.findings("5") if "a pytest plugin" in f]
+    # The kit's own names, the start mark and the locators are kept by the clear; check
+    # 5's INTERNAL_ENV rule holds the module's reads of them as for any file.
+    assert [f.split(":")[1] for f in found] == ["6"]
+    assert "a pytest plugin reads MOXI_ALPHA_MORE, which its RUN_INPUT_ENV does not name" in (
+        found[0])
+
+
+def test_a_plugin_that_names_its_inputs_passes(repo):
+    repo.src("module.py", announcement(INTERNAL_ENV="{'MOXI_ALPHA_NAMES': 'the run sets it'}"))
+    repo.src("check_plugin.py", """\
+        import os
+        RUN_INPUT_ENV = ("MOXI_ALPHA_NAMES",)
+        def pytest_configure(config):
+            os.environ.get("MOXI_ALPHA_NAMES")
+        """)
+    assert repo.findings("5") == []
+
+
+def test_a_file_with_no_pytest_function_is_held_to_check_5_alone(repo):
+    repo.src("module.py", announcement(INTERNAL_ENV="{'MOXI_ALPHA_NAMES': 'the run sets it'}"))
+    repo.src("core.py", """\
+        import os
+        def run_pytest():
+            pass
+        class Plugin:
+            def pytest_configure(self, config):
+                os.environ.get("MOXI_ALPHA_NAMES")
+        """)
+    assert repo.findings("5") == []
+
+
 def test_writes_and_tests_are_not_reads_checked(repo):
     repo.src("core.py", "import os\nos.environ['MOXI_ALPHA_X'] = '1'\n"
                         "env = dict(os.environ)\n")

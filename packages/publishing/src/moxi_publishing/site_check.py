@@ -7,6 +7,8 @@ installed, so it imports nothing beyond the standard library. It never imports p
 publishing doesn't depend on it, and the session pytest hands the hook carries what it
 needs. `moxi publishing ci siblings` copies this file beside the run and loads it with
 `-p`; the names to check are in the environment variable below, separated by commas.
+The plugin declares that variable in `RUN_INPUT_ENV`, so a test kit that clears the
+session's variables when a run starts keeps it.
 """
 
 from __future__ import annotations
@@ -16,6 +18,9 @@ import sys
 
 #: The import names of the wheel under test, separated by commas.
 NAMES_ENV = "MOXI_PUBLISHING_SITE_CHECK_NAMES"
+#: The variables the command starting the run sets for this plugin, which a test kit's
+#: clear at the run's start keeps.
+RUN_INPUT_ENV = (NAMES_ENV,)
 
 
 def site_roots() -> set[str]:

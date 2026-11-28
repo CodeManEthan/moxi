@@ -1,4 +1,6 @@
-# The same check a contributor runs before asking for a merge: `moxi-dev check`.
+# The same check a contributor runs before asking for a merge: `moxi-dev check`, here
+# with `--with-dependents`, so a pushed branch checks the packages it touches and every
+# package that depends on one.
 # A merge queue's candidate, pushed to a ci/queue- branch, is checked by queue.yml
 # instead, and this workflow ignores those branches; it runs on every other one.
 # Linux runs on every push to any of them; Windows and macOS run on pushes to main,
@@ -57,7 +59,7 @@ jobs:
       - run: uv sync --locked
       - name: check the change against main
         if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/') && !startsWith(github.ref, 'refs/heads/ci-full/')
-        run: uv run --locked moxi-dev check --base origin/main
+        run: uv run --locked moxi-dev check --with-dependents --base origin/main
       - name: check everything
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci/') || startsWith(github.ref, 'refs/heads/ci-full/')
         run: uv run --locked moxi-dev check --full

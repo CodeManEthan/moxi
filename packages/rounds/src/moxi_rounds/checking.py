@@ -15,7 +15,8 @@ do not count. A run of one step is never read for another.
 
 **A queue project's check** (`land = "queue"`) is the repo's `check.scoped` command,
 `{base}` filled in with the merge-base of `T` and the target's head: the check of the
-packages the build touched and their dependents. It pushes nothing and reads no CI.
+packages the build touched; the candidate's CI run adds every package that depends on
+them. It pushes nothing and reads no CI.
 `--full` runs the repo's `check.command` there instead, as in any other project, and
 records it; `land` is neither read for it nor changed. The step is met at `T` by the
 newest run passing with either argv as the settings give it now (`steps.Seen.check`,
