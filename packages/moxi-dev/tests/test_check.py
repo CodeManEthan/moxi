@@ -672,7 +672,7 @@ def run(cmd, cwd, env, /, *, timeout_s=None):
 
 if len(sys.argv) > 3:
     import signal
-    signal.signal(getattr(signal, sys.argv[3]), signal.SIG_IGN)
+    signal.signal(getattr(signal, sys.argv[3]), getattr(signal, sys.argv[4]))
 result = check.check(Path(sys.argv[1]), run=run, full=True, env=dict(os.environ),
                      plan=lambda package, work, members: [])
 sys.exit(result.code)
@@ -687,13 +687,18 @@ def test_a_check_ended_by_a_signal_ends_the_package_run_under_way(repo, tmp_path
     import signal
 
     pids_file = tmp_path / "pids"
-    checker = subprocess.Popen([sys.executable, "-c", SIGNALLED, str(repo), str(pids_file)],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    signum = getattr(signal, name)
+    before = signal.signal(signum, signal.SIG_IGN)
+    try:
+        checker = subprocess.Popen(
+            [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), name, "SIG_DFL"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        signal.signal(signum, before)
     try:
         wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
                  testing.PROC_WAIT_S, what="the package run to start")
         run_pid, child = (int(one) for one in pids_file.read_text().split())
-        signum = getattr(signal, name)
         checker.send_signal(signum)
         assert checker.wait(timeout=testing.PROC_WAIT_S) == 128 + signum
         wait_for(lambda: not _running(run_pid) and not _running(child), testing.PROC_WAIT_S,
@@ -720,7 +725,7 @@ def test_a_check_started_ignoring_sighup_survives_it_and_its_run_goes_on(repo, t
 
     pids_file = tmp_path / "pids"
     checker = subprocess.Popen(
-        [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), "SIGHUP"],
+        [sys.executable, "-c", SIGNALLED, str(repo), str(pids_file), "SIGHUP", "SIG_IGN"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_for(lambda: pids_file.exists() and " " in pids_file.read_text(),
