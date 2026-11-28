@@ -9,8 +9,12 @@ takes any object with the same methods, so a test gives it a stand-in.
   run on it. It gives git's exit code and what it printed.
 - `local(place, values)` runs the setting's `local` command at the candidate checked out
   at `place`, placeholders filled from `values`, for at most its `timeout_s`; None when
-  `local` is `none`. Its output goes to `local_log`. The command holds its own locks, as
-  a check's does (moxi's runs under `gate.lock` and `check.lock`).
+  `local` is `none`. Its output goes to `local_log`. It holds a place of the machine's
+  check lock for the run, as a check's run does (`check_line.slot`), its ticket first in
+  line (`first`), admitted beside running checks by `ci.local`'s own `memory_mib`; the
+  waiting lines go to `say`. The command runs with the place's tag, its first process
+  named in the holder record, and everything it started is ended before the place is
+  let go. The `Local` it gives names the place it held (`Local.held`).
 - `read(place, commit)` reads a candidate's CI at `commit` as `check` reads it
   (`ci.read_runs`), by the workflows the setting gives candidates
   (`ci.Declared.candidate_workflows`), as one `Read`: the whole reading, `cancelled`
@@ -42,13 +46,14 @@ from __future__ import annotations
 import shlex
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from moxi import proc
 
-from . import checking, ci, gitreads
+from . import check_line, checking, ci, gitreads
 from . import failures as failing
 
 #: How long a push or a rerun may take, in seconds.
@@ -72,12 +77,15 @@ class Said:
 @dataclass(frozen=True)
 class Local:
     """A run of `ci.local` at a candidate: the argv, its exit code (None when it ran past
-    its limit), how long it took and the file its output went to."""
+    its limit), how long it took, the file its output went to, and what its record says
+    of the check lock's place it held (`held`, as `checking.lock_fields` gives it; empty
+    when none is known)."""
 
     argv: tuple[str, ...]
     exit_code: int | None
     duration_s: float
     output: str
+    held: Mapping = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -115,11 +123,18 @@ def _said(argv: Sequence[str], *, cwd, timeout_s: float | None) -> Said:
 
 class QueueCi:
     """A queue project's candidate CI from its `ci` setting `found`, whose `local` output
-    goes to `local_log`."""
+    goes to `local_log`. Its `local` run takes the machine's check lock with `at_once`
+    and `need_mib` (the `check_lock` settings), in rounds' folder of lock files as `env`
+    places it, and gives its waiting lines to `say`."""
 
-    def __init__(self, found: ci.Declared, *, local_log: Path):
+    def __init__(self, found: ci.Declared, *, local_log: Path, at_once: int = 1,
+                 need_mib: int = 0, env=None, say: Callable[[str], None] | None = None):
         self.found = found
         self.local_log = local_log
+        self.at_once = at_once
+        self.need_mib = need_mib
+        self.env = env
+        self.say = say
 
     def push(self, place: Path, commit: str, ref: str) -> Said:
         return _said(["git", "push", str(self.found.remote), f"+{commit}:refs/heads/{ref}"],
@@ -133,16 +148,29 @@ class QueueCi:
         if self.found.local is None:
             return None
         argv = tuple(checking.fill(self.found.local, values))
-        began = time.monotonic()
-        try:
-            done = proc.run(list(argv), timeout_s=self.found.local_timeout_s or LOCAL_TIMEOUT_S,
-                            env=gitreads.git_env(), cwd=place, output=self.local_log)
-            code: int | None = done.returncode
-        except subprocess.TimeoutExpired:
-            code = None
-        except OSError:
-            code = 127
-        return Local(argv, code, round(time.monotonic() - began, 1), str(self.local_log))
+        fields = {**check_line.me(), "round": values.get("round"),
+                  "stage": values.get("stage"), "step": ci.LOCAL, "repo": values.get("repo")}
+        with check_line.slot(checking.lock_file(self.env), fields,
+                             memory_mib=self.found.local_memory_mib, at_once=self.at_once,
+                             need_mib=self.need_mib, first=True, say=self.say,
+                             available=check_line.available_mib) as taken:
+            check_line.update_holder(taken.path, output=str(self.local_log))
+            began = time.monotonic()
+            try:
+                done = proc.run(list(argv),
+                                timeout_s=self.found.local_timeout_s or LOCAL_TIMEOUT_S,
+                                env=gitreads.git_env(), cwd=place, output=self.local_log,
+                                tag=taken.tag,
+                                on_start=partial(check_line.name_first, taken.path),
+                                end_leftovers=True)
+                code: int | None = done.returncode
+            except subprocess.TimeoutExpired:
+                code = None
+            except OSError:
+                code = 127
+            duration_s = round(time.monotonic() - began, 1)
+        return Local(argv, code, duration_s, str(self.local_log),
+                     checking.lock_fields(taken))
 
     def read(self, place: Path, commit: str) -> Read:
         return self._read(place, commit, is_candidate=True)

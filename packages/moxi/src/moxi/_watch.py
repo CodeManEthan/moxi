@@ -20,6 +20,10 @@ left. A process that has ended and was not yet reaped (a zombie) counts as gone.
 
 A descendant started and moved away from the child's tree between two scans (a wrapper
 that forks and exits at once) is never seen, so it is not reached.
+
+The ending of a set of processes (`end`) is shared: `moxi.proc.run` with
+`end_leftovers=True` ends a run's process group and the processes carrying its tag
+through it.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ import math
 import os
 import sys
 import time
+from collections.abc import Callable
 
 #: Seconds between SIGTERM and SIGKILL.
 GRACE = 2.0
@@ -96,63 +101,95 @@ class Watch:
                     if pid != self.pid:
                         self.watched[pid] = started
 
+    def members(self) -> list:
+        """The child, while it lives, and every watched process still alive, as
+        `psutil.Process`es."""
+        return [p for p in [self.child(), *self.live()] if p is not None]
+
     def done(self) -> bool:
         """True when the child is gone and no watched process is left."""
-        return self.child() is None and not self.live()
+        return not self.members()
 
     def stop(self, grace: float = GRACE) -> None:
         """End the child and everything watched: SIGTERM, then SIGKILL for what is left
-        after `grace` seconds."""
+        after `grace` seconds (`end`)."""
         import signal
 
-        # Scan first: a child that dies of the SIGTERM before the scan after it leaves its
-        # descendants to init, where no scan finds them. A descendant born between this scan
-        # and the SIGTERM, to a child that then dies of it, can still be missed.
-        self.scan()
-        self._send(signal.SIGTERM)
-        self.scan()
-        deadline = time.monotonic() + grace
-        while time.monotonic() < deadline and not self.done():
-            time.sleep(_POLL)
-        self._freeze()
-        self._send(signal.SIGKILL)
-        deadline = time.monotonic() + _REAP
-        while time.monotonic() < deadline and not self.done():
-            time.sleep(_POLL)
+        end(self.members, first_signal=signal.SIGTERM, grace_s=grace, grow=self.scan)
 
-    def _freeze(self) -> None:
-        """Scan once more, with the tree held still: SIGSTOP the child and every watched
-        process, wait for them to stop, scan, and do the same for what the scan adds. A
-        stopped process starts nothing, so nothing is born between the last scan and the
-        SIGKILL that follows."""
-        import psutil
-        import signal
 
-        held: set[int] = set()
-        for _ in range(_FREEZE_ROUNDS):
-            batch = [p for p in [self.child(), *self.live()]
-                     if p is not None and p.pid not in held]
-            if not batch:
-                return
-            for process in batch:
-                held.add(process.pid)
-                try:
-                    process.send_signal(signal.SIGSTOP)
-                except psutil.Error:
-                    pass
-            deadline = time.monotonic() + _FREEZE_WAIT
-            while time.monotonic() < deadline and not all(map(_still, batch)):
-                time.sleep(0.01)
-            self.scan()
+def end(members: Callable[[], list], *, first_signal: int, grace_s: float,
+        grow: Callable[[], None] | None = None,
+        wait: Callable[[float], None] | None = None) -> None:
+    """End a set of processes: `first_signal`, up to `grace_s` seconds for them to go,
+    then SIGKILL for every one left, and up to five seconds more for those to go.
 
-    def _send(self, signum: int) -> None:
-        import psutil
+    `members()` gives the set as it is now, as `psutil.Process`es, each named by its pid
+    and start time so a pid given to another process since is never signalled; one that
+    has ended is not in it. `grow()`, when given, adds to the set what `members()` alone
+    would not find: it is called before the first signal (a process that dies of it can
+    leave its descendants to init, where no later look finds them), after it, and in the
+    last look. `wait(deadline)`, when given, is called once after the first signal with
+    the monotonic time the grace ends, for a caller that must do something while it waits
+    (read a child's pipes); the grace then goes on until `members()` is empty or the
+    deadline passes.
 
-        for process in [p for p in [self.child(), *self.live()] if p is not None]:
+    The last look before SIGKILL holds the set still: each member is stopped with
+    SIGSTOP, so none starts another between that look and the kill. POSIX only.
+    """
+    import signal
+
+    grow = grow or (lambda: None)
+    # Grow first: a process that dies of the first signal before the look after it
+    # leaves its descendants to init, where no look finds them. One born between this
+    # look and the signal, to a process that then dies of it, can still be missed.
+    grow()
+    _send(members(), first_signal)
+    grow()
+    deadline = time.monotonic() + grace_s
+    if wait is not None:
+        wait(deadline)
+    while time.monotonic() < deadline and members():
+        time.sleep(_POLL)
+    _freeze(members, grow)
+    _send(members(), signal.SIGKILL)
+    deadline = time.monotonic() + _REAP
+    while time.monotonic() < deadline and members():
+        time.sleep(_POLL)
+
+
+def _freeze(members: Callable[[], list], grow: Callable[[], None]) -> None:
+    """Look once more, with the set held still: SIGSTOP every member, wait for them to
+    stop, grow the set, and do the same for what that adds. A stopped process starts
+    nothing, so nothing is born between the last look and the SIGKILL that follows."""
+    import psutil
+    import signal
+
+    held: set[int] = set()
+    for _ in range(_FREEZE_ROUNDS):
+        batch = [p for p in members() if p.pid not in held]
+        if not batch:
+            return
+        for process in batch:
+            held.add(process.pid)
             try:
-                process.send_signal(signum)
+                process.send_signal(signal.SIGSTOP)
             except psutil.Error:
-                pass  # gone since it was matched
+                pass
+        deadline = time.monotonic() + _FREEZE_WAIT
+        while time.monotonic() < deadline and not all(map(_still, batch)):
+            time.sleep(0.01)
+        grow()
+
+
+def _send(processes: list, signum: int) -> None:
+    import psutil
+
+    for process in processes:
+        try:
+            process.send_signal(signum)
+        except psutil.Error:
+            pass  # gone since it was matched
 
 
 def _still(process) -> bool:
