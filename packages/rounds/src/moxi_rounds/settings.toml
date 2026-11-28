@@ -170,6 +170,14 @@ label = "Free memory a second check needs"
 line = "0 sums each run's memory_mib."
 unit = "MiB"
 
+[lanes]
+type = "table"
+default = {}
+doc = "Other machines a check can be sent to, [lanes.<name>]: host (the ssh destination, a Host of your ssh config or user@host; required), moxi (the command line that runs Moxi there, as its login shell reads it; default moxi; on a Windows machine give a full path), ssh (the words that run the ssh client here, a list used as given; default [\"ssh\"]), connect_timeout_s (how long reaching the host may take, in seconds, above 0; default 10) and shared_lock (the path, on that machine, of a lock file its own scheduled work holds; a run there takes it too). A project sends checks only to the lanes its [projects.<key>.lanes.<name>] tables name."
+read = "use"
+label = "Other machines checks can run on"
+line = "[lanes.<name>] tables: host, moxi, ssh, connect_timeout_s, shared_lock."
+
 [watched_paths_guard.enabled]
 type = "bool"
 default = false
@@ -183,7 +191,7 @@ hurts = { when = "off", says = "turns this guard off", confirm = "From the next 
 [projects]
 type = "table"
 default = {}
-doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check (command, scoped, timeout_s and memory_mib, the most memory one run holds, in MiB), ci, finish, shared_paths, keep_branch, lock_ref, brief, private_files, checklist, watched_paths and verifier_brief."
+doc = "Per-project tables, [projects.<key>]: any key of defaults, and the project's own dir, into, land, check (command, scoped, timeout_s and memory_mib, the most memory one run holds, in MiB), ci, finish, shared_paths, keep_branch, lock_ref, brief, private_files, checklist, watched_paths and verifier_brief; and lanes, [projects.<key>.lanes.<name>], one table per lane of [lanes] the project sends checks to, in the order they are asked: command and scoped (the words that run there in place of the check's own, with the same placeholders), timeout_s (the time limit there, in seconds), memory_mib (the most memory one run there holds, in MiB, which fills {memory_mib} in the lane's words) and preflight (command lines run there in the run's tree before each run; each must exit 0)."
 read = "use"
 label = "Each project's own settings"
 line = "[projects.<key>] tables: any key of defaults, and the project's own dir, into, land, check, finish, checklist, watched_paths, verifier_brief and more."

@@ -33,6 +33,7 @@ DEFAULTS = {
     "sweep.grace_hours": 2,
     "check_lock.at_once": 1,
     "check_lock.need_mib": 0,
+    "lanes": {},
     "watched_paths_guard.enabled": False,
     "projects": {},
 }
@@ -46,7 +47,7 @@ TYPES = {
     "defaults.sitting_at": "int", "defaults.disposable": "list", "sweep.armed": "bool",
     "sweep.at_start": "bool", "sweep.grace_hours": "int",
     "check_lock.at_once": "int", "check_lock.need_mib": "int",
-    "watched_paths_guard.enabled": "bool", "projects": "table",
+    "lanes": "table", "watched_paths_guard.enabled": "bool", "projects": "table",
 }
 
 FLOWS = """\

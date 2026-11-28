@@ -224,7 +224,7 @@ RECORD = lb.Out("table", nullable=True, items={
     "runs": _list(lb.Out("table", items={
         "step": _s(), "exit_code": lb.Out("int", nullable=True),
         "duration_s": lb.Out("float", nullable=True), "commit": _s(), "at": _s(),
-        "output": _s("path")})),
+        "output": _s("path"), "lane": _s()})),
     "drift": lb.Out("table", nullable=True, items={
         "why": _s("scrub"), "owed": BOOL, "moved": lb.Out("int", nullable=True),
         "meeting": _list(lb.Out("string", mark="path")),

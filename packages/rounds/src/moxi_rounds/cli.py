@@ -9,7 +9,7 @@
                            [--slice ID=TEXT --minutes N]... [--record PTR] [--existing]
                            [--as NAME]
     moxi rounds check [ROUND STAGE] [--step NAME | --full] [--timeout-s N] [--no-wait]
-                      [--as NAME]
+                      [--urgent | --lane NAME] [--as NAME]
     moxi rounds finish [ROUND STAGE] [--again ID | --urgent | --leave] [--as NAME]
     moxi rounds ask ROUND|PROJECT TEXT --from PTR [--blocks LIST|none] [--record PTR]
                     [--option K=TEXT]... [--as NAME]
@@ -45,6 +45,7 @@
     moxi rounds next [ROUND] [--json]
     moxi rounds queue [--repo KEY] [--resume] [--as NAME]
     moxi rounds land --repo KEY
+    moxi rounds serve [--probe]
     moxi rounds next --schema design|build|step|majors|retro|answer
     moxi rounds show ROUND [--json]
     moxi rounds list [PROJECT] [--closed] [--json]
@@ -179,7 +180,11 @@ Up to `check_lock.at_once` runs at a time on the machine (one by default) hold a
 of the check lock: a run waits in line, taking a place in the order the runs asked (a
 lander's first) and beside others only when memory allows, or with `--no-wait` is
 refused while no place can be taken now. Everything the run started is ended before its
-place frees. The run is recorded with its commit, the place it held, that
+place frees. In a project that names lanes (`[projects.<key>.lanes.<name>]`), a run of
+its check that can't take a place here at once goes to the first of those lanes that is
+free now, over ssh, under that machine's own check lock, and else waits here;
+`--urgent` keeps it here and `--lane NAME` sends it to that lane. A check by CI and a
+step of your own run here. The run is recorded with its commit, the place it held, that
 commit's merge-base with the target, the argv as it ran, its exit code and its
 duration; when the tip moved or the worktree changed while it ran, nothing is
 recorded. Run with no round in a build's worktree, it checks that build. A check
@@ -1458,7 +1463,17 @@ def _declare_check(verbs) -> None:
     parser.add_argument("--no-wait", action="store_true", dest="no_wait",
                         help="refuse at once when no place of this machine's check "
                              "lock can be taken now (every place held, a run waiting in "
-                             "line, or too little memory), in place of waiting in line")
+                             "line, or too little memory), nor of a lane's, in place of "
+                             "waiting in line")
+    where = parser.add_mutually_exclusive_group()
+    where.add_argument("--urgent", action="store_true",
+                       help="run the check on this machine, waiting in its line, and "
+                            "ask no lane")
+    where.add_argument("--lane", metavar="NAME",
+                       help="run the check on the lane NAME, one the project's "
+                            "[projects.<key>.lanes.NAME] names, waiting in that "
+                            "machine's line; refused when it can't be reached or isn't "
+                            "ready")
     _writes(parser)
 
 
@@ -1477,13 +1492,15 @@ def _check(args, out) -> int:
                           "build's worktree")
     ran = checking.check(name, stage, by=_actor(args), step=args.step,
                          full=args.full, timeout_s=args.timeout_s, wait=not args.no_wait,
-                         say=lambda line: print(line, file=sys.stderr, flush=True))
+                         say=lambda line: print(line, file=sys.stderr, flush=True),
+                         urgent=args.urgent, lane=args.lane)
     if isinstance(ran, checking.CiChecked):
         return _ci_checked(ran, args, out)
     code = ran.exit_code
     how = ("passed" if ran.passed else "was ended at its time limit" if code is None
            else f"failed: exit {code}")
-    print(f"{ran.step} {ran.name} {ran.stage} at {ran.commit[:12]}: {how}, in "
+    on = "" if ran.lane is None else f" on lane {ran.lane} ({ran.lane_host})"
+    print(f"{ran.step} {ran.name} {ran.stage} at {ran.commit[:12]}{on}: {how}, in "
           f"{ran.duration_s:g} s", file=out)
     print(f"ran: {shlex.join(ran.argv)}", file=out)
     print(f"output: {ran.output}", file=out)
@@ -2016,6 +2033,27 @@ def _land(args, out) -> int:
     return codes.OK
 
 
+# -- serve -------------------------------------------------------------------------------
+
+def _declare_serve(verbs) -> None:
+    said = ("The far side of a lane: run by another machine over ssh, not by hand. It "
+            "reads one request on stdin, takes a place of this machine's check lock, "
+            "takes the build's commit and brought private files, runs the check in a "
+            "tree of its own and sends its output and result on stdout, in frames. With "
+            "--probe it answers the doctor's round trip instead.")
+    parser = verbs.add_parser("serve", help=said, description=said)
+    parser.add_argument("--probe", action="store_true",
+                        help="answer the doctor's probe: the payload as read, whether "
+                             "stdin's end was seen, this machine's name, memory and "
+                             "check lock, and each preflight line's result")
+
+
+def _serve(args, out) -> int:
+    from . import serving
+
+    return serving.main(probe_only=args.probe)
+
+
 # -- show --------------------------------------------------------------------------------
 
 def _declare_show(verbs) -> None:
@@ -2132,7 +2170,8 @@ _DECLARE: tuple[Callable, ...] = (_declare_open, _declare_fold, _declare_verdict
                                   _declare_ask,
                                   _declare_rule,
                                   _declare_mark, _declare_drop, _declare_next,
-                                  _declare_queue, _declare_land, _declare_show,
+                                  _declare_queue, _declare_land, _declare_serve,
+                                  _declare_show,
                                   _declare_list)
 
 #: Each verb's name -> the function that runs it, as `fn(args, out) -> int`.
@@ -2142,7 +2181,7 @@ _VERBS: dict[str, Callable] = {"open": _open, "fold": _fold, "verdict": _verdict
                                "ask": _ask, "rule": _rule,
                                "mark": _mark, "drop": _drop, "next": _next,
                                "queue": _queue, "land": _land,
-                               "show": _show,
+                               "serve": _serve, "show": _show,
                                "list": _list}
 
 
