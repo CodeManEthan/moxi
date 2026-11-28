@@ -50,15 +50,15 @@ def test_the_scope_and_the_verbs_import_where_there_is_no_sighup(tmp_path):
 
 # --- the figures -----------------------------------------------------------------------
 
-@pytest.mark.parametrize("workers, high, top", [(1, 3008, 4544), (8, 6592, 8128),
-                                                (16, 10688, 12224)])
+@pytest.mark.parametrize("workers, high, top", [(1, 5312, 6848), (8, 8000, 9536),
+                                                (16, 11072, 12608)])
 def test_the_default_figures_follow_the_worker_count(workers, high, top):
     found = scope.figures({}, workers)
     assert (found.high_mib, found.max_mib) == (high, top)
     assert found.source() == f"the default for {workers} worker{'s' * (workers != 1)}"
 
 
-@pytest.mark.parametrize("workers, line_mib", [(8, 6262.4), (16, 10153.6)])
+@pytest.mark.parametrize("workers, line_mib", [(8, 7600.0), (16, 10518.4)])
 def test_the_line_is_95_percent_of_high_unrounded(workers, line_mib):
     found = scope.figures({}, workers)
     assert found.line_bytes == pytest.approx(line_mib * MIB)
@@ -66,10 +66,10 @@ def test_the_line_is_95_percent_of_high_unrounded(workers, line_mib):
 
 def test_each_variable_replaces_its_own_default_alone():
     high = scope.figures({scope.MEMORY_HIGH_ENV: "5000"}, 8)
-    assert (high.high_mib, high.max_mib, high.high_set, high.max_set) == (5000, 8128, True,
+    assert (high.high_mib, high.max_mib, high.high_set, high.max_set) == (5000, 9536, True,
                                                                          False)
     top = scope.figures({scope.MEMORY_MAX_ENV: "9000"}, 8)
-    assert (top.high_mib, top.max_mib) == (6592, 9000)
+    assert (top.high_mib, top.max_mib) == (8000, 9000)
     assert top.source() == f"set by {scope.MEMORY_MAX_ENV}"
 
 
@@ -83,7 +83,7 @@ def test_max_none_runs_with_no_scope():
                                  {scope.MEMORY_MAX_ENV: "1.5"},
                                  {scope.MEMORY_MAX_ENV: "-100"},
                                  {scope.MEMORY_HIGH_ENV: "6G"},
-                                 {scope.MEMORY_HIGH_ENV: "8128"},
+                                 {scope.MEMORY_HIGH_ENV: "9536"},
                                  {scope.MEMORY_HIGH_ENV: "900", scope.MEMORY_MAX_ENV: "800"}])
 def test_a_bad_value_or_a_high_not_below_the_max_is_refused(env):
     with pytest.raises(ScopeError):
@@ -93,15 +93,15 @@ def test_a_bad_value_or_a_high_not_below_the_max_is_refused(env):
 @pytest.mark.parametrize("env, high_from, max_from", [
     ({scope.MEMORY_MAX_ENV: "6000"}, "the default for 8 workers",
      f"set by {scope.MEMORY_MAX_ENV}"),
-    ({scope.MEMORY_HIGH_ENV: "8128"}, f"set by {scope.MEMORY_HIGH_ENV}",
+    ({scope.MEMORY_HIGH_ENV: "9536"}, f"set by {scope.MEMORY_HIGH_ENV}",
      "the default for 8 workers"),
     ({scope.MEMORY_HIGH_ENV: "900", scope.MEMORY_MAX_ENV: "800"},
      f"set by {scope.MEMORY_HIGH_ENV}", f"set by {scope.MEMORY_MAX_ENV}")])
 def test_the_refusal_names_where_each_figure_came_from(env, high_from, max_from):
     with pytest.raises(ScopeError) as caught:
         scope.figures(env, 8)
-    high, top = int(env.get(scope.MEMORY_HIGH_ENV, 6592)), int(env.get(scope.MEMORY_MAX_ENV,
-                                                                         8128))
+    high, top = int(env.get(scope.MEMORY_HIGH_ENV, 8000)), int(env.get(scope.MEMORY_MAX_ENV,
+                                                                         9536))
     assert str(caught.value).startswith(f"MemoryHigh {high} MiB ({high_from}) is not below "
                                         f"MemoryMax {top} MiB ({max_from}), and the high "
                                         f"must sit below the max: ")
@@ -111,7 +111,7 @@ def test_the_refusal_names_where_each_figure_came_from(env, high_from, max_from)
     ({scope.MEMORY_MAX_ENV: "6000"},
      f"a {scope.MEMORY_MAX_ENV} at or below the default MemoryHigh needs "
      f"{scope.MEMORY_HIGH_ENV} set below it too"),
-    ({scope.MEMORY_HIGH_ENV: "8128"},
+    ({scope.MEMORY_HIGH_ENV: "9536"},
      f"set {scope.MEMORY_HIGH_ENV} lower, or {scope.MEMORY_MAX_ENV} above it"),
     ({scope.MEMORY_HIGH_ENV: "900", scope.MEMORY_MAX_ENV: "800"},
      f"set {scope.MEMORY_HIGH_ENV} below {scope.MEMORY_MAX_ENV}")])
@@ -122,20 +122,20 @@ def test_the_refusal_says_how_to_go_lower(env, how):
 
 
 def test_a_max_below_the_default_max_but_above_the_default_high_runs():
-    found = scope.figures({scope.MEMORY_MAX_ENV: "6593"}, 8)
-    assert (found.high_mib, found.max_mib) == (6592, 6593)
+    found = scope.figures({scope.MEMORY_MAX_ENV: "8001"}, 8)
+    assert (found.high_mib, found.max_mib) == (8000, 8001)
     with pytest.raises(ScopeError):
-        scope.figures({scope.MEMORY_MAX_ENV: "6592"}, 8)
+        scope.figures({scope.MEMORY_MAX_ENV: "8000"}, 8)
     found = scope.figures({scope.MEMORY_MAX_ENV: "6000", scope.MEMORY_HIGH_ENV: "5000"}, 8)
     assert (found.high_mib, found.max_mib) == (5000, 6000)
 
 
 def test_a_max_below_the_default_warns_with_the_default_figure():
-    found = scope.figures({scope.MEMORY_MAX_ENV: "7000"}, 8)
+    found = scope.figures({scope.MEMORY_MAX_ENV: "9000"}, 8)
     assert scope.below_default(found) == (
-        f"{scope.MEMORY_MAX_ENV} 7000 is below the 8128 MiB the suite needs at 8 workers; "
-        f"expect a kill, or lower {scope.WORKERS_ENV}")
-    assert scope.below_default(scope.figures({scope.MEMORY_MAX_ENV: "9000"}, 8)) is None
+        f"{scope.MEMORY_MAX_ENV} 9000 is below the {scope.default_max_mib(8)} MiB the suite "
+        f"needs at 8 workers; expect a kill, or lower {scope.WORKERS_ENV}")
+    assert scope.below_default(scope.figures({scope.MEMORY_MAX_ENV: "10000"}, 8)) is None
     assert scope.below_default(scope.figures({}, 8)) is None
 
 
@@ -247,7 +247,7 @@ def test_the_argv_on_258_has_every_property_and_the_flag():
     assert argv[:argv.index("--")] == [
         "systemd-run", "--user", "--scope", "--quiet", "--expand-environment=no",
         "--unit=moxi-dev-check-0123456789ab.scope", "--description=moxi-dev check in /r",
-        "-p", "MemoryHigh=6592M", "-p", "MemoryMax=8128M", "-p", "MemorySwapMax=0",
+        "-p", "MemoryHigh=8000M", "-p", "MemoryMax=9536M", "-p", "MemorySwapMax=0",
         "-p", "OOMPolicy=kill"]
     after = argv[argv.index("--") + 1:]
     assert after[:3] == ["/py", "-I", "-c"] and after[3] == scope.STARTED
@@ -264,7 +264,7 @@ def test_each_option_goes_by_its_own_programs_version(client, manager, flag, pol
     argv = argv_for(Host(client=client, manager=manager, line_figures=True))
     assert ("--expand-environment=no" in argv) is flag
     assert ("OOMPolicy=kill" in argv) is policy
-    assert "MemoryMax=8128M" in argv and "MemorySwapMax=0" in argv
+    assert "MemoryMax=9536M" in argv and "MemorySwapMax=0" in argv
 
 
 def test_no_line_figures_gives_no_memory_high():
@@ -412,12 +412,12 @@ def test_the_sampler_keeps_the_largest_u(tmp_path):
     assert scope.Sampler(None).start().stop() is None
 
 
-def inner_cgroup(tmp_path, *, high="6912212992", peak="6120000000",
+def inner_cgroup(tmp_path, *, high="8388608000", peak="6120000000",
                  pressure="some avg10=0.00 avg60=0.00 avg300=0.00 total=400000\n"):
     group = tmp_path / "scope"
     group.mkdir()
     (group / "memory.high").write_text(high + "\n")
-    (group / "memory.max").write_text(str(8128 * MIB) + "\n")
+    (group / "memory.max").write_text(str(9536 * MIB) + "\n")
     if peak is not None:
         (group / "memory.peak").write_text(peak + "\n")
     if pressure is not None:
@@ -427,31 +427,31 @@ def inner_cgroup(tmp_path, *, high="6912212992", peak="6120000000",
 
 def test_the_report_names_peak_held_line_high_max_and_stalled(tmp_path):
     report = scope.memory_report(inner_cgroup(tmp_path), held=5000 * MIB)
-    assert report.field == ("peak 5.7G, held 4.9G, line 6.1G, high 6.4G, max 7.9G, "
+    assert report.field == ("peak 5.7G, held 4.9G, line 7.4G, high 7.8G, max 9.3G, "
                             "stalled 0.4s")
     assert report.lines == []
 
 
 def test_the_near_line_line_comes_at_90_percent_of_the_line(tmp_path):
     group = inner_cgroup(tmp_path)
-    line = 6592 * MIB * 0.95
+    line = 8000 * MIB * 0.95
     assert scope.memory_report(group, held=int(0.9 * line) - 1).lines == []
     lines = scope.memory_report(group, held=int(0.9 * line) + 1).lines
-    assert len(lines) == 1 and lines[0].startswith("held 5.5G it can't give back, within a "
-                                                   "tenth of its line 6.1G")
+    assert len(lines) == 1 and lines[0].startswith("held 6.7G it can't give back, within a "
+                                                   "tenth of its line 7.4G")
 
 
 def test_a_stall_of_10s_warns(tmp_path):
     group = inner_cgroup(tmp_path, pressure="some avg10=1 avg60=1 avg300=1 total=41200000\n")
     lines = scope.memory_report(group, held=10).lines
-    assert lines == [f"the check waited on memory for 41.2s (MemoryHigh 6.4G, peak 5.7G); "
+    assert lines == [f"the check waited on memory for 41.2s (MemoryHigh 7.8G, peak 5.7G); "
                      f"fewer workers or a higher {scope.MEMORY_HIGH_ENV} would speed it up"]
 
 
 def test_missing_parts_are_named(tmp_path):
     group = inner_cgroup(tmp_path, high="max", peak=None, pressure=None)
     assert scope.memory_report(group, held=10).field == (
-        "peak unknown, high not set (no kernel memory figures), max 7.9G, stalled unknown")
+        "peak unknown, high not set (no kernel memory figures), max 9.3G, stalled unknown")
 
 
 def test_leftovers_are_killed_but_the_kept_one(tmp_path):
@@ -649,8 +649,8 @@ def test_no_started_byte_is_exit_2_pointing_at_systemd_run(tmp_path):
 
 
 def runaway(rig, n=5):
-    line_mib = 6592 * 0.95
-    return [rig.stat(line_mib + 10, high=k, current_mib=6600, peak_mib=6650)
+    line_mib = 8000 * 0.95
+    return [rig.stat(line_mib + 10, high=k, current_mib=8008, peak_mib=8058)
             for k in range(1, n + 1)]
 
 
@@ -669,20 +669,20 @@ def test_a_runaway_is_ended_past_its_line_the_line_said_before_the_kill(tmp_path
     rig.outer.system.output = calls
     outcome = rig.run()
     assert outcome.code == 1
-    assert outcome.memory == ("ended past its line (held 6.1G, line 6.1G, high 6.4G, max "
-                              "7.9G, peak 6.5G)")
+    assert outcome.memory == ("ended past its line (held 7.4G, line 7.4G, high 7.8G, max "
+                              "9.3G, peak 7.9G)")
     assert said_at_kill and len(said_at_kill[0]) == 1
     line = said_at_kill[0][0]
-    assert line.startswith("moxi-dev check: ended for memory: u.scope held 6.1G it can't "
+    assert line.startswith("moxi-dev check: ended for memory: u.scope held 7.4G it can't "
                            "give back (anonymous, shared and kernel memory) for 5s, past its "
-                           "line 6.1G under MemoryHigh 6.4G (now 6.4G, peak 6.5G, MemoryMax "
-                           "7.9G; the default for 8 workers).")
+                           "line 7.4G under MemoryHigh 7.8G (now 7.8G, peak 7.9G, MemoryMax "
+                           "9.3G; the default for 8 workers).")
     assert ["systemctl", "--user", "kill", "--signal=SIGKILL", "u.scope"] in rig.calls.calls
 
 
 def test_a_check_under_its_line_is_never_ended(tmp_path):
     rig = Rig(tmp_path, child=Child(code=0, alive=12))
-    rig.waiter.steps = [rig.stat(6000, high=k * 1000, current_mib=6592, peak_mib=6592,
+    rig.waiter.steps = [rig.stat(6000, high=k * 1000, current_mib=8000, peak_mib=8000,
                                  stalled_us=k * 10**6) for k in range(12)]
     outcome = rig.run()
     assert outcome.code == 0 and rig.said == [] and not rig.systemctl("kill")
@@ -703,7 +703,7 @@ def test_a_read_that_fails_mid_run_stops_the_watch_with_no_error(tmp_path):
 
 def killed_rig(tmp_path, result, memory_peak, *, host=HOST, oom_kill=0, kind="check"):
     show = (f"ActiveState=failed\nResult={result}\nMemoryPeak={memory_peak}\n"
-            f"MemoryMax={8128 * MIB}\n")
+            f"MemoryMax={9536 * MIB}\n")
     rig = Rig(tmp_path, host=host, kind=kind, child=Child(code=-signal.SIGKILL, alive=2),
               answers={("--property=ActiveState,Result,MemoryPeak,MemoryMax",): (0, show)})
     rig.waiter.steps = [rig.stat(5000, high=1, oom_kill=oom_kill, peak_mib=7000,
@@ -712,25 +712,25 @@ def killed_rig(tmp_path, result, memory_peak, *, host=HOST, oom_kill=0, kind="ch
 
 
 def test_a_kernel_kill_at_the_cap_is_named_and_reset(tmp_path):
-    rig = killed_rig(tmp_path, "oom-kill", 8100 * MIB)
+    rig = killed_rig(tmp_path, "oom-kill", 9500 * MIB)
     outcome = rig.run()
-    assert outcome.code == 1 and outcome.memory == "killed at its cap (max 7.9G, peak 7.9G)"
+    assert outcome.code == 1 and outcome.memory == "killed at its cap (max 9.3G, peak 9.3G)"
     assert rig.said[0].startswith("moxi-dev check: killed for memory: u.scope reached its "
-                                  "cap, MemoryMax 7.9G (peak 7.9G; the default for 8 workers)")
+                                  "cap, MemoryMax 9.3G (peak 9.3G; the default for 8 workers)")
     assert ["systemctl", "--user", "reset-failed", "u.scope"] in rig.calls.calls
 
 
 def test_a_kill_below_95_percent_of_max_is_the_machine_running_short(tmp_path):
     rig = killed_rig(tmp_path, "oom-kill", 5100 * MIB)
     outcome = rig.run()
-    assert outcome.memory == "killed while the machine ran short (max 7.9G, peak 5.0G)"
+    assert outcome.memory == "killed while the machine ran short (max 9.3G, peak 5.0G)"
     assert rig.said[0].startswith("moxi-dev check: killed for memory while the machine ran "
-                                  "short, below its cap (peak 5.0G, MemoryMax 7.9G)")
+                                  "short, below its cap (peak 5.0G, MemoryMax 9.3G)")
 
 
 def test_the_peak_is_memory_peak_then_memory_peak_read_then_current(tmp_path):
     old = Host(client=258, manager=254, line_figures=True)    # no MemoryPeak before 255
-    rig = killed_rig(tmp_path, "oom-kill", 8100 * MIB, host=old)
+    rig = killed_rig(tmp_path, "oom-kill", 9500 * MIB, host=old)
     assert "peak 6.8G" in rig.run().memory                     # memory.peak read, 7000 MiB
     rig = killed_rig(tmp_path / "b", "oom-kill", "[not set]")
     (rig.cgroup / "memory.peak").unlink(missing_ok=True)
@@ -739,7 +739,7 @@ def test_the_peak_is_memory_peak_then_memory_peak_read_then_current(tmp_path):
 
 
 def test_an_oom_kill_count_names_a_memory_kill_whatever_the_result(tmp_path):
-    rig = killed_rig(tmp_path, "success", 8100 * MIB, oom_kill=1)
+    rig = killed_rig(tmp_path, "success", 9500 * MIB, oom_kill=1)
     assert rig.run().memory.startswith("killed at its cap")
 
 
@@ -753,7 +753,7 @@ def test_a_sigkill_not_for_memory_is_said_so(tmp_path):
 
 def test_below_253_the_outer_finishes_an_oom_kill_itself(tmp_path):
     old = Host(client=252, manager=252, line_figures=True)
-    rig = killed_rig(tmp_path, "oom-kill", 8100 * MIB, host=old, oom_kill=1)
+    rig = killed_rig(tmp_path, "oom-kill", 9500 * MIB, host=old, oom_kill=1)
     rig.child = Child(code=-signal.SIGKILL, alive=100)
     outcome = rig.run()
     assert ["systemctl", "--user", "kill", "--signal=SIGKILL", "u.scope"] in rig.calls.calls
@@ -773,7 +773,7 @@ def test_sigterm_and_sighup_say_the_state_and_queue_the_stop_at_once(tmp_path, s
     assert outcome.signum == signum
     name = signal.Signals(signum).name
     assert rig.said == [f"moxi-dev check: stopped by {name}; memory then 5.8G, held 5.0G "
-                        f"(line 6.1G, peak 5.9G, MemoryHigh 6.4G, MemoryMax 7.9G, stalled "
+                        f"(line 7.4G, peak 5.9G, MemoryHigh 7.8G, MemoryMax 9.3G, stalled "
                         f"12s of the last 1)"]
     stops = rig.systemctl("stop")
     assert stops == [["systemctl", "--user", "stop", "--no-block", "u.scope"]]
@@ -846,5 +846,5 @@ def test_the_cap_ends_its_leftovers_and_counts_them(tmp_path, monkeypatch):
     outcome = rig.run()
     assert outcome.code == 4
     assert rig.said == ["moxi-dev cap: ended 2 processes the command left running"]
-    assert outcome.memory == "peak 0.2G, held 0.1G, line 6.1G, high 6.4G, max 7.9G, " \
+    assert outcome.memory == "peak 0.2G, held 0.1G, line 7.4G, high 7.8G, max 9.3G, " \
                              "stalled unknown"

@@ -617,12 +617,12 @@ of its own, with MemoryHigh, MemoryMax and no swap, so a check that runs away is
 throttled and then ended alone, and the rest of the machine goes on. The `moxi-dev` you
 started stays outside the scope and watches it once a second.
 
-- **The figures.** By default MemoryHigh is 2496 MiB plus 512 MiB per worker and
-  MemoryMax is 1536 MiB above it: 6592 and 8128 MiB at 8 workers, 10688 and 12224 at 16.
+- **The figures.** By default MemoryHigh is 4928 MiB plus 384 MiB per worker and
+  MemoryMax is 1536 MiB above it: 8000 and 9536 MiB at 8 workers, 11072 and 12608 at 16.
   Lowering `MOXI_TEST_WORKERS` lowers both. `MOXI_TEST_MEMORY_HIGH_MIB` and
   `MOXI_TEST_MEMORY_MAX_MIB` (whole MiB, 64 or more, the high below the max) replace
   them; `MOXI_TEST_MEMORY_MAX_MIB=none` runs the check with no scope. A max set below
-  the default max but above the default high (8128 and 6592 MiB at 8 workers) prints a
+  the default max but above the default high (9536 and 8000 MiB at 8 workers) prints a
   warning and runs anyway. A max set at or below the default high, with no
   `MOXI_TEST_MEMORY_HIGH_MIB`, exits 2 before anything runs: MemoryHigh must sit below
   MemoryMax, and the default high would not. To go that low, set both, the high below
@@ -633,8 +633,8 @@ started stays outside the scope and watches it once a second.
   for 5 s while pressed against MemoryHigh is ended, exit 1, with a line naming the unit
   and its figures; one that reaches MemoryMax first is killed by the kernel and named the
   same way. A check that stays under its line is never ended by the cap, however slow.
-- **The last line** gains a memory field: `memory peak 5.7G, held 5.0G, line 6.1G, high
-  6.4G, max 7.9G, stalled 0.4s`. A check that held 90 % of its line, or waited on memory
+- **The last line** gains a memory field: `memory peak 5.7G, held 5.0G, line 7.4G, high
+  7.8G, max 9.3G, stalled 0.4s`. A check that held 90 % of its line, or waited on memory
   for 10 s or more, prints a warning before it.
 - **No scope** is made off Linux, where `CI` is set, or where there is no systemd user
   manager with the memory controller; the memory field says `not capped (<why>)`. Where

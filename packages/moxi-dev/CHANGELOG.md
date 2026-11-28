@@ -42,7 +42,7 @@
   the run it names, so a run started in an agent's session answers as one in CI. A child
   whose environment a test builds from nothing lacks it and answers as outside a test.
 - `moxi-dev check` (any form but `--only`) runs its steps in a memory-capped
-  `systemd-run --user --scope` of its own: MemoryHigh 2496 MiB plus 512 MiB per worker,
+  `systemd-run --user --scope` of its own: MemoryHigh 4928 MiB plus 384 MiB per worker,
   MemoryMax 1536 MiB above it, no swap (`MOXI_TEST_MEMORY_HIGH_MIB` and
   `MOXI_TEST_MEMORY_MAX_MIB` replace them; `none` runs uncapped). A check that holds its
   unreclaimable memory at 95 % of MemoryHigh for 5 s at MemoryHigh is ended with exit 1

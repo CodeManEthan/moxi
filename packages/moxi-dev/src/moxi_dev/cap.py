@@ -19,7 +19,7 @@ lines as the check's, with `moxi-dev cap:` in front, and exits 1; a bad figure o
 `MOXI_TEST_TEMP`, or a scope that can't be made where one is expected, exits 2. When the command has ended it kills
 any process left in the scope and prints `moxi-dev cap: ended 2 processes the command left
 running`, and then, last, one line: `moxi-dev cap: memory peak 0.8G, held 0.6G, line
-6.1G, high 6.4G, max 7.9G, stalled 0.0s`, or `moxi-dev cap: memory not capped (CI)` where
+7.4G, high 7.8G, max 9.3G, stalled 0.0s`, or `moxi-dev cap: memory not capped (CI)` where
 it ran with no scope.
 """
 

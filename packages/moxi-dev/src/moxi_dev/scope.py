@@ -66,8 +66,8 @@ from typing import Callable, Mapping, Protocol, Sequence
 #: each count is 1.2 × that, the line through the two unrounded points is fitted once, and
 #: its slope (`PER_WORKER_MIB`) and intercept (`BASE_MIB`) are each rounded up to 64 MiB
 #: from the fit. `ROOM_MIB` is MemoryMax's room above MemoryHigh for page cache.
-PER_WORKER_MIB = 512
-BASE_MIB = 2496
+PER_WORKER_MIB = 384
+BASE_MIB = 4928
 ROOM_MIB = 1536
 #: The smallest figure a variable may set.
 MIN_MIB = 64
