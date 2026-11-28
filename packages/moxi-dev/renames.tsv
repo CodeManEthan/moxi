@@ -18800,3 +18800,10 @@ rounds	packages/rounds/tests/test_lane_send.py	if not self.record.exists():	keep
 rounds	packages/rounds/tests/test_lane_send.py	return [json.loads(line) for line in self.record.read_text().splitlines()]	keep	record	record
 rounds	packages/rounds/tests/test_lane_send.py	lane.lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_lane_send.py	if held.stdin and not held.stdin.closed:	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="run the check on this machine, waiting in its line, and "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/cli.py	where.add_argument("--lane", metavar="NAME",	keep	NAME	NAME
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="run the check on the lane NAME, one the project's "	keep	help	help
+rounds	packages/rounds/tests/test_lane_check.py	assert any(line.startswith("lane far (far-test) is busy") for line in said)	keep	any	any
+rounds	packages/rounds/tests/test_lane_check.py	assert any(line.startswith("waiting for the machine's check lock") for line in said)	keep	any	any
+rounds	packages/rounds/tests/test_lane_check.py	assert any("ssh could not reach far-test" in line and "no route to host" in line	keep	any	any
+rounds	packages/rounds/tests/test_lane_check.py	assert any(line.startswith("lane far: waiting for the machine's check lock")	keep	any	any

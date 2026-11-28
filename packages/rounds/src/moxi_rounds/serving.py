@@ -86,7 +86,7 @@ from pathlib import Path, PurePosixPath
 from moxi import files, proc
 from moxi.config import ConfigError
 
-from . import check_line, checking, frames, gitreads, paths
+from . import check_line, checking, frames, gitreads, paths, places
 from . import settings as own
 from .errors import RoundsError
 
@@ -699,7 +699,7 @@ class _Session:
     def shared(self, stack: ExitStack, request: Request) -> None:
         """Take the shared lock into `stack`: at once, or answer busy without `wait`;
         else waiting, saying so once."""
-        path = Path(os.path.expanduser(request.shared_lock))
+        path = Path(places.expand_home(request.shared_lock))
         said = False
         while True:
             try:

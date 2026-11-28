@@ -84,6 +84,20 @@ naming the holders, the number waiting and, when memory is short, the reading an
 need, with nothing run or recorded. The record of a run names its place (`check_lock`)
 and, for one started beside others, the reading and the need it met. A wait that a tip
 moved during is caught by step 3.
+
+**Lanes.** A project may send its check to lanes, other machines its
+`[projects.<key>.lanes.<name>]` tables name (`sending`). Only a run of the repo's check
+as this machine would run it may go: the scoped check and `--full` in a queue project,
+`--full` in a project with CI, the declared check in any other; a check by CI and a
+command step of the user's own run here. Such a run chooses where it runs before it
+takes any place here (`_choose`): here when a place is free now, else the first lane, in
+the project's order, that takes it now, else here, waiting in line. `urgent` asks no
+lane; `lane` sends it to that lane, waiting in that machine's line. A run on a lane runs
+the lane's words (`lane_words`), holds no place here, and is recorded with `lane`,
+`lane_host` and `lane_check_lock` in place of `check_lock`, its argv filled with this
+machine's root. The gate compares it with the words that lane's table gives now, picked
+by the newest run's `lane` (`run_lane`, `argv_now`): a run on a lane the project no
+longer names counts for nothing.
 """
 
 from __future__ import annotations
@@ -143,14 +157,42 @@ def fill(words: Sequence[str], values: Mapping[str, str]) -> list[str]:
     return [_PLACEHOLDER.sub(one, str(word)) for word in words]
 
 
-def declared(settings, repo: str) -> list[str] | None:
+def declared(settings, repo: str, lane: str | None = None) -> list[str] | None:
     """The words of the repo's declared check, split as a shell would, with their
     placeholders as written but `{memory_mib}`, filled from the check's own
-    `memory_mib` where it declares one; None when the repo declares no check."""
+    `memory_mib` where it declares one; None when the repo declares no check. With
+    `lane`, the words that lane runs (`lane_words`), None when the project names no
+    such lane."""
     found = own.build_setting(settings, repo, "check")
     if not isinstance(found, Mapping) or not isinstance(found.get("command"), str):
         return None
+    if lane is not None:
+        return lane_words(settings, repo, lane, "command")
     return own.fill_memory(shlex.split(found["command"]), found)
+
+
+def lane_words(settings, repo: str, lane: str, key: str) -> list[str] | None:
+    """The words the check's `key` (`command` or `scoped`) runs on the lane `lane`: the
+    project's lane table's own, else the project's, split as a shell would, with
+    `{memory_mib}` filled from the lane table's `memory_mib`, else the check's own, else
+    kept as written. None when the project names no such lane or has no such words."""
+    check = own.build_setting(settings, repo, "check")
+    used = own.project_lanes(settings, repo).get(lane)
+    if used is None or not isinstance(check, Mapping):
+        return None
+    text = used.get(key) if isinstance(used.get(key), str) else check.get(key)
+    if not isinstance(text, str):
+        return None
+    return own.fill_memory(own.fill_memory(shlex.split(text), used), check)
+
+
+def lane_memory_mib(settings, repo: str, lane: str) -> int | None:
+    """What one run of the check on the lane `lane` holds at most: the project's lane
+    table's `memory_mib`, else the check's own; None when neither declares one."""
+    used = own.project_lanes(settings, repo).get(lane)
+    found = own.memory_mib(used)
+    return found if found is not None else own.memory_mib(
+        own.build_setting(settings, repo, "check"))
 
 
 def values(name: str, build: builds.Build, *, root: str | os.PathLike,
@@ -166,14 +208,17 @@ def queued(settings, repo: str) -> bool:
     return own.build_setting(settings, repo, "land") == own.LAND_QUEUE
 
 
-def scoped(settings, repo: str) -> list[str] | None:
+def scoped(settings, repo: str, lane: str | None = None) -> list[str] | None:
     """The words of a queue project's `check.scoped`, placeholders and `{base}` as
     written but `{memory_mib}`, filled as `declared` fills it; None when the repo is no
-    queue project or names no scoped command."""
+    queue project or names no scoped command. With `lane`, the words that lane runs
+    (`lane_words`)."""
     found = own.build_setting(settings, repo, "check")
     if not queued(settings, repo) or not isinstance(found, Mapping) or not isinstance(
             found.get("scoped"), str):
         return None
+    if lane is not None:
+        return lane_words(settings, repo, lane, "scoped")
     return own.fill_memory(shlex.split(found["scoped"]), found)
 
 
@@ -189,10 +234,14 @@ def argv_now(settings, name: str, build: builds.Build, *, root: str | os.PathLik
     """The argv the repo's check gives now for the build at `tip`, placeholders filled;
     None when the repo declares no check. In a queue project it is the scoped command,
     `{base}` filled in with the newest run's own merge-base when that run is at `tip`
-    and `state` is given, else with the merge-base git reads now."""
-    words = scoped(settings, build.repo) or declared(settings, build.repo)
+    and `state` is given, else with the merge-base git reads now. With `state`, the
+    words are picked by the newest run's `lane` (`run_lane`): that lane's words when the
+    project still names it, and an empty argv, which no run passes, when it names a lane
+    the project no longer names."""
+    lane = run_lane(state, build.stage)
+    words = scoped(settings, build.repo, lane) or declared(settings, build.repo, lane)
     if words is None:
-        return None
+        return None if lane is None or declared(settings, build.repo) is None else []
     filled = fill(words, values(name, build, root=root, tip=tip))
     if not queued(settings, build.repo):
         return filled
@@ -202,6 +251,14 @@ def argv_now(settings, name: str, build: builds.Build, *, root: str | os.PathLik
     target_head = Git(root).branch(build.target)
     bases = () if target_head is None else Git(root).merge_bases(tip, target_head)
     return fill_base(filled, bases[0] if len(bases) == 1 else None)
+
+
+def run_lane(state: states.State | None, stage: str) -> str | None:
+    """The lane the newest run of the stage's check ran on; None when it ran on this
+    machine, or with no run or no `state`."""
+    run = None if state is None else newest(state, stage, CHECK)
+    lane = None if run is None else run.get("lane")
+    return lane if isinstance(lane, str) else None
 
 
 def runs(state: states.State, stage: str, step: str) -> list[dict]:
@@ -235,9 +292,14 @@ def why_not(state: states.State, stage: str, step: str, *, tip: str,
         code = run.get("exit_code")
         how = "was ended at its time limit" if code is None else f"exited {code}"
         return f"the newest run of {step} for {stage}, at {tip[:12]}, {how}"
+    lane = run.get("lane")
+    on = f" on lane {lane}" if lane else ""
+    if lane and not argv:
+        return (f"the newest run of {step} for {stage} passed at {tip[:12]} on lane "
+                f"{lane}, which the project no longer sends checks to")
     if _words(run.get("argv") or ()) != _words(argv):
-        return (f"the newest run of {step} for {stage} passed at {tip[:12]}, but ran "
-                f"{shlex.join(run.get('argv') or ())}, and the command is now "
+        return (f"the newest run of {step} for {stage} passed at {tip[:12]}{on}, but ran "
+                f"{shlex.join(run.get('argv') or ())}, and the command{on} is now "
                 f"{shlex.join(argv)}")
     return None
 
@@ -386,7 +448,8 @@ def seen_of(state: states.State, name: str, *, settings,
             check=None if argv is None and declared(settings, build.repo) is None
             else tuple(argv or ()),
             values=None if head is None else values(name, build, root=root, tip=head),
-            full_check=_full_check(settings, name, build, root=root, tip=head),
+            full_check=_full_check(settings, name, build, root=root, tip=head,
+                                   state=state),
             ci=(None if queued(settings, build.repo)
                 else _ci_now(settings, build, name=name, root=root, tip=head)),
             head=head, since=since, drift=moved, reported=reported,
@@ -399,13 +462,17 @@ def seen_of(state: states.State, name: str, *, settings,
 
 
 def _full_check(settings, name: str, build: builds.Build, *, root,
-                tip: str | None) -> tuple[str, ...] | None:
+                tip: str | None, state: states.State | None = None
+                ) -> tuple[str, ...] | None:
     """In a queue project, the argv the repo's `check.command` gives now at `tip`, which
-    meets the check step as the scoped argv does; None elsewhere, or with no tip or no
-    such command."""
-    words = declared(settings, build.repo)
-    if tip is None or words is None or not queued(settings, build.repo):
+    meets the check step as the scoped argv does, picked by the newest run's lane as
+    `argv_now` picks it; None elsewhere, or with no tip or no such command."""
+    if tip is None or declared(settings, build.repo) is None or not queued(
+            settings, build.repo):
         return None
+    words = declared(settings, build.repo, run_lane(state, build.stage))
+    if words is None:
+        return ()
     return tuple(fill(words, values(name, build, root=root, tip=tip)))
 
 
@@ -471,7 +538,8 @@ class Ran:
     as, the `commit` (the tip), its `merge_base` with the target's head, the `argv`,
     the `exit_code` (None when the run was ended at its time limit), the run's
     `duration_s`, the `output` file, the `event` written and the after-append
-    callbacks that `failed`."""
+    callbacks that `failed`; for a run on a lane, the `lane`'s name and the name its
+    machine gave (`lane_host`)."""
 
     name: str
     stage: str
@@ -484,6 +552,8 @@ class Ran:
     output: Path
     event: dict
     failed: tuple = ()
+    lane: str | None = None
+    lane_host: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -505,6 +575,28 @@ class _Look:
     local_argv: list[str] | None = None
     local_due: bool = False
     memory_mib: int | None = None
+    full: bool = False
+    given_timeout_s: float | None = None
+    own_timeout_s: float | None = None
+    into_head: str | None = None
+    brought: object = None
+    lanes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _OnLane:
+    """Where a run on a lane held its place: the `lane`'s name, the far machine's name
+    (`host`) and the place of its check lock (`check_lock`); and the `argv` the run's
+    record holds, the lane's words filled with this machine's root."""
+
+    lane: str
+    host: str
+    check_lock: int | None
+    argv: tuple[str, ...]
+
+    def fields(self) -> dict:
+        return {"lane": self.lane, "lane_host": self.host,
+                "lane_check_lock": self.check_lock}
 
 
 def lock_file(env=None) -> Path:
@@ -536,7 +628,8 @@ def lock_fields(taken: check_line.Taken) -> dict:
 def check(name: str, stage: str, *, by: str, step: str | None = None,
           full: bool = False, timeout_s: float | None = None, settings=None,
           wait_s: float = write.WAIT_S, at: str | None = None,
-          env=None, wait: bool = True, say=None) -> Ran | CiChecked:
+          env=None, wait: bool = True, say=None, urgent: bool = False,
+          lane: str | None = None) -> Ran | CiChecked:
     """Run the repo's check for the build of `stage` in the round `name` at its tip,
     and record the run; with `step`, run that command step of the user's own instead,
     and record the run under its name. In a repo that declares `ci`, with neither
@@ -547,8 +640,18 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
     whether to wait for the machine's check lock while another run holds it; `say`
     gets the lines that say who holds it and how long the wait was.
 
+    A run of the repo's check that may go to a lane (`_lanes_look`), in a project that names
+    lanes, chooses where it runs before it takes any place here: here when a place is
+    free now; else the first of the project's lanes, in its order, that takes the run
+    now (`sending.send`, not waiting), each lane that is busy, can't be reached or isn't
+    ready said to `say` and passed over; else here, waiting in line as with no lane, or
+    refused with `wait` false. `urgent` keeps it here and asks no lane; `lane` sends it to
+    that lane, waiting in its line unless `wait` is false, and refuses it, with nothing
+    recorded, when that lane gives no result. A run on a lane holds no place here.
+
     Raises `BadArgument` for no stage, a time limit that is not above 0, `step` with
-    `full`, and a `step` whose name no step of the user's own can have; what
+    `full`, `urgent` with `lane`, `step` with `lane`, and a `step` whose name no step of
+    the user's own can have; what
     `folders.home` raises for a round that can't be found; and `Refused` with every
     condition that does not hold before the run, with a refused push, with what
     changed during the run, with the check lock held and `wait` false, or with a
@@ -564,6 +667,13 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
     if full and step is not None:
         raise BadArgument("--full runs the repo's check, and --step a step of your own",
                           "give one of them")
+    if urgent and lane is not None:
+        raise BadArgument("--urgent keeps the check on this machine, and --lane sends it "
+                          "to another", "give one of them")
+    if step is not None and lane is not None:
+        raise BadArgument("a command step of your own runs here: its words come from the "
+                          "round's flow and may read this machine's state",
+                          "leave --lane out")
     project, slug = folders.split(name)
     settings = own.load() if settings is None else settings
     home = folders.home(project, settings)
@@ -574,9 +684,12 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
 
     def look(view) -> _Look:
         if id(view) not in looked:
-            looked[id(view)] = _look(view, name=name, stage=stage, step=step,
-                                     settings=settings, again=again, timeout_s=timeout_s,
-                                     by_ci=step is None and not full, full=full)
+            found = _look(view, name=name, stage=stage, step=step,
+                          settings=settings, again=again, timeout_s=timeout_s,
+                          by_ci=step is None and not full, full=full)
+            if step is None:
+                _lanes_look(found, settings, lane=lane, urgent=urgent, again=again)
+            looked[id(view)] = found
         return looked[id(view)]
 
     held = _Held(wait=wait, say=say, again=again, env=env, name=name, step=run_as,
@@ -589,10 +702,15 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
             return _by_ci(found, again=again, held=held)
         where = ("the check's command in the settings" if step is None
                  else f"the argv of the step {step} in the round's flow")
-        return _run(found, found.argv, found.timeout_s, f"fix {where}, then {again}",
+        fix = f"fix {where}, then {again}"
+        if found.lanes:
+            return _choose(found, fix, held=held, keep=keep, settings=settings,
+                           lane=lane)
+        return _run(found, found.argv, found.timeout_s, fix,
                     held=held, memory_mib=found.memory_mib, keep=keep)
 
     first: list[_Look] = []
+    ran_argv: list = []
 
     def event(view, result):
         before = first[0]
@@ -602,11 +720,15 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
         if before.ci is not None:
             return _ci_entries(before, result, stage=stage, name=name)
         code, duration_s, output, taken = result
+        on_lane = isinstance(taken, _OnLane)
+        argv = taken.argv if on_lane else before.argv
+        ran_argv.append(argv)
         return write.Entry(RAN, {
             "stage": stage, "step": run_as, "commit": before.tip,
-            "merge_base": before.merge_base, "argv": recorded_argv(before.argv),
+            "merge_base": before.merge_base, "argv": recorded_argv(argv),
             "exit_code": code, "duration_s": duration_s,
-            "output": places.contract_home(output), **lock_fields(taken)})
+            "output": places.contract_home(output),
+            **(taken.fields() if on_lane else lock_fields(taken))})
 
     def gate_and_keep(view):
         found = look(view)
@@ -624,10 +746,10 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
         return _ci_checked(first[0], written, name=name, stage=stage)
     one = written.events[-1]
     return Ran(name=name, stage=stage, step=run_as, commit=one["commit"],
-               merge_base=one["merge_base"], argv=tuple(first[0].argv),
+               merge_base=one["merge_base"], argv=tuple(ran_argv[-1]),
                exit_code=one["exit_code"], duration_s=one["duration_s"],
                output=Path(places.expand_home(one["output"])), event=one,
-               failed=written.failed)
+               failed=written.failed, lane=one.get("lane"), lane_host=one.get("lane_host"))
 
 
 @dataclass(frozen=True)
@@ -651,18 +773,26 @@ class _Held:
 
 
 @contextmanager
-def _check_lock(held: _Held, found: _Look, *,
-                memory_mib: int | None = None) -> Iterator[check_line.Taken]:
+def _check_lock(held: _Held, found: _Look, *, memory_mib: int | None = None,
+                now: bool = False) -> Iterator[check_line.Taken]:
     """Hold a place of the machine's check lock for the block, taken in the order the
     runs asked for it (`check_line.slot`), or refused at once where `held.wait` is false
     and no place can be taken now. `memory_mib` is what the run declares it holds at
-    most. The block gets the place taken, to name its output and its command in the
-    holder record (`check_line.update_holder`, `check_line.name_first`)."""
+    most. With `now`, it takes a place only when one can be taken now, and raises
+    `check_line.NotFree` otherwise, having taken nothing. The block gets the place
+    taken, to name its output and its command in the holder record
+    (`check_line.update_holder`, `check_line.name_first`)."""
     path = lock_file(held.env)
     build = found.build
     fields = {**check_line.me(), "round": held.name,
               "stage": None if build is None else build.stage, "step": held.step,
               "repo": None if build is None else build.repo}
+    if now:
+        with check_line.slot(path, fields, memory_mib=memory_mib, at_once=held.at_once,
+                             need_mib=held.need_mib, wait=False, say=held.say,
+                             available=held.available or check_line.available_mib) as taken:
+            yield taken
+        return
     try:
         with check_line.slot(path, fields, memory_mib=memory_mib, at_once=held.at_once,
                              need_mib=held.need_mib, wait=held.wait, say=held.say,
@@ -689,6 +819,80 @@ def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
         code, duration_s = run_held(taken, argv, cwd=found.worktree, output=output,
                                     timeout_s=timeout_s, fix=fix)
         return code, duration_s, output, taken
+
+
+def _choose(found: _Look, fix: str, *, held: _Held, keep: ExitStack, settings,
+            lane: str | None) -> tuple:
+    """Where the run goes, and its run: on `lane` when one is named; else here when a
+    place is free now, else the first of `found.lanes` that takes it now, else here,
+    waiting in line (refused at once where `held.wait` is false). What `_run` gives,
+    with an `_OnLane` in place of the place held for a run on a lane."""
+    from . import sending
+
+    say = held.say or (lambda _line: None)
+    if lane is not None:
+        try:
+            return _on_lane(found, lane, settings=settings, wait=held.wait, say=say,
+                            name=held.name)
+        except sending.LaneError as exc:
+            raise Refused([Unmet(exc.reason, exc.fix or held.again)]) from None
+    try:
+        taken = keep.enter_context(_check_lock(held, found, memory_mib=found.memory_mib,
+                                               now=True))
+    except check_line.NotFree as exc:
+        why = [exc.words]
+    else:
+        output = _output_file(found.scratch)
+        code, duration_s = run_held(taken, found.argv, cwd=found.worktree, output=output,
+                                    timeout_s=found.timeout_s, fix=fix)
+        return code, duration_s, output, taken
+    for one in found.lanes:
+        try:
+            return _on_lane(found, one, settings=settings, wait=False, say=say,
+                            name=held.name)
+        except sending.Lost as exc:
+            raise Refused([Unmet(exc.reason, exc.fix or held.again)]) from None
+        except sending.LaneError as exc:
+            say(f"{exc.reason}; so it is not used for this check")
+            why.append(exc.reason)
+    if not held.wait:
+        raise Refused([Unmet("; ".join(why), f"run it again once those are done: "
+                             f"{held.again}, or leave --no-wait out to wait in line")])
+    return _run(found, found.argv, found.timeout_s, fix, held=held,
+                memory_mib=found.memory_mib, keep=keep)
+
+
+def _on_lane(found: _Look, lane: str, *, settings, wait: bool, say, name: str) -> tuple:
+    """Run the check on `lane` (`sending.send`): the lane's words, filled here but for
+    `{root}`, which the far side fills; its time limit (the call's, else the project's
+    lane table's, else the check's, else `DEFAULT_TIMEOUT_S`); its `memory_mib`
+    (`lane_memory_mib`), its preflight and its machine's shared lock. Gives what `_run`
+    gives, with an `_OnLane`. Raises what `sending.send` raises."""
+    from . import sending
+
+    build = found.build
+    used = own.project_lanes(settings, build.repo)[lane]
+    machine = own.lane(settings, lane)
+    words = (None if found.full else scoped(settings, build.repo, lane)) or declared(
+        settings, build.repo, lane)
+    far = fill(words, {key: value for key, value in found.values.items() if key != "root"})
+    here = fill(words, found.values)
+    if not found.full and queued(settings, build.repo):
+        far, here = fill_base(far, found.merge_base), fill_base(here, found.merge_base)
+    limit = next((one for one in (found.given_timeout_s, used.get("timeout_s"),
+                                  found.own_timeout_s) if one is not None),
+                 DEFAULT_TIMEOUT_S)
+    request = sending.request_of(
+        name=name, stage=build.stage, step=CHECK, repo=build.repo, branch=build.branch,
+        tip=found.tip, into=build.target, into_head=found.into_head, argv=far,
+        timeout_s=limit, memory_mib=lane_memory_mib(settings, build.repo, lane),
+        preflight=used.get("preflight") or (), wait=wait,
+        shared_lock=machine["shared_lock"])
+    output = _output_file(found.scratch)
+    ran = sending.send(lane, machine, request, worktree=found.worktree, output=output,
+                       brought=found.brought, say=say)
+    return (ran.exit_code, ran.duration_s, output,
+            _OnLane(lane, ran.host, ran.check_lock, tuple(here)))
 
 
 def run_held(taken: check_line.Taken, argv: Sequence[str], *, cwd: Path, output: Path,
@@ -1048,6 +1252,8 @@ def _look(view, *, name: str, stage: str, step: str | None, settings, again: str
         found.values = values(name, build, root=root, tip=found.tip)
         found.argv = fill(words, found.values)
     found.timeout_s = _limit(timeout_s, own_timeout_s)
+    found.given_timeout_s, found.own_timeout_s, found.full = timeout_s, own_timeout_s, full
+    found.brought = commissioned.get("brought")
     if step is None:
         found.memory_mib = own.memory_mib(own.build_setting(settings, build.repo, "check"))
     if step is None and queued(settings, build.repo):
@@ -1152,12 +1358,45 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build,
         unmet.append(Unmet(reason, fix))
     bases = () if target_head is None else git.merge_bases(tip, target_head)
     found.tip = tip
+    found.into_head = target_head
     found.merge_base = bases[0] if len(bases) == 1 else None
     return unmet
 
 
+def _lanes_look(found: _Look, settings, *, lane: str | None, urgent: bool,
+                again: str) -> None:
+    """The lanes a run of the repo's check asks (`found.lanes`), in the order the
+    project's table names them: the one `lane` names, or with none named every lane the
+    project names, unless `urgent`. Only a run that may go asks any: one by CI runs
+    here, and with `lane` named is refused, as is a lane the project names no table
+    for."""
+    build = found.build
+    if build is None or found.unmet or found.argv is None:
+        return
+    if found.ci is not None:
+        if lane is not None:
+            found.unmet.append(Unmet(
+                "a check by CI runs here: its local part reads this machine's CI state; "
+                "--full can go to a lane", f"{again} --full --lane {lane}"))
+        return
+    named = list(own.project_lanes(settings, build.repo))
+    if lane is None:
+        found.lanes = () if urgent else tuple(
+            one for one in named if own.lane(settings, one) is not None)
+        return
+    if lane not in named or own.lane(settings, lane) is None:
+        listed = ", ".join(named) if named else "none"
+        found.unmet.append(Unmet(
+            f"{build.repo} sends no check to a lane {lane}: its lanes are {listed}",
+            f"name one of them, or add [lanes.{lane}] and [projects.{build.repo}.lanes."
+            f"{lane}] to {paths.LAYOUT.config_file()}"))
+        return
+    found.lanes = (lane,)
+
+
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "DEFAULT_TIMEOUT_S",
            "GRACE_S", "LOCK_FILE", "lock_file", "lock_setting", "lock_fields", "fill", "declared",
-           "values", "queued", "scoped", "fill_base", "argv_now", "runs", "newest", "why_not", "passes", "recorded_argv",
+           "values", "queued", "scoped", "lane_words", "lane_memory_mib", "fill_base",
+           "argv_now", "run_lane", "runs", "newest", "why_not", "passes", "recorded_argv",
            "step_entry", "report_steps", "commission_of", "run_held",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]
