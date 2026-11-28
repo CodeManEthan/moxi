@@ -16,6 +16,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from moxi import proc
 from moxi_dev.testing import PROC_WAIT_S, wait_for
 
 from moxi_rounds import check_line, checking, frames, paths, sending, serving
@@ -394,6 +395,37 @@ def test_an_interrupt_of_the_near_side_ends_the_far_run_and_frees_its_place(
     assert caught_file.read_text() == "SIGINT"
     assert check_line.holder(lane.lock) is None and lane.tree_dirs() == []
     assert "started" in (tmp_path / "check-1.log").read_text()
+
+
+@POSIX
+def test_an_interrupt_during_the_preflight_frees_the_far_place_and_removes_the_tree(
+        lane, work, tmp_path):
+    ready = tmp_path / "ready"
+    line = tmp_path / "preflight.py"
+    line.write_text(textwrap.dedent(f"""
+        import os, time
+        open({str(ready)!r}, "w").write(str(os.getpid()))
+        time.sleep(60)
+        """), encoding="utf-8")
+    seen: dict = {}
+
+    def interrupt() -> None:
+        wait_for(lambda: ready.exists() and ready.read_text(), timeout=PROC_WAIT_S)
+        seen["held"] = check_line.holder(lane.lock) is not None
+        seen["trees"] = len(lane.tree_dirs())
+        _thread.interrupt_main()
+
+    threading.Thread(target=interrupt, daemon=True).start()
+    with pytest.raises(KeyboardInterrupt):
+        run(lane, work, [PY, "-c", "print('never runs')"], tmp_path,
+            preflight=[f"{Path(PY).as_posix()} {line.as_posix()}"])
+
+    wait_for(lambda: lane.relayed(), timeout=PROC_WAIT_S)
+    assert seen == {"held": True, "trees": 1}
+    assert check_line.holder(lane.lock) is None and lane.tree_dirs() == []
+    started = proc.identity(int(ready.read_text()))
+    assert started is None or not proc.alive(started)
+    assert "never runs" not in (tmp_path / "check-1.log").read_text()
 
 
 def test_the_bundle_of_a_build_with_nothing_missing_is_empty(work):
