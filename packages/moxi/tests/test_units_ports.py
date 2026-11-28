@@ -138,7 +138,9 @@ def unreadable_child():
     entries to root, as a setuid program or an agent that guards its memory does."""
     if not sys.platform.startswith("linux"):
         pytest.skip("non-dumpable is Linux's")
-    code = ("import ctypes, sys\n"
+    if os.geteuid() == 0:
+        pytest.skip("root reads a non-dumpable child, so no child here is unreadable")
+    code =("import ctypes, sys\n"
             "assert ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) == 0\n"
             "print('up', flush=True); sys.stdin.read()\n")
     proc = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
