@@ -25,8 +25,9 @@ and holds its stdin as the far run's lifeline; every part of the exchange is a f
 4. **The run**: `frames.NOT_READY` (a brought file, a preflight line or the far tree
    failed) raises `NotReady`; `frames.STARTED`, then the command's output, kept in
    memory and written whole to the output file (`files.atomic_write`) every
-   `LOG_EVERY_S` while output arrives, at each waiting line and at the end, so the file
-   trails the run by up to that long; then the result.
+   `LOG_EVERY_S` while output not yet written waits, whether more arrives or not, at
+   each waiting line and at the end, so the file trails the output received by up to
+   that long; then the result.
 
 **How it ends.** After the result, stdin is closed and ssh is waited for. An interrupt
 (`KeyboardInterrupt`) closes stdin, which ends the far run by the far side's own end,
@@ -235,14 +236,20 @@ class _Session:
         for line in iter(self.popen.stderr.readline, b""):
             self.err.append(line.decode(errors="replace").rstrip())
 
-    def next(self, deadline: float | None):
+    def next(self, deadline: float | None,
+             tick: Callable[[], float | None] | None = None):
         """The next frame, `(kind, payload)`; None at the session's end. Raises `_Late`
         when none came by `deadline` (a `time.monotonic` time), and `frames.FrameError`
-        for a frame that can't be read."""
+        for a frame that can't be read. While it waits, `tick` is called (`_Log.tick`):
+        it does what is due and gives the `time.monotonic` time it is next due, or None,
+        and the wait wakes for it then."""
         while True:
             wait_s = 0.5 if deadline is None else min(0.5, deadline - time.monotonic())
             if wait_s <= 0:
                 raise _Late()
+            due = tick() if tick is not None else None
+            if due is not None:
+                wait_s = max(0.0, min(wait_s, due - time.monotonic()))
             try:
                 found = self.frames.get(timeout=wait_s)
             except queue.Empty:
@@ -298,23 +305,37 @@ class _Session:
 
 
 class _Log:
-    """The output received, kept in memory and written whole to `path` every
-    `LOG_EVERY_S` while output arrives, and when `write` is called."""
+    """The output received, kept in memory and written whole to `path` when `write` is
+    called, and by `tick` once output not yet written has waited `LOG_EVERY_S` since
+    the last write, so the file trails the output received by up to that long, quiet
+    stretches included."""
 
     def __init__(self, path: Path):
         self.path = path
         self.data = bytearray()
         self.written_at = time.monotonic()
+        self.written_len = 0
         self.write()
 
     def add(self, chunk: bytes) -> None:
         self.data += chunk
-        if time.monotonic() - self.written_at >= LOG_EVERY_S:
-            self.write()
+        self.tick()
+
+    def tick(self) -> float | None:
+        """Write the file when output waits and `LOG_EVERY_S` has passed since the last
+        write; the `time.monotonic` time it is next due, or None when nothing waits."""
+        if len(self.data) == self.written_len:
+            return None
+        due = self.written_at + LOG_EVERY_S
+        if time.monotonic() < due:
+            return due
+        self.write()
+        return None
 
     def write(self) -> None:
         files.atomic_write(self.path, bytes(self.data))
         self.written_at = time.monotonic()
+        self.written_len = len(self.data)
 
 
 def _message(payload: bytes) -> dict:
@@ -420,7 +441,7 @@ class _Exchange:
 
     def frame(self, deadline: float | None, *, before: str):
         try:
-            return self.session.next(deadline)
+            return self.session.next(deadline, self.log.tick)
         except _Late:
             raise _LateFor(before) from None
 

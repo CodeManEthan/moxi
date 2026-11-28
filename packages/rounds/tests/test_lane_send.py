@@ -215,6 +215,40 @@ def test_a_failed_command_and_one_past_its_limit_give_their_results(lane, work, 
     assert late.exit_code is None and late.duration_s < 40
 
 
+def test_output_before_a_quiet_stretch_reaches_the_file_while_the_run_is_quiet(
+        lane, work, tmp_path):
+    output = tmp_path / "check-1.log"
+    release = tmp_path / "release"
+    command = textwrap.dedent(f"""
+        import os, time
+        print("before the quiet stretch", flush=True)
+        end = time.monotonic() + 60
+        while not os.path.exists({str(release)!r}) and time.monotonic() < end:
+            time.sleep(0.05)
+        print("after it", flush=True)
+        """)
+    seen: list[str] = []
+
+    def watch() -> None:
+        def written() -> bool:
+            text = output.read_text() if output.exists() else ""
+            return "before the quiet stretch" in text and "after it" not in text
+        try:
+            wait_for(written, timeout=sending.LOG_EVERY_S + 8)
+            seen.append("written while quiet")
+        except AssertionError:
+            pass
+        release.write_text("go", encoding="utf-8")
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    done = run(lane, work, [PY, "-c", command], tmp_path)
+    watcher.join(timeout=PROC_WAIT_S)
+
+    assert seen == ["written while quiet"]
+    assert done.exit_code == 0 and "after it" in output.read_text()
+
+
 # -- the far lock's answer ---------------------------------------------------------------
 
 def test_no_wait_with_the_far_lock_held_is_busy_and_sends_no_bundle(

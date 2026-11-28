@@ -1621,9 +1621,9 @@ lane's words as they are now: a run on a lane the project no longer names, or wh
 words changed, counts for nothing. `check`, `show` and the board say `on lane NAME`.
 
 The output goes to `check-<n>.log` in the build's scratch folder, as for a run here, but
-it is kept in memory and the file written whole every 2 seconds while output arrives, so
-the file trails the run by up to 2 s, and a rounds process killed outright may leave the
-last 2 s out of it.
+it is kept in memory and the file written whole every 2 seconds while output not yet in
+it waits, quiet stretches included, so the file trails the run by up to 2 s, and a
+rounds process killed outright may leave the last 2 s out of it.
 
 **How a run ends.** However this side ends, the lane's run ends.
 
