@@ -679,30 +679,42 @@ def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
     """Run `argv` in the build's worktree, holding a place of the machine's check lock,
     its output to a new file in the scratch folder: its exit code (None when ended at
     `timeout_s`), duration, output file and the place it held (`check_line.Taken`). The
-    duration counts the run only. The command runs tagged with the place's tag, its
-    first process is named in the holder record once it starts, and everything it
-    started is ended before the place is let go, however the run ends. With `keep`, the
-    place is held in that stack, let go when the caller closes it, not when the run
-    ends."""
+    place is taken (`_check_lock`) and the run made under it (`run_held`), with no time
+    between them. With `keep`, the place is held in that stack, let go when the caller
+    closes it, not when the run ends."""
     with ExitStack() as own_stack:
         taken = (own_stack if keep is None else keep).enter_context(
             _check_lock(held, found, memory_mib=memory_mib))
         output = _output_file(found.scratch)
-        check_line.update_holder(taken.path, output=str(output))
-        started = time.monotonic()
-        try:
-            done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
-                            cwd=found.worktree, output=output, first_signal="SIGINT",
-                            grace_s=GRACE_S, tag=taken.tag,
-                            on_start=functools.partial(check_line.name_first, taken.path),
-                            end_leftovers=True)
-            code: int | None = done.returncode
-        except subprocess.TimeoutExpired:
-            code = None
-        except OSError as exc:
-            raise RoundsError(f"the command {shlex.join(argv)} could not be started in "
-                              f"{found.worktree}: {exc}", fix) from None
-        return code, round(time.monotonic() - started, 3), output, taken
+        code, duration_s = run_held(taken, argv, cwd=found.worktree, output=output,
+                                    timeout_s=timeout_s, fix=fix)
+        return code, duration_s, output, taken
+
+
+def run_held(taken: check_line.Taken, argv: Sequence[str], *, cwd: Path, output: Path,
+             timeout_s: float | None, fix: str = "") -> tuple[int | None, float]:
+    """Run `argv` in `cwd` under the place `taken` already held, its output to `output`:
+    its exit code (None when ended at `timeout_s`) and duration, which counts the run
+    only. The place's holder record names the output file, and the command's first
+    process once it starts; the command runs with the place's tag, with the caller's
+    environment less every `GIT_` variable, and everything it started is ended before
+    this returns, however it ends: SIGINT first, then SIGKILL `GRACE_S` later (read at
+    the call). Raises `RoundsError` with `fix` when the command can't be started."""
+    check_line.update_holder(taken.path, output=str(output))
+    started = time.monotonic()
+    try:
+        done = proc.run(list(argv), timeout_s=timeout_s, env=gitreads.git_env(),
+                        cwd=cwd, output=output, first_signal="SIGINT",
+                        grace_s=GRACE_S, tag=taken.tag,
+                        on_start=functools.partial(check_line.name_first, taken.path),
+                        end_leftovers=True)
+        code: int | None = done.returncode
+    except subprocess.TimeoutExpired:
+        code = None
+    except OSError as exc:
+        raise RoundsError(f"the command {shlex.join(argv)} could not be started in "
+                          f"{cwd}: {exc}", fix) from None
+    return code, round(time.monotonic() - started, 3)
 
 
 # -- by CI -------------------------------------------------------------------------------
@@ -1147,5 +1159,5 @@ def _read_git(found: _Look, git: Git, worktree: Path, build: builds.Build,
 __all__ = ["CHECK", "RAN", "PLACEHOLDERS", "WITH_WORK", "OUTPUT", "DEFAULT_TIMEOUT_S",
            "GRACE_S", "LOCK_FILE", "lock_file", "lock_setting", "lock_fields", "fill", "declared",
            "values", "queued", "scoped", "fill_base", "argv_now", "runs", "newest", "why_not", "passes", "recorded_argv",
-           "step_entry", "report_steps", "commission_of",
+           "step_entry", "report_steps", "commission_of", "run_held",
            "Tip", "read_tip", "seen_of", "Ran", "CiChecked", "PUSH_TIMEOUT_S", "check"]

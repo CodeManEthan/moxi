@@ -9687,7 +9687,7 @@ rounds	packages/rounds/src/moxi_rounds/checking.py	_moved	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/checking.py	_run	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/checking.py	check	name	actor	by
 rounds	packages/rounds/src/moxi_rounds/checking.py	or set(Git(root).present([before, head])) != {before, head}	keep	set	set
-rounds	packages/rounds/src/moxi_rounds/checking.py	return code, round(time.monotonic() - started, 3), output	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/checking.py	return code, round(time.monotonic() - started, 3)	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/checking.py	return scratch / OUTPUT.format(n=max(taken, default=0) + 1)	keep	default	default
 rounds	packages/rounds/src/moxi_rounds/checking.py	return {"round": name, "stage": build.stage, "repo": build.repo, "root": str(root),	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/checking.py	seen_of	name	error	exc
