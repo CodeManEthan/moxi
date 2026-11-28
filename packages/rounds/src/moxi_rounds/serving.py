@@ -10,7 +10,12 @@ Moxi whose files change under a long run can't mix two versions in it. In order:
    thread (`_interrupt_main`: SIGINT to that thread on POSIX, `_thread.interrupt_main`
    on Windows) and does nothing else, no timed exit, so whatever step runs ends by its
    own end: the far command by `proc.run`'s (SIGINT, `checking.GRACE_S`, SIGKILL), the
-   wait for the lock by removing its ticket. The interrupt is disarmed once `serve`
+   wait for the lock by removing its ticket. On Windows the interrupt doesn't wake a
+   wait on a process handle, so there stdin's end also ends the far command's first
+   process, the one the held place's holder record names (`_RunStop`, `stop_first`):
+   the wait returns, the interrupt is raised, and `proc.run` ends the rest of the run's
+   job. A preflight line there still runs to its own end or `PREFLIGHT_TIMEOUT_S`.
+   The interrupt is disarmed once `serve`
    begins its final answer (`_Lifeline`): the near side closes stdin only after reading
    that answer, so the end of a normal run never interrupts the cleanup after it. A
    write to stdout that fails (the near side gone) is dropped, and the run goes on to
@@ -157,13 +162,15 @@ def _interrupt_main() -> None:
 
 
 class _Lifeline:
-    """What stdin's end does: interrupts the main thread once, unless `disarm` ran
-    first. `closed` says whether stdin has ended."""
+    """What stdin's end does: interrupts the main thread once, then calls `stop` when
+    given, unless `disarm` ran first. `closed` says whether stdin has ended."""
 
-    def __init__(self, *, armed: bool = True, interrupt: Callable[[], None] = _interrupt_main):
+    def __init__(self, *, armed: bool = True, interrupt: Callable[[], None] = _interrupt_main,
+                 stop: Callable[[], None] | None = None):
         self._lock = threading.Lock()
         self._armed = armed
         self._interrupt = interrupt
+        self._stop = stop
         self.closed = threading.Event()
 
     def on_close(self) -> None:
@@ -172,11 +179,48 @@ class _Lifeline:
             if self._armed:
                 self._armed = False
                 self._interrupt()
+                if self._stop is not None:
+                    self._stop()
 
     def disarm(self) -> None:
         """From now on stdin's end does nothing."""
         with self._lock:
             self._armed = False
+
+
+def stop_first(lock_path: Path) -> bool:
+    """End the first process of the run that this process's holder record of the place
+    whose lock file is `lock_path` names (`run_pid`, `run_started`), while it is alive:
+    SIGTERM on POSIX, TerminateProcess on Windows (`os.kill`). Whether one was ended;
+    a record that is another process's, or names no run, ends nothing."""
+    found = check_line.holder(lock_path)
+    if found is None or found.get("pid") != os.getpid():
+        return False
+    try:
+        first = proc.ProcId(int(found["run_pid"]), float(found["run_started"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not proc.alive(first):
+        return False
+    import signal
+
+    try:
+        os.kill(first.pid, signal.SIGTERM)
+    except OSError:
+        return False
+    return True
+
+
+class _RunStop:
+    """What stdin's end does on Windows after the interrupt: `stop_first` of the place
+    held, once `place` (its lock file) is set."""
+
+    def __init__(self):
+        self.place: Path | None = None
+
+    def __call__(self) -> None:
+        if self.place is not None:
+            stop_first(self.place)
 
 
 class _Stdin:
@@ -592,10 +636,11 @@ class _Answered(Exception):
 
 class _Session:
     def __init__(self, reader: frames.Reader, out: frames.Writer, lifeline: _Lifeline, *,
-                 env, settings, clock: Callable[[], float]):
+                 env, settings, clock: Callable[[], float], run_stop: _RunStop):
         self.reader = reader
         self.out = out
         self.lifeline = lifeline
+        self.run_stop = run_stop
         self.env = env
         self.settings = settings
         self.clock = clock
@@ -647,6 +692,7 @@ class _Session:
             stack.enter_context(files.lock(tree_lock(tree), timeout_s=0))
             stack.callback(_remove_tree, tree)
             taken = self.place(stack, request, lock_path, tree, at_once)
+            self.run_stop.place = taken.path
             self.out.send_json(frames.PLACED, checking.lock_fields(taken))
             if request.shared_lock is not None:
                 self.shared(stack, request)
@@ -768,7 +814,8 @@ def serve(*, fd_in: int = 0, fd_out: int = 1, env=None, settings=None,
     not-ready answer, `INTERRUPTED` when stdin ended before the final answer."""
     _binary(fd_in)
     _binary(fd_out)
-    lifeline = _Lifeline(interrupt=interrupt)
+    run_stop = _RunStop()
+    lifeline = _Lifeline(interrupt=interrupt, stop=run_stop if _WINDOWS else None)
     out = frames.Writer(_fd_writer(fd_out), drop=True)
     reader = frames.Reader(_Stdin(fd_in, lifeline.on_close).read)
     try:
@@ -779,7 +826,8 @@ def serve(*, fd_in: int = 0, fd_out: int = 1, env=None, settings=None,
                                                  f"can't be read: {exc}",
                                        "fix": fix_line(host_name())})
         return 1
-    session = _Session(reader, out, lifeline, env=env, settings=settings, clock=clock)
+    session = _Session(reader, out, lifeline, env=env, settings=settings, clock=clock,
+                       run_stop=run_stop)
     try:
         session.run()
     except _Answered as exc:
@@ -874,4 +922,4 @@ __all__ = ["LANES_DIR", "REPOS_DIR", "TREES_DIR", "REF_TIMES_FILE", "PREFLIGHT_T
            "fix_line", "host_name", "lanes_dir", "repo_dir", "Request", "Unreadable",
            "read_request", "held_refs", "ensure_bare", "prune_refs", "take_bundle",
            "trees_dir", "tree_lock", "tree_log", "sweep", "make_tree", "write_brought",
-           "preflight", "serve", "probe", "main"]
+           "preflight", "stop_first", "serve", "probe", "main"]

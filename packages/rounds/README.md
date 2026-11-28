@@ -1662,9 +1662,9 @@ check is a failed tick, which `moxi-dev timed show` lists as failed, not a measu
 
 **Known limits.**
 
-- On a Windows lane an interrupt doesn't reach the running command at once: `serve`
-  there sees it only when the command ends by itself or at its time limit, and then
-  ends as above. A run here on Windows has the same wait.
+- On a Windows lane, when the session ends, the command's whole tree is ended at once,
+  with no SIGINT and no 30 s grace first. A preflight line running there then runs to
+  its own end or its 60 s limit before the place frees.
 - The lane holds the bundle in memory while it writes it, so a send needs the bundle's
   size in free memory there; a project's first send is its whole packed history.
 - The log here trails the run by up to 2 s (above).

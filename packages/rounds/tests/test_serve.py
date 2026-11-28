@@ -545,6 +545,49 @@ def test_serve_outlives_its_run_when_the_near_side_goes(far, work, tmp_path, std
     assert "Traceback" not in one.said()
 
 
+def test_the_near_side_gone_ends_a_long_far_command_at_once_on_every_system(
+        far, work, tmp_path):
+    marker = tmp_path / "long.pid"
+    long_run = (f"import os, time; open({str(marker)!r}, 'w').write(str(os.getpid())); "
+                "time.sleep(120)")
+    one = far()
+    one.send(frames.REQUEST, request(work, [PY, "-c", long_run], timeout_s=300))
+    send_all(one, work, tmp_path)
+    one.until(frames.STARTED)
+    wait_for(marker.exists, timeout=PROC_WAIT_S, what="the far command's start")
+    wait_for(lambda: (holder_record(far) or {}).get("run_pid"), timeout=PROC_WAIT_S,
+             what="the holder record naming the run")
+    command = proc.identity(int(marker.read_text()))
+    started = time.monotonic()
+
+    one.proc.stdin.close()
+
+    assert one.proc.wait(timeout=PROC_WAIT_S) == serving.INTERRUPTED, one.said()
+    assert time.monotonic() - started < PROC_WAIT_S
+    assert command is None or not proc.alive(command)
+    assert holder_record(far) is None and trees(far) == []
+
+
+def test_stop_first_ends_the_run_this_process_holds_a_place_for(fenced):
+    lock_path = checking.lock_file()
+    child = subprocess.Popen([PY, "-c", "import time; time.sleep(60)"])
+    try:
+        fields = {**check_line.me(), "round": "proj-a/lane", "stage": "B1",
+                  "step": "check", "repo": "proj-a"}
+        with check_line.slot(lock_path, fields, wait=False) as taken:
+            assert serving.stop_first(taken.path) is False
+            first = wait_for(lambda: proc.identity(child.pid), timeout=PROC_WAIT_S)
+            check_line.name_first(taken.path, first)
+
+            assert serving.stop_first(taken.path) is True
+            child.wait(timeout=PROC_WAIT_S)
+            assert serving.stop_first(taken.path) is False
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
 def test_a_normal_end_whose_near_side_closes_stdin_at_once_cleans_up_and_exits_0(
         far, work, tmp_path):
     one = far()
