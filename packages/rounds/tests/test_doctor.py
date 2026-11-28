@@ -7,11 +7,14 @@ import json
 import os
 import sqlite3
 import stat
+import sys
 from pathlib import Path
 
 import pytest
 from moxi import cli, modules
 from moxi.doctor import Row
+
+from test_check_slots import POSIX, a_tag, hold, record, started  # noqa: F401 -- fixture
 
 from moxi_rounds import asking, check_line, checking, doctor, log, opening, paths
 from moxi_rounds.cli import main
@@ -445,6 +448,80 @@ def test_the_doctor_warns_of_a_lock_held_with_no_holder_record(holder):
     assert (row.state, row.detail) == ("warn", f"held by pid {held.pid}, which wrote no "
                                        "holder record; 0 waiting; a check that keeps no "
                                        "holder record holds it")
+
+
+def test_the_doctor_names_each_place_of_two_and_their_holders(holder, write_config):
+    write_config("[check_lock]\nat_once = 2\n")
+    first = hold(holder, 1, memory_mib=100, name="proj-a/one")
+    second = hold(holder, 2, memory_mib=100, name="proj-a/two")
+
+    row = by_name()["check lock"]
+
+    assert row.state == "ok", row
+    assert row.detail == (
+        f"check lock 1 of 2: held by pid {first.pid} (proj-a/one B1, repo proj-a) for "
+        "0 min; its output is not there yet; check lock 2 of 2: held by pid "
+        f"{second.pid} (proj-a/two B1, repo proj-a) for 0 min; its output is not there "
+        "yet; 0 waiting")
+
+
+def test_the_doctor_reads_a_held_place_above_at_once(holder):
+    held = hold(holder, 2, memory_mib=100, record=False)
+
+    row = by_name()["check lock"]
+
+    assert row.state == "warn"
+    assert row.detail.startswith(f"check lock 1 of 1: free; check lock 2, above "
+                                 f"check_lock.at_once: held by pid {held.pid}, which wrote "
+                                 "no holder record; 0 waiting; ")
+    assert row.detail.endswith("check lock 2, above check_lock.at_once: a check that "
+                               "keeps no holder record holds it")
+
+
+def test_the_doctor_gives_the_reading_and_need_the_first_in_line_waits_on(
+        holder, write_config, monkeypatch):
+    write_config("[check_lock]\nat_once = 2\n")
+    hold(holder, 1, memory_mib=100, name="proj-a/one")
+    wait_in_line("proj-a/y", "B2", memory_mib=150)
+    monkeypatch.setattr(check_line, "available_mib", lambda: 200)
+
+    row = by_name()["check lock"]
+
+    assert row.state == "ok", row
+    assert row.detail.endswith(f"check lock 2 of 2: free; 1 waiting: 1. pid {os.getpid()} "
+                               "proj-a/y B2 for 0 min; the first in line waits for "
+                               "memory: 0.2G available, 0.2G needed")
+
+
+def test_the_doctor_puts_a_landers_ticket_first_in_the_line():
+    wait_in_line("proj-a/y", "B2")
+    wait_in_line("queue/proj-a", "b3", first=True)
+
+    detail = by_name()["check lock"].detail
+
+    assert detail.index("queue/proj-a b3") < detail.index("proj-a/y B2")
+
+
+@POSIX
+def test_the_doctor_warns_of_an_orphans_run_naming_its_pid(started):
+    import time
+
+    tag = a_tag()
+    run = started([sys.executable, "-c", "import time; time.sleep(120)"], tag=tag,
+                  setsid=True)
+    dead = started([sys.executable, "-c", "pass"])
+    dead.wait(timeout=30)
+    check_line.write_holder(checking.lock_file(), {
+        "pid": dead.pid, "created": time.time() - 50, "round": "proj-a/gone",
+        "stage": "B1", "check_lock": 1, **record(run, tag=tag)})
+
+    row = by_name()["check lock"]
+
+    assert row.state == "warn"
+    assert row.detail == (f"its holder, pid {dead.pid} (proj-a/gone B1), is gone, but its "
+                          "run still runs, so it stays taken; 0 waiting; the run of a "
+                          f"gone holder still runs: pid {run.pid}")
+    assert row.fix.startswith(f"look at pid {run.pid} (proj-a/gone B1): ")
 
 
 # -- looking changes nothing -------------------------------------------------------------------

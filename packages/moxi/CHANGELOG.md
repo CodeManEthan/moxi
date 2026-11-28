@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.12 (unreleased)
+
+- The agent test (`moxi.terminal.agent()`) stops at the pytest run a test kit names, by
+  its pid, in `MOXI_TEST_RUN_PID`, and nowhere else: a process of that run names no
+  harness, so a test run started in an agent's session answers as one in CI. A process
+  called `pytest` that no such value names, a value naming no pytest run, and a run that
+  doesn't load a kit answer as before. `moxi.terminal` exports the name as
+  `TEST_RUN_PID_ENV`, and `Run` gains `test_run_pid` and `test_run_pid_now`.
+- `moxi.proc.run` takes three options that name a run and end all of it, each off unless
+  given, so every existing call behaves as before. `tag` puts a string in the command's
+  environment as `MOXI_RUN_TAG` (the new constant `moxi.proc.RUN_TAG_ENV`), so every
+  process that inherits the environment carries it, one that left the process group
+  included. `on_start` is called with the first process as a `ProcId` once it has started
+  (on Windows, once it is in its job); one that raises ends the run and is raised.
+  `end_leftovers=True` ends everything the run started before `run` returns or raises:
+  on a normal end, a timeout and an interrupt, the process group and every process
+  carrying the tag get `first_signal`, then `grace_s`, then SIGKILL, and a second
+  interrupt during the grace kills at once. On Windows the run's job is made
+  kill-on-close, so the tree also ends when the caller dies, and it is terminated on
+  every end. A caller that passes them needs `moxi>=0.1.12`.
+- The ending of a set of processes is one piece of code, shared by the watchdog of
+  `spawn(..., lifeline="watch")` and `run`'s `end_leftovers`.
+
 ## 0.1.11 (unreleased)
 
 - `moxi.place.move_aside(path, harness=...)` moves a path no placement holds under the

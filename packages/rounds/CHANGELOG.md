@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.1.6 (unreleased)
+
+- New settings `check_lock.at_once` (how many runs may hold the machine's check lock at
+  once, default 1) and `check_lock.need_mib` (the free memory, in MiB, a run needs to
+  start beside running ones; 0, the default, sums their `memory_mib`). A project's
+  `check` table and its `ci.local` take `memory_mib`, the most memory one run of that
+  command holds, a whole number of MiB of at least 64, and `{memory_mib}` in that table's
+  command lines is filled with it; left out, the placeholder stays as written. rounds
+  needs `moxi>=0.1.12`.
+- The machine's check lock counts places: up to `check_lock.at_once` runs hold it at
+  once, the first place `check.lock` and the k-th `check-<k>.lock`, each with its holder
+  record. A run that would be alone takes the first and reads no memory; one beside
+  others starts only when it and every holder declare `memory_mib` and the free memory
+  covers `check_lock.need_mib`, or their sum. Every held place counts, whatever
+  `at_once` says now, so lowering it starts nothing beside a running check. The waiting
+  lines say each reason once (places held, memory short with the reading and the need,
+  no `memory_mib`, an orphan's run) and which place the run got; with one place they
+  read as before. `--no-wait` decides under the line's lock, and its refusal names each
+  holder, and the reading and the need when memory is short.
+- A run ends whole. `moxi rounds check` runs each command with a tag of the run's own
+  (`MOXI_RUN_TAG`), names its first process in the holder record, and on a normal end, a
+  timeout and an interrupt ends its process group and every process carrying the tag
+  before it lets its place go; an interrupt now sends SIGINT and waits the grace before
+  SIGKILL. When the rounds process dies, the place stays taken while the run's first
+  process or a tagged process still runs. On Windows the run's job ends the tree when
+  the rounds process dies.
+- `check.ran` names the place the run held (`check_lock`), and for a run started beside
+  others the free memory read then and the need it met (`available_mib`, `need_mib`).
+- The lander's `ci.local` run takes the check lock like a check's run, its ticket ahead
+  of every check's in line, admitted beside a running check by `ci.local`'s own
+  `memory_mib`; with one place, landing now waits for a running check. Its queue event
+  and the `check.ran` written from it name the place it held.
+- The doctor's `check lock` row reads every place: each holder, or an orphan's run, the
+  line in order with a lander's first, and the reading and the need when the first in
+  line waits for memory. It warns for each place as before, and for an orphan's run
+  still running, naming its pid.
+
 ## 0.1.5 (unreleased)
 
 - The page acts, at a desk. An item's popover and the walk take the operator's answer:

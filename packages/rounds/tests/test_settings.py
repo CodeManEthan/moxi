@@ -31,6 +31,8 @@ DEFAULTS = {
     "sweep.armed": False,
     "sweep.at_start": False,
     "sweep.grace_hours": 2,
+    "check_lock.at_once": 1,
+    "check_lock.need_mib": 0,
     "watched_paths_guard.enabled": False,
     "projects": {},
 }
@@ -43,6 +45,7 @@ TYPES = {
     "defaults.dormant_days": "int", "defaults.slice_minutes": "int",
     "defaults.sitting_at": "int", "defaults.disposable": "list", "sweep.armed": "bool",
     "sweep.at_start": "bool", "sweep.grace_hours": "int",
+    "check_lock.at_once": "int", "check_lock.need_mib": "int",
     "watched_paths_guard.enabled": "bool", "projects": "table",
 }
 
@@ -154,7 +157,7 @@ def test_moxi_config_shows_each_key_with_a_label_and_the_words_of_each_enum_valu
     assert {name: row["unit"] for name, row in rows.items() if row["unit"]} == {
         "defaults.idle_days": "days", "defaults.dormant_days": "days",
         "defaults.slice_minutes": "minutes", "defaults.sitting_at": "open questions",
-        "sweep.grace_hours": "hours"}
+        "sweep.grace_hours": "hours", "check_lock.need_mib": "MiB"}
     assert [(choice["value"], choice["words"]) for choice in
             rows["defaults.ratify"]["choices"]] == [
         ("majors", "the major ones"), ("majors+minors", "major and minor"), ("off", "none")]

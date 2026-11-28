@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A Claude row whose readings share one reset time shows the newest reading. A higher
+  percent wins only among readings observed within 15 minutes of the newest
+  (`limits.TIE_WINDOW_S`), so a weekly counter cleared mid-window no longer leaves the
+  row stuck on its old number.
 - A `project-facts` component for the Projects page: each project's cost today on its
   row, the opened project's `Cost` row (today, 7 days, 30 days) linking to Usage, and
   each folder in no project with its 7-day cost. Usage takes the address
