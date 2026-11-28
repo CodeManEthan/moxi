@@ -116,8 +116,9 @@ lower-case letters, digits and `-`.
 | `moxi rounds mark ROUND --restamp --record PTR` | re-stamp the design's current version with the digest of its frozen copy, when an edit outside the round rewrote the copy and `design.md` alike; changes no standing, and an ended round takes it too |
 | `moxi rounds commission ROUND --repo KEY --branch NAME --builder NAME [--slice ID=TEXT --minutes N]...` | in a flow that does not verify its design: declare a stage under the lowest `B<n>` not used, and commission it as below |
 | `moxi rounds commission ROUND B<n> --builder NAME [--record PTR] [--existing]` | build a stage: cut its branch from the target, add its worktree under `worktree_dir` as `<repo>/<branch>` and its scratch folder in rounds' cache directory, each with a marker naming the build, copy the repo's `private_files` into the worktree (see Config), and record the build; `--existing` builds on a branch that is there, one strictly inside or around another open build's branch included, and refuses one that overlaps another open build's or that a recorded landing already brought onto the target. It prints the commission block, which goes first in the builder's brief, then tells you which of the block's rulings the operator has not been shown |
-| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group and every process carrying its tag get SIGINT and 30 s later SIGKILL, and an interrupt does the same. Each run holds a place of the machine's check lock while anything it started runs (see The machine's check lock): one run at a time by default, the runs taking places in the order they asked, a lander's first. A run that must wait takes a ticket in the lock's line (`check.line/` beside `check.lock` in rounds' folder of lock files) and says why, once for each reason: the places held and how many are ahead of it, memory short with the reading and the need, or a run with no `memory_mib`; then which place it got. A waiter that dies loses its place at the next poll, on every system. With `--no-wait` it is refused while no place can be taken now, naming each holder, how many wait and, when memory is short, the reading and the need. The run holding a place names its round, stage, step, repo, output file, the place, its `memory_mib`, and its command's tag and first process in the place's holder record (`check.holder.json` for the first place), which the doctor's `check lock` row reads; the run's record names the place it held (`check_lock`) and, for a run started beside others, the reading and the need it met (`available_mib`, `need_mib`). Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there |
+| `moxi rounds check [ROUND B<n>] [--step NAME \| --full] [--timeout-s N] [--no-wait] [--urgent \| --lane NAME]` | run the repo's declared check for a build at its tip, in its worktree, and record the run: its commit, that commit's merge-base with the target, the argv, its exit code and duration. The worktree must be clean on the build's branch and the build must have work. Its output goes to `check-<n>.log` in the build's scratch folder; at the check's `timeout_s`, or `--timeout-s`, else 3600 s, its whole process group and every process carrying its tag get SIGINT and 30 s later SIGKILL, and an interrupt does the same. Each run holds a place of the machine's check lock while anything it started runs (see The machine's check lock): one run at a time by default, the runs taking places in the order they asked, a lander's first. A run that must wait takes a ticket in the lock's line (`check.line/` beside `check.lock` in rounds' folder of lock files) and says why, once for each reason: the places held and how many are ahead of it, memory short with the reading and the need, or a run with no `memory_mib`; then which place it got. A waiter that dies loses its place at the next poll, on every system. With `--no-wait` it is refused while no place can be taken now, naming each holder, how many wait and, when memory is short, the reading and the need. The run holding a place names its round, stage, step, repo, output file, the place, its `memory_mib`, and its command's tag and first process in the place's holder record (`check.holder.json` for the first place), which the doctor's `check lock` row reads; the run's record names the place it held (`check_lock`) and, for a run started beside others, the reading and the need it met (`available_mib`, `need_mib`). Nothing is recorded when the tip or the worktree changed while it ran. With no round, in a build's worktree, it checks that build; it exits 1 when the check failed. With `--step NAME` it runs the command step `NAME` of the round's flow, a step of your own, the same way, and records the run under that name. In a repo that declares `ci` it checks by CI instead: it pushes the tip to `ci.remote` when set (forced, to the branch `ci.ref` gives, when that is set), runs the local part (recorded under `check.local`) unless it passed at the tip, and reads CI, recording the reading; `--full` runs the full check there. In a project that names lanes, a check that may go to one runs on the first lane free now when no place here is free now; `--urgent` keeps it here and `--lane NAME` sends it to that lane (see Lanes) |
 | `moxi rounds finish [ROUND B<n>] [--again ID]` | finish a build at its branch's tip once every gate of finish holds there: take the repo's finish lock, the ref `refs/rounds/finishing/<into>` or the repo's `lock_ref`; read again the gates a move of the target can change; run the repo's finish actions in order, each recorded under its `id` before the next starts, an action recorded `ok` or `found` at the tip not run again; a merge already on the target (made by hand, by a fast-forward of the target, or by a finish that stopped before recording it) is recorded `found` with where it landed and is not made again, and a hand merge is printed as `found hand merge <commit>:` with what it put on the target; and record the finish when the gates read on the log still hold at the tip it merged, though the branch moved since. The `merge` action merges the tip, by its commit id, into the target with a merge commit, in the checkout that has the target, or in one it adds under `worktree_dir` and removes after. A conflict is aborted and refused with the way through; a failed action is recorded, undoes nothing, and exits 1. A refusal or failure after anything was recorded names each thing done and recorded, and says the build reads merged, not finished, when its merge is on the target. A lock left by a process on this machine that has ended is cleared and recorded; any other holder is named, with the git command that clears it. A `push` pushes the target at the merge's landing, or with no merge before it the build's branch at the tip, both by commit id. A push of the target git refuses still passes when the remote's target already holds the landing, so a rerun does not fail because the target moved on there; nothing is forced, so the remote's target never moves back. To read that, finish fetches the remote's target when the repo lacks its commit, which refreshes the repo's remote-tracking branch for it (`refs/remotes/<remote>/<into>`), as a push that succeeds would; no other ref changes. A `command` runs its argv with no shell in the build's worktree, placeholders filled as for a check, its output yours, with `started` recorded before it runs. A command that started and has no result may have done its work: it is run again, saying so, when its `repeat` is true, or once with `--again ID` after you have looked at what it did; otherwise it is refused with both ways on, that and the operator's `skip-action`. `--again` is refused for any other action. An action the operator skipped for the stage is not run and counts as done. Then it cleans up: after a merge, and only while the branch is still at the tip it finished, it removes the build's worktree and scratch folder and deletes the branch with `git branch -d` (not with `keep_branch`); with no merge it removes only the scratch folder. Each removal obeys the removal rule below, and a folder the rule keeps is named with the check that kept it. Before anything is written, finish is refused while a process of yours uses the build's scratch folder (its working folder, an open file, an argument or an environment value), naming the process: end it or leave the folder, then finish again. A scratch folder a process came to use after that read is not moved and is left for the sweep, named with the process. Where the processes can't be read, finish says the scratch gate was not run and goes on. Last, it removes from the remote CI's own refs of the build (see `ref` and `full_ref` under Config), each named with what became of it. With no round, in a build's worktree, it finishes that build |
+| `moxi rounds serve [--probe]` | the far side of a lane, which a lane's machine runs when another machine sends it a check over ssh; not typed by hand. With `--probe` it answers the doctor's round trip (see Lanes) |
 | `moxi rounds show ROUND [--json]` | one round: status, lead, flow, the step it is at, what its close waits for, its design and stages, its builds (for a build not finished, the newest record of each finish action at its head, with its state and landing), questions by state, rulings, verdicts and history |
 | `moxi rounds list [PROJECT] [--closed] [--json]` | the open rounds, each with its step and its counts, or with `--closed` the ended ones, each with how and when it ended; each row of `--json` also has the round's `lead` |
 | `moxi rounds list [PROJECT] --waiting [--json]` | what waits on the operator: open questions, parked ones, open waiting items, rulings not yet shown, builds to look at |
@@ -1246,10 +1247,11 @@ fails before it writes: put a test in `packages/rounds/tests` and run pytest fro
 | `models` | `{}` | the model each tier names, per harness or one for all; see below |
 | `defaults.trace` | `false` | run the trace check when a design is frozen |
 | `defaults.idle_days` | `14` | days a build's head may go without a commit before the read API's `builds` gives the build as idle |
-| `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow`, `trace` and `idle_days` for that project, and its own `checklist`, `watched_paths` and `verifier_brief` (see A project's checklist) |
+| `projects` | `{}` | per-project tables, `[projects.<key>]`, which may set `dir`, `flow`, `trace` and `idle_days` for that project, and its own `checklist`, `watched_paths` and `verifier_brief` (see A project's checklist), and `lanes`, the lanes it sends checks to (see Lanes) |
 | `watched_paths_guard.enabled` | `false` | run the watched-paths guard (see A project's checklist); the install asks |
 | `check_lock.at_once` | `1` | how many runs may hold the machine's check lock at once, across every repo; at least 1 (see The machine's check lock) |
 | `check_lock.need_mib` | `0` | the free memory, in MiB, a run needs to start beside running ones; 0 sums their `memory_mib` |
+| `lanes` | `{}` | other machines a check can be sent to, `[lanes.<name>]` (see Lanes) |
 
 ```toml
 [projects.alpha]
@@ -1506,6 +1508,166 @@ Since 0.1.6, with one place too:
 - the lock stays taken while an orphaned run still runs, where a dead holder freed it at
   once;
 - on Windows a check ends when the rounds process that started it dies.
+
+### Lanes
+
+A lane is another machine a check can run on, reached over ssh. When this machine's
+check lock has no place free now, a check goes to the first lane its project names that
+is free now, runs there under that machine's own check lock, and is recorded here like
+any run, naming the lane. rounds sets nothing up on the lane: it needs its own Moxi with
+rounds, git, and an ssh server this machine reaches with no prompt.
+
+```toml
+[lanes.spare]
+host = "spare"            # a Host of your ssh config, or user@host
+connect_timeout_s = 10
+
+[projects.alpha.lanes.spare]
+scoped = "make check BASE={base} MAX_MIB={memory_mib}"
+memory_mib = 4096
+timeout_s = 7200
+preflight = ["node --version", "uv --version"]
+```
+
+`[lanes.<name>]` is the machine: `host` (required), `moxi` (the command line that runs
+Moxi there, as its login shell reads it; default `moxi`), `ssh` (the words that run the
+ssh client here, a list used as given and never split, so a Windows path keeps its
+backslashes; default `["ssh"]`), `connect_timeout_s` (how long reaching the host may
+take, in seconds; default 10) and `shared_lock` (below). `[projects.<key>.lanes.<name>]`
+is a project's use of it: a project sends checks only to the lanes its tables name, and
+asks them in the order its tables come. Each key is optional: `command` and `scoped`,
+the words that run there in place of the check's own, with the same placeholders;
+`timeout_s`, the time limit there; `memory_mib`, the most memory one run there holds;
+and `preflight`. `moxi config rounds check` refuses a lane with no `host`, a number out
+of range and a project lane naming a lane `[lanes]` lacks, and prints the project's
+words and the lane's under each other wherever a lane gives its own, since the two
+copies can drift.
+
+**Which checks go.** Only the repo's declared check, as this machine would run it: in a
+queue project the scoped check and `--full`; in a project with CI that isn't queued,
+`--full` only, since a plain check by CI pushes and reads CI from this machine; in a
+project with neither, the declared command. These always run here: the lander's
+`ci.local` run, which every queued build waits on; a command step (`--step`); and a
+check by CI. `--lane` with a check that can't go is refused, with the reason, before
+anything is sent; a plain check of that kind runs here and asks no lane.
+
+**Where a check runs.** The choice is made once, before the run takes any place here.
+
+- Plain: here when a place is free now. Else each lane the project names, in order, is
+  asked to take a place of its own check lock with no wait; the first that takes one
+  runs the check, and each lane passed over is named with why (busy, can't be reached,
+  not ready). Else the check waits here, in this machine's line, and never moves to a
+  lane later.
+- `--urgent`: here, waiting in this machine's line as before; no lane is asked.
+- `--lane NAME`: on that lane, waiting in its line, its waiting lines shown here led by
+  `lane NAME:`. Refused, with nothing run, when the lane can't be reached or isn't
+  ready. `--urgent` with `--lane` is refused.
+- `--no-wait`: refused at once when no place can be taken now, here or on the lanes
+  asked; a busy lane answers from its lock before anything is sent.
+
+A run on a lane holds no place of this machine's check lock and counts toward neither
+`check_lock.at_once` nor the memory a run here needs. The cost of the choice: a slower
+lane can give its result later than a short wait here would have.
+
+**What is sent.** The build's commit, as a git bundle of what the lane doesn't hold yet,
+with the target's head: the first send of a project carries its whole history, later
+ones only the new commits, so a scoped check there finds its merge-base and `{into}`
+names a branch there. And the build's brought private files, the `private_files`
+commission copied into the worktree: each one the worktree holds now goes with its
+SHA-256, which the lane checks before it writes the file into the run's tree, mode
+0600, never into its repository; it is removed with the tree. All of it travels inside
+the one ssh session, and no word of the request goes on ssh's command line.
+
+Not sent, so not in the lane's tree:
+
+- any other untracked or ignored file of the worktree: virtual environments, caches,
+  generated files;
+- other ignored state a check reads when it is there, such as a `node_modules` folder
+  that turns on an extra step: the lane's tree never has it, so that step doesn't run
+  there unless the lane's words or a preflight line make it;
+- the build's scratch folder, and anything outside the repo.
+
+The lane builds its own environment, as a fresh clone does. A check that reads files
+outside its repo, such as a dependency at a path in a sibling folder, fails on a lane,
+and one that reads other ignored state does less there.
+
+**What the lane's machine needs.** An ssh server this machine reaches with no prompt
+(the session runs with `BatchMode=yes`), git, and Moxi with rounds at a version that
+speaks this one's request; `moxi doctor rounds` checks each (see Doctor). Every session
+opens its own connection (`ControlMaster=no`, `ControlPath=none`), so a multiplexing ssh
+config doesn't carry it, and costs one handshake. `moxi` is the one far command line,
+never split or quoted by rounds. A `~` in it is expanded only where the far login shell
+is a POSIX shell, so for a Windows lane give a full path, such as
+`C:\Tools\moxi\.venv\Scripts\moxi.exe`. This machine needs OpenSSH's client (on
+Windows 10 and later, its optional feature) and git.
+
+**The preflight.** What a project's check needs from a machine that the check doesn't
+install itself goes in the lane table's `preflight`: command lines, each split as a
+shell would but run with no shell, in the run's tree, up to 60 s each, once the lane's
+place is held and before the check. One that fails ends the run as not ready, naming the
+line, its exit code and the end of its output; the place frees and nothing else runs. A
+plain check then goes on to the next lane or here; a `--lane` check is refused. A tool
+of another version that works is not checked: say what the check needs in the preflight.
+
+**Its words, the record and the gate.** On a lane the check runs the lane table's
+`command` or `scoped`, else the project's own. `{memory_mib}` in them is the lane table's
+`memory_mib`, else the project check's own, else left as written; `{root}` is the run's
+tree on the lane, and every other placeholder is filled here. The time limit is
+`--timeout-s`, else the lane table's `timeout_s`, else the check's, else 3600 s. The
+run's record carries `lane`, `lane_host` (the name the lane's machine gives itself) and
+`lane_check_lock` (the place it held there) in place of `check_lock`, and its argv is the
+lane's words filled with this machine's root. The gate compares a lane run with that
+lane's words as they are now: a run on a lane the project no longer names, or whose
+words changed, counts for nothing. `check`, `show` and the board say `on lane NAME`.
+
+The output goes to `check-<n>.log` in the build's scratch folder, as for a run here, but
+it is kept in memory and the file written whole every 2 seconds while output arrives, so
+the file trails the run by up to 2 s, and a rounds process killed outright may leave the
+last 2 s out of it.
+
+**How a run ends.** However this side ends, the lane's run ends.
+
+- An interrupt here (Ctrl-C or SIGINT) closes the session's input. The lane ends the
+  command as an interrupt there would, SIGINT, 30 s, then SIGKILL to what is left, frees
+  its place and removes the tree. rounds waits up to 45 s for ssh, then kills it; a
+  second interrupt kills it at once, and the lane still ends its run the same way.
+  Nothing is recorded. A rounds process ended by SIGTERM or killed outright closes the
+  session with it, and the lane ends its run the same way.
+- The time limit is applied on the lane, and the run is recorded as ended at its limit.
+  As a backstop, a run that gives no result by its limit, 30 s and 60 s more is ended
+  here and counts as lost.
+- A lane lost after it took a place (ssh ended with no result) records nothing and says
+  so, with the way to run it again. Such a check never goes on to another lane or here,
+  since it may have run there.
+
+**On the lane's machine.** `serve` keeps one bare repository per sending machine and
+project in rounds' cache folder there (`lanes/repos/`), drops refs no send has named for
+14 days, makes each run's tree under `lanes/trees/` and removes it at the run's end; a
+tree that a killed `serve` left is removed by a later run there once nothing of its run
+still runs. A run holds a place of that machine's own check lock, whose holder record
+names the round, the stage and the machine that sent it (`from_host`); that machine's
+doctor shows them. The lane adds no fence: the check runs with the same environment
+rules as here, and what keeps a project's tests off a home folder is the project's own
+test fence. On a lane whose home folder is synced elsewhere, a check that writes outside
+its tree writes into the sync.
+
+**The lane's own scheduled work.** `shared_lock` in `[lanes.<name>]` is the path, on
+that machine, of a lock file its own scheduled work holds. A run there takes it right
+after its check lock place and holds it to the run's end. A plain check finds the lane
+busy while the scheduled work holds it and goes on to the next lane or here; a `--lane`
+check waits for it, or with `--no-wait` is refused as busy. Scheduled work that finds
+the lock held during a lane check does what it does with its lock held. For moxi-dev's
+timed runs that is not a skip: the run exits 2, so a timed tick that falls during a lane
+check is a failed tick, which `moxi-dev timed show` lists as failed, not a measurement.
+
+**Known limits.**
+
+- On a Windows lane an interrupt doesn't reach the running command at once: `serve`
+  there sees it only when the command ends by itself or at its time limit, and then
+  ends as above. A run here on Windows has the same wait.
+- The lane holds the bundle in memory while it writes it, so a send needs the bundle's
+  size in free memory there; a project's first send is its whole packed history.
+- The log here trails the run by up to 2 s (above).
 
 ### A project's checklist
 
@@ -1769,7 +1931,8 @@ its call raises as a `moxi_rounds.errors.RoundsError`, with `reason`, `fix` and
 | `index` | warns when the index says something else than the logs do; `moxi rounds list` brings it up to them |
 | `ci <repo>` | for each repo that declares `ci`: warns when the commands that read CI are not on PATH, or, with the default `gh` commands, when `gh auth status` does not exit 0, with `check --full` as the way through; says so when the repo meets the check gate on CI alone |
 | `finish locks` | warns for each finish lock older than an hour in a project's repo, with its holder and the one git command that clears it, for you to run after asking the holder |
-| `check lock` | the machine's check lock, read without taking a lock: each of its places (`check lock k of N` when there is more than one, a held place above `check_lock.at_once` included), who holds it, for how long, its output file's size and last write, or the orphaned run that keeps it taken; each run waiting in line, in order, a lander's first; and when the first in line waits beside running checks for memory, the reading and the need. Warns, for each place, when the holder's output has not been written for 30 minutes (it may be hung: end it, and the next in line takes the place), for a place held with no holder record, and for an orphan, a run whose rounds process is gone while it still runs, naming its pid; and for a waiter's ticket not touched for a minute (a waiter stopped or suspended, passed over until it runs again) |
+| `check lock` | the machine's check lock, read without taking a lock: each of its places (`check lock k of N` when there is more than one, a held place above `check_lock.at_once` included), who holds it, for how long, its output file's size and last write, or the orphaned run that keeps it taken; each run waiting in line, in order, a lander's first; and when the first in line waits beside running checks for memory, the reading and the need. Warns, for each place, when the holder's output has not been written for 30 minutes (it may be hung: end it, and the next in line takes the place), for a place held with no holder record, and for an orphan, a run whose rounds process is gone while it still runs, naming its pid; and for a waiter's ticket not touched for a minute (a waiter stopped or suspended, passed over until it runs again). A holder or waiter whose run another machine sent here, as a lane, names that machine |
+| `lane <name>` | for each lane in `[lanes]`, a real round trip: ssh with the lane's own words and options to `<moxi> rounds serve --probe` there, a payload of every byte value, then the input's end. Says the lane's machine, its version, CPUs, free memory, git, and its check lock's holders, each with the machine it came from, and its line. Warns, naming the first that fails: no ssh client here, the host not reached, `serve` missing there, of another version or failing to start (with the last lines it wrote), a session that changes the bytes or doesn't pass on the input's end, no git there, and a preflight line of a project that names the lane, run there in a scratch folder. It never fails: a lane that is down costs only its own checks |
 | `leftovers` | the sweep's dry run: warns with each folder an ended build left on this machine, whether it would go or the check that keeps it, and the command that removes what would go |
 
 The doctor only reads.

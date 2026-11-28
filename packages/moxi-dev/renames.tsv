@@ -9974,8 +9974,6 @@ rounds	packages/rounds/src/moxi_rounds/doctor.py	goes = swept.would_go or any(on
 rounds	packages/rounds/src/moxi_rounds/doctor.py	rows	name	error	exc
 rounds	packages/rounds/src/moxi_rounds/doctor.py	yield from _folders(len(homes), unresolved)	use	_folders	_round_dirs
 rounds	packages/rounds/src/moxi_rounds/doctor.py	if one.stale(now_s):	keep	stale	stale
-rounds	packages/rounds/src/moxi_rounds/doctor.py	return (f"pid {found.get('pid')} ({found.get('round')} {found.get('stage')}, repo "	keep	round	round
-rounds	packages/rounds/src/moxi_rounds/doctor.py	return (f"pid {fields.get('pid')} {fields.get('round')} {fields.get('stage')} for "	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/drift.py	return any(fnmatch.fnmatchcase(path if "/" in glob else last, glob)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/drift.py	return len(parents) > 1 and any(git.is_ancestor(one, target_before)	keep	any	any
 rounds	packages/rounds/src/moxi_rounds/dropping.py	"""A round as it was dropped: its `name`, who it was `by` and the `record` given,	keep	record	record
@@ -18789,7 +18787,6 @@ rounds	packages/rounds/src/moxi_rounds/sending.py	found = self.frames.get(timeou
 rounds	packages/rounds/src/moxi_rounds/sending.py	self.writer.send(kind, payload)	keep	fail	fail
 rounds	packages/rounds/src/moxi_rounds/sending.py	self.popen.wait(timeout=wait_s)	keep	timeout	timeout
 rounds	packages/rounds/src/moxi_rounds/sending.py	thread.join(timeout=5)	keep	timeout	timeout
-rounds	packages/rounds/src/moxi_rounds/sending.py	code = self.session.popen.wait(timeout=5)	keep	timeout	timeout
 rounds	packages/rounds/src/moxi_rounds/sending.py	if not self.session.send(frames.REQUEST, _json(self.request)):	keep	fail	fail
 rounds	packages/rounds/src/moxi_rounds/sending.py	if not self.session.send(frames.BUNDLE, data):	keep	fail	fail
 rounds	packages/rounds/src/moxi_rounds/sending.py	if not self.session.send(frames.FILE, frames.file_payload(meta, file_data)):	keep	fail	fail
@@ -18807,3 +18804,9 @@ rounds	packages/rounds/tests/test_lane_check.py	assert any(line.startswith("lane
 rounds	packages/rounds/tests/test_lane_check.py	assert any(line.startswith("waiting for the machine's check lock") for line in said)	keep	any	any
 rounds	packages/rounds/tests/test_lane_check.py	assert any("ssh could not reach far-test" in line and "no route to host" in line	keep	any	any
 rounds	packages/rounds/tests/test_lane_check.py	assert any(line.startswith("lane far: waiting for the machine's check lock")	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/doctor.py	return (f"({found.get('round')} {found.get('stage')}, repo {found.get('repo')}"	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/doctor.py	return (f"pid {fields.get('pid')} {fields.get('round')} {fields.get('stage')}{came} "	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/sending.py	code = session.popen.wait(timeout=5)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_lane_doctor.py	check_line.write_holder(far.lock, {**check_line.me(), "round": "proj-a/x",	keep	round	round
+rounds	packages/rounds/tests/test_lane_doctor.py	**check_line.me(), "round": "proj-a/x", "stage": "B1", "step": "check",	keep	round	round
+rounds	packages/rounds/tests/test_lane_doctor.py	**check_line.me(), "round": "proj-a/y", "stage": "B2", "step": "check",	keep	round	round

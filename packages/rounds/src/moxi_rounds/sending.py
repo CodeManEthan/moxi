@@ -36,6 +36,11 @@ ends with no result raises `Lost`, and so does one with no result by the time li
 `checking.GRACE_S` plus `BACKSTOP_S` after the command started: the run may have started
 there, so it is never sent anywhere else. `Busy`, `Unreachable` and `NotReady` mean
 nothing ran.
+
+**The doctor's probe** (`probe`): the same session with the far word `<moxi> rounds
+serve --probe`; the request names each project's preflight lines for the lane, then a
+payload of every byte value, then stdin closes. The far side answers what it read and
+what it has (`serving.probe`); nothing is taken or kept there.
 """
 
 from __future__ import annotations
@@ -77,6 +82,8 @@ BUNDLE_TIMEOUT_S = 600.0
 SSH_FAILED = 255
 #: The exit code of a far shell that found no such command.
 NOT_FOUND = 127
+#: The doctor's probe payload: every byte value once.
+PROBE_PAYLOAD = bytes(range(256))
 
 
 class LaneError(RoundsError):
@@ -330,10 +337,7 @@ def send(lane_name: str, lane: Mapping, request: Mapping, *, worktree: Path,
     try:
         session = _Session(session_argv(lane))
     except OSError as exc:
-        raise Unreachable(lane_name, f"lane {lane_name}: the ssh client "
-                          f"{lane['ssh'][0]!r} could not start here: {exc}",
-                          f"install OpenSSH's client, or set ssh in [lanes.{lane_name}]"
-                          ) from None
+        raise _no_client(lane_name, lane, exc) from None
     log = _Log(output)
     ended = False
     try:
@@ -355,6 +359,36 @@ def send(lane_name: str, lane: Mapping, request: Mapping, *, worktree: Path,
             log.write()
 
 
+def _no_client(lane_name: str, lane: Mapping, exc: OSError) -> Unreachable:
+    return Unreachable(lane_name, f"lane {lane_name}: the ssh client {lane['ssh'][0]!r} "
+                       f"could not start here: {exc}",
+                       f"install OpenSSH's client, or set ssh in [lanes.{lane_name}]")
+
+
+def _unreachable(session: _Session, lane_name: str, lane: Mapping, why: str) -> Unreachable:
+    """Why the far side gave no answer, told from how the session ended: ssh could not
+    reach the host, `serve` is missing there, or it failed to start, with the last lines
+    ssh wrote to stderr."""
+    try:
+        code = session.popen.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        code = None
+    err = session.stderr_words()
+    host, moxi = str(lane["host"]), lane["moxi"]
+    fix = serving.fix_line(host)
+    if code == SSH_FAILED:
+        return Unreachable(lane_name, f"lane {lane_name}: ssh could not reach {host}: "
+                           f"{err or why}",
+                           f"check that ssh {host} works here with no prompt, or fix host "
+                           f"in [lanes.{lane_name}]")
+    if code == NOT_FOUND or "not found" in err or "not recognized" in err:
+        return Unreachable(lane_name, f"lane {lane_name}: {moxi} rounds serve is missing "
+                           f"on {host}: {err or why}", fix)
+    tail = f": {err}" if err else ""
+    return Unreachable(lane_name, f"lane {lane_name}: {moxi} rounds serve failed to start "
+                       f"on {host} ({why}, exit {code}){tail}", fix)
+
+
 class _Exchange:
     def __init__(self, session: _Session, lane_name: str, lane: Mapping,
                  request: Mapping, log: _Log, say: Callable[[str], None]):
@@ -372,24 +406,7 @@ class _Exchange:
 
     def unreachable(self, why: str) -> Unreachable:
         """Why the far lock gave no answer, told from how the session ended."""
-        try:
-            code = self.session.popen.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            code = None
-        err = self.session.stderr_words()
-        moxi = self.lane["moxi"]
-        fix = serving.fix_line(self.host)
-        if code == SSH_FAILED:
-            return Unreachable(self.name, f"lane {self.name}: ssh could not reach "
-                               f"{self.host}: {err or why}",
-                               f"check that ssh {self.host} works here with no prompt, "
-                               f"or fix host in [lanes.{self.name}]")
-        if code == NOT_FOUND or "not found" in err or "not recognized" in err:
-            return Unreachable(self.name, f"lane {self.name}: {moxi} rounds serve is "
-                               f"missing on {self.host}: {err or why}", fix)
-        tail = f": {err}" if err else ""
-        return Unreachable(self.name, f"lane {self.name}: {moxi} rounds serve failed to "
-                           f"start on {self.host} ({why}, exit {code}){tail}", fix)
+        return _unreachable(self.session, self.name, self.lane, why)
 
     def run(self, *, worktree: Path, brought: object) -> dict:
         answer_by = (None if self.request.get("wait") else time.monotonic()
@@ -539,6 +556,67 @@ class _Exchange:
         return "the session ended with no result" + (f": {err}" if err else "")
 
 
+# -- the doctor's probe ------------------------------------------------------------------
+
+def probe_argv(lane: Mapping) -> list[str]:
+    """The words that open the doctor's probe of a lane: the session's (`session_argv`),
+    with the far word `<moxi> rounds serve --probe`."""
+    words = session_argv(lane)
+    return [*words[:-1], f"{words[-1]} --probe"]
+
+
+def probe(lane_name: str, lane: Mapping, preflight: Mapping[str, Sequence[str]]) -> dict:
+    """The doctor's round trip to the lane `lane_name` (its table `lane`, defaults
+    filled): the request (the version and `preflight`, each project's lines by key),
+    then `PROBE_PAYLOAD`, then stdin's end; the far side's answer (`frames.PROBED`'s
+    fields). Raises `Unreachable` when ssh, the host or `serve --probe` there failed,
+    when the far side refused the probe (its reason and fix), and when no answer came
+    within `connect_timeout_s`, `ANSWER_WAIT_S`, `serving.PROBE_EOF_WAIT_S` and
+    `serving.PREFLIGHT_TIMEOUT_S` for each preflight line."""
+    host = str(lane["host"])
+    lines = {str(key): [str(one) for one in value] for key, value in preflight.items()}
+    wait_s = (float(lane["connect_timeout_s"]) + ANSWER_WAIT_S + serving.PROBE_EOF_WAIT_S
+              + serving.PREFLIGHT_TIMEOUT_S * sum(len(one) for one in lines.values()))
+    try:
+        session = _Session(probe_argv(lane))
+    except OSError as exc:
+        raise _no_client(lane_name, lane, exc) from None
+    deadline = time.monotonic() + wait_s
+    try:
+        # A send that fails means the session ended; the read says how.
+        if session.send(frames.REQUEST, _json({"version": frames.VERSION,
+                                               "preflight": lines})):
+            session.send(frames.PROBE, PROBE_PAYLOAD)
+        session.close_stdin()
+        while True:
+            try:
+                found = session.next(deadline)
+            except _Late:
+                session.end(0)
+                raise Unreachable(lane_name, f"lane {lane_name}: {host} gave no answer to "
+                                  f"the probe within {wait_s:g} s",
+                                  f"check that ssh {host} works here, then run the doctor "
+                                  "again") from None
+            except frames.FrameError as exc:
+                raise _unreachable(session, lane_name, lane,
+                                   f"its answer can't be read: {exc}") from None
+            if found is None:
+                raise _unreachable(session, lane_name, lane,
+                                   "the session ended before the probe's answer")
+            kind, payload = found
+            if kind == frames.PROBED:
+                return _message(payload)
+            if kind == frames.REFUSED:
+                value = _message(payload)
+                raise Unreachable(lane_name, f"lane {lane_name}: {host} refused the probe: "
+                                  f"{value.get('reason')}",
+                                  value.get("fix") or serving.fix_line(host))
+            raise _unreachable(session, lane_name, lane,
+                               f"a {kind} frame came where the probe's answer was due")
+    finally:
+        session.end(END_WAIT_S)
+
+
 class _LateFor(Exception):
     def __init__(self, before: str):
         super().__init__(before)
@@ -556,4 +634,4 @@ def _json(value) -> bytes:
 __all__ = ["ANSWER_WAIT_S", "LOG_EVERY_S", "BACKSTOP_S", "END_WAIT_S", "STDERR_LINES",
            "BUNDLE_TIMEOUT_S", "SSH_FAILED", "NOT_FOUND", "LaneError", "Unreachable",
            "Busy", "NotReady", "Lost", "LaneRan", "session_argv", "request_of",
-           "bundle_of", "brought_files", "send"]
+           "bundle_of", "brought_files", "send", "PROBE_PAYLOAD", "probe_argv", "probe"]
