@@ -18784,3 +18784,19 @@ rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, {"version": 
 rounds	packages/rounds/tests/test_serve.py	one.send(frames.PROBE, payload)	keep	fail	fail
 rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, {"version": 0})	keep	fail	fail
 rounds	packages/rounds/tests/test_serve.py	assert one.proc.wait(timeout=PROC_WAIT_S) == 1	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/sending.py	return {"version": frames.VERSION, "round": name, "stage": stage, "step": step,	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/sending.py	found = self.frames.get(timeout=wait_s)	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/sending.py	self.writer.send(kind, payload)	keep	fail	fail
+rounds	packages/rounds/src/moxi_rounds/sending.py	self.popen.wait(timeout=wait_s)	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/sending.py	thread.join(timeout=5)	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/sending.py	code = self.session.popen.wait(timeout=5)	keep	timeout	timeout
+rounds	packages/rounds/src/moxi_rounds/sending.py	if not self.session.send(frames.REQUEST, _json(self.request)):	keep	fail	fail
+rounds	packages/rounds/src/moxi_rounds/sending.py	if not self.session.send(frames.BUNDLE, data):	keep	fail	fail
+rounds	packages/rounds/src/moxi_rounds/sending.py	if not self.session.send(frames.FILE, frames.file_payload(meta, file_data)):	keep	fail	fail
+rounds	packages/rounds/src/moxi_rounds/sending.py	self.session.send(frames.FILES_END)	keep	fail	fail
+rounds	packages/rounds/tests/test_lane_send.py	self.record = tmp_path / "relay.jsonl"	keep	record	record
+rounds	packages/rounds/tests/test_lane_send.py	"ssh": [PY, "-c", RELAY, str(self.home), str(self.record),	keep	record	record
+rounds	packages/rounds/tests/test_lane_send.py	if not self.record.exists():	keep	record	record
+rounds	packages/rounds/tests/test_lane_send.py	return [json.loads(line) for line in self.record.read_text().splitlines()]	keep	record	record
+rounds	packages/rounds/tests/test_lane_send.py	lane.lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_lane_send.py	if held.stdin and not held.stdin.closed:	keep	closed	closed
