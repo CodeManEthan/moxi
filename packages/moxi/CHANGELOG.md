@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.12 (unreleased)
+
+- `moxi.proc.run` takes three options that name a run and end all of it, each off unless
+  given, so every existing call behaves as before. `tag` puts a string in the command's
+  environment as `MOXI_RUN_TAG` (the new constant `moxi.proc.RUN_TAG_ENV`), so every
+  process that inherits the environment carries it, one that left the process group
+  included. `on_start` is called with the first process as a `ProcId` once it has started
+  (on Windows, once it is in its job); one that raises ends the run and is raised.
+  `end_leftovers=True` ends everything the run started before `run` returns or raises:
+  on a normal end, a timeout and an interrupt, the process group and every process
+  carrying the tag get `first_signal`, then `grace_s`, then SIGKILL, and a second
+  interrupt during the grace kills at once. On Windows the run's job is made
+  kill-on-close, so the tree also ends when the caller dies, and it is terminated on
+  every end. A caller that passes them needs `moxi>=0.1.12`.
+- The ending of a set of processes is one piece of code, shared by the watchdog of
+  `spawn(..., lifeline="watch")` and `run`'s `end_leftovers`.
+
 ## 0.1.11 (unreleased)
 
 - The agent test (`moxi.terminal.agent()`) stops at the pytest run a test kit names, by

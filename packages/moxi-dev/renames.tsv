@@ -18693,3 +18693,47 @@ moxi-dev	packages/moxi-dev/tests/test_fence.py	assert any(getattr(plugin, "RUN_I
 moxi-dev	packages/moxi-dev/tests/test_fence.py	assert not any(one == key or (key.endswith("_") and one.startswith(key))	keep	any	any
 moxi-dev	packages/moxi-dev/tests/test_fence.py	cleared = sorted(set(SESSION_SOURCE) - {"MOXI_X_INPUT"})	keep	set	set
 moxi-dev	packages/moxi-dev/tests/test_workflows.py	assert not any("--with-dependents" in line for line in full)	keep	any	any
+moxi	packages/moxi/src/moxi/proc.py	said[:] = proc.communicate(timeout=max(deadline - time.monotonic(), 0))	keep	timeout	timeout
+moxi	packages/moxi/tests/test_watch.py	send(processes, signum)	keep	fail	fail
+rounds	packages/rounds/src/moxi_rounds/check_line.py	"""A held place of the check lock: its number `k`, its holder `record` (None when	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/check_line.py	elif (own is None or mine is None or order(one) < mine) and not one.stale(now_s):	keep	stale	stale
+rounds	packages/rounds/src/moxi_rounds/check_line.py	if any(one.memory_mib is None for one in held):	keep	any	any
+rounds	packages/rounds/src/moxi_rounds/check_line.py	if one.orphan and (one.k, (one.record or {}).get("run_pid")) not in orphans:	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/check_line.py	if one.record is not None and one.record.get("since")	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/check_line.py	lock_path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/src/moxi_rounds/check_line.py	orphans.add((one.k, (one.record or {}).get("run_pid")))	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/check_line.py	orphans: set = set()	keep	set	set
+rounds	packages/rounds/src/moxi_rounds/check_line.py	record = one.record or {}	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/check_line.py	return ", ".join(f"{one.name} for {age(one.record.get('since'))}"	keep	record	record
+rounds	packages/rounds/src/moxi_rounds/check_line.py	return f"{self.record.get('round')} {self.record.get('stage')}"	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/checking.py	return code, round(time.monotonic() - started, 3), output, taken	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/cli.py	help="refuse at once when no place of this machine's check "	keep	help	help
+rounds	packages/rounds/src/moxi_rounds/doctor.py	[f"look at {run} ({gone.get('round')} {gone.get('stage')}): the place frees "	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/doctor.py	f"its holder, pid {gone.get('pid')} ({gone.get('round')} {gone.get('stage')}), "	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/queue_ci.py	duration_s = round(time.monotonic() - began, 1)	keep	round	round
+rounds	packages/rounds/src/moxi_rounds/queue_ci.py	fields = {**check_line.me(), "round": values.get("round"),	keep	round	round
+rounds	packages/rounds/tests/test_check_run_ends.py	"""`rounds_proc(round)`: a real rounds process running the check of B1 in `round`;	keep	round	round
+rounds	packages/rounds/tests/test_check_run_ends.py	assert rounds.wait(timeout=PROC_WAIT_S) != 0	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_run_ends.py	assert rounds.wait(timeout=PROC_WAIT_S) == -signal.SIGKILL	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_run_ends.py	one.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_run_ends.py	rounds.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_run_ends.py	with check_line.slot(checking.lock_file(), {**check_line.me(), "round": "x/y"},	keep	round	round
+rounds	packages/rounds/tests/test_check_slots.py	"pid": held.pid, "created": ident.started, "round": name, "stage": "B1",	keep	round	round
+rounds	packages/rounds/tests/test_check_slots.py	"round": "proj-a/gone", "stage": "B1",	keep	round	round
+rounds	packages/rounds/tests/test_check_slots.py	`memory_mib`) unless `record` is false."""	keep	record	record
+rounds	packages/rounds/tests/test_check_slots.py	assert check_line.orphan(path)["round"] == "proj-a/gone"	keep	round	round
+rounds	packages/rounds/tests/test_check_slots.py	dead.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_slots.py	first.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_slots.py	one.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_slots.py	other.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_check_slots.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+rounds	packages/rounds/tests/test_check_slots.py	return check_line.Held(k, {"round": f"r{k}", "stage": "B1",	keep	round	round
+rounds	packages/rounds/tests/test_check_slots.py	return {**check_line.me(), "round": name, "stage": "B1", "step": "check",	keep	round	round
+rounds	packages/rounds/tests/test_check_slots.py	run.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_doctor.py	"pid": dead.pid, "created": time.time() - 50, "round": "proj-a/gone",	keep	round	round
+rounds	packages/rounds/tests/test_doctor.py	dead.wait(timeout=30)	keep	timeout	timeout
+rounds	packages/rounds/tests/test_queue_local.py	VALUES = {"round": "queue/proj-a", "stage": "b7", "repo": "proj-a"}	keep	round	round
+rounds	packages/rounds/tests/test_queue_local.py	assert (record["round"], record["stage"], record["step"], record["repo"]) == (	keep	round	round
+rounds	packages/rounds/tests/test_queue_local.py	earlier = check_line.take(lock, {**check_line.me(), "round": "proj-a/earlier",	keep	round	round
+rounds	packages/rounds/tests/test_queue_local.py	record = leftover(out, "record")	keep	record	record
+rounds	packages/rounds/tests/test_check_slots.py	killed.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout

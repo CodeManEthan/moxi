@@ -13,8 +13,8 @@ for the round's home project; `build_setting` reads one of `BUILD_KEYS` for the 
 repo. Each takes the project's own table first, then `defaults`.
 `project_setting` reads one of `PROJECT_KEYS`, which only a project's own table holds:
 its checklist, its watched paths and its verifier's brief lines.
-The `sweep` and `watched_paths_guard` keys are this machine's and belong to no project, so they are read as
-they stand (`settings["sweep.armed"]`).
+The `sweep`, `check_lock` and `watched_paths_guard` keys are this machine's and belong to
+no project, so they are read as they stand (`settings["sweep.armed"]`).
 
 A project's table is `[projects.<key>]`, and its name finds the project the way the
 projects list finds one: ignoring case. So `project_table` gives the same table for
@@ -25,6 +25,7 @@ differ only in case are refused, since both would be the one project's.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 from moxi.config import ConfigError, Schema
 
@@ -73,6 +74,8 @@ def check(settings):
     _check_disposable(settings.file, "defaults.disposable",
                       settings["defaults.disposable"])
     _check_grace(settings.file, "sweep.grace_hours", settings["sweep.grace_hours"])
+    _check_at_once(settings.file, "check_lock.at_once", settings["check_lock.at_once"])
+    _check_need(settings.file, "check_lock.need_mib", settings["check_lock.need_mib"])
     _check_director(settings.file, "defaults.director", settings["defaults.director"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
@@ -110,6 +113,11 @@ LAND_QUEUE = "queue"
 #: What `{base}` in a check's `scoped` command line is filled in with: the merge-base of
 #: the build's tip and its target.
 BASE_FIELD = "{base}"
+#: What `{memory_mib}` in a check's `command` and `scoped`, and in `ci.local`'s `command`,
+#: is filled in with: that table's own `memory_mib`.
+MEMORY_FIELD = "{memory_mib}"
+#: The least `memory_mib` a check may declare, in MiB.
+MEMORY_MIB_MIN = 64
 
 #: What a finish action does.
 MERGE = "merge"
@@ -174,6 +182,24 @@ def _setting(settings, project, key):
         return settings[f"defaults.{key}"]
     value = _PROJECT_ONLY[key]
     return copy.deepcopy(list(value)) if isinstance(value, tuple) else value
+
+
+def memory_mib(table) -> int | None:
+    """The `memory_mib` a check's table (the project's `check`, or `ci.local`) declares:
+    the most memory one run of its command holds, in MiB; None when it declares none."""
+    if not isinstance(table, Mapping):
+        return None
+    value = table.get("memory_mib")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def fill_memory(words, table) -> list[str]:
+    """`words` with `{memory_mib}` filled in with the `memory_mib` of `table`, the table
+    the words come from; kept as written where it declares none."""
+    found = memory_mib(table)
+    if found is None:
+        return [str(word) for word in words]
+    return [str(word).replace(MEMORY_FIELD, str(found)) for word in words]
 
 
 def finish_actions(actions) -> list[dict]:
@@ -271,6 +297,31 @@ def _check_grace(file, where, value) -> None:
         raise ConfigError(file, where, f"is {value}, below 1",
                           "give the hours nothing in a leftover folder must have changed "
                           "before the sweep takes it, 1 or more")
+
+
+def _check_at_once(file, where, value) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ConfigError(file, where, f"is {value!r}, not a whole number of at least 1",
+                          "give how many runs may hold the check lock at once: 1, or 2 "
+                          "where two checks fit in memory")
+
+
+def _check_need(file, where, value) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError(file, where, f"is {value!r}, not a whole number of at least 0",
+                          "give the free memory a second run needs, in MiB, or 0 for the "
+                          "sum of the runs' memory_mib")
+
+
+def _check_memory_mib(file, where, value) -> None:
+    """A check's `memory_mib`: the most memory one run of its command holds, a whole
+    number of MiB, at least `MEMORY_MIB_MIN`."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < MEMORY_MIB_MIN:
+        raise ConfigError(file, where,
+                          f"is {value!r}, not a whole number of at least {MEMORY_MIB_MIN}",
+                          "give the most memory one run of the command holds, in MiB "
+                          "(the MemoryMax its cap enforces), or leave it out to run the "
+                          "command only alone")
 
 
 def _check_disposable(file, where, value) -> None:
@@ -441,11 +492,13 @@ def _private_file_problem(entry: str) -> str:
     return ""
 
 
-def _check_check(file, where, value, *, keys=("command", "timeout_s")) -> None:
-    """The repo's check: a command line that splits into a command, and its time limit.
-    The project's own check also takes `scoped`, the command line a queue project's
-    build is checked by, `{base}` in it filled in at each run (`_check_project_check`);
-    `ci.local` takes the first two alone."""
+def _check_check(file, where, value, *,
+                 keys=("command", "timeout_s", "memory_mib")) -> None:
+    """The repo's check: a command line that splits into a command, its time limit, and
+    the most memory one run holds (`memory_mib`, which `{memory_mib}` in the command
+    line is filled with). The project's own check also takes `scoped`, the command line
+    a queue project's build is checked by, `{base}` in it filled in at each run
+    (`_check_project_check`); `ci.local` takes the others alone."""
     if not isinstance(value, dict):
         raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
                           'write it as { command = "make check", timeout_s = 600 }')
@@ -458,10 +511,12 @@ def _check_check(file, where, value, *, keys=("command", "timeout_s")) -> None:
     if "scoped" in value:
         _check_command_line(file, f"{where}.scoped", value["scoped"])
     flows.check_timeout(file, f"{where}.timeout_s", value.get("timeout_s"))
+    if "memory_mib" in value:
+        _check_memory_mib(file, f"{where}.memory_mib", value["memory_mib"])
 
 
 def _check_project_check(file, where, value) -> None:
-    _check_check(file, where, value, keys=("command", "scoped", "timeout_s"))
+    _check_check(file, where, value, keys=("command", "scoped", "timeout_s", "memory_mib"))
 
 
 def _check_command_line(file, where, command) -> None:
@@ -848,6 +903,6 @@ _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 
 
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
-           "ROUND_KEYS", "BUILD_KEYS", "PROJECT_KEYS", "GUARD_SWITCH", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
+           "ROUND_KEYS", "BUILD_KEYS", "PROJECT_KEYS", "GUARD_SWITCH", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MEMORY_FIELD", "MEMORY_MIB_MIN", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
            "round_setting", "build_setting", "project_setting", "project_table",
-           "finish_actions", "has_notes_dir"]
+           "finish_actions", "has_notes_dir", "memory_mib", "fill_memory"]

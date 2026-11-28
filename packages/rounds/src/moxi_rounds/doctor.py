@@ -29,14 +29,19 @@ be, with the right mode and size. These look at what rounds needs and keeps:
   writes has a holder and a time to read; whatever else a repo's `lock_ref` points at
   is another tool's, and not judged here. A project whose root git can't read has no
   locks to look at.
-- check lock: the machine's check lock, its holder record and its line of waiting
-  tickets (`check_line`), read without taking any lock. `ok` while it is free with no
-  live ticket, or while its holder's output was written within `check_line.QUIET_S`,
-  naming the holder, how long it has held the lock, its output's size and last write,
-  and each waiter in order. `warn` when the holder's output has not been written for
-  `check_line.QUIET_S` (an empty output counts from when the lock was taken), for a
-  ticket not touched for `check_line.TICKET_STALE_S`, and for a lock held by a live
-  process that wrote no holder record.
+- check lock: the machine's check lock, every place of it (`check_line.places`, from
+  `check_lock.at_once`), each one's holder record, and its line of waiting tickets
+  (`check_line`), read without taking any lock. One row: with one place it reads as a
+  single lock; with more each place is named `check lock k of N`. `ok` while every
+  place is free with no live ticket, or while each holder's output was written within
+  `check_line.QUIET_S`, naming each holder, how long it has held its place, its output's
+  size and last write, and each waiter in order, a lander's first. When the first in
+  line waits beside held places for memory, the reading and the need. `warn`, per
+  place, when the holder's output has not been written for `check_line.QUIET_S` (an
+  empty output counts from when the place was taken), for a place held by a live
+  process that wrote no holder record, and for an orphan's run, one whose rounds
+  process is gone while it still runs (`check_line.orphan`), naming its pid; and for a
+  ticket not touched for `check_line.TICKET_STALE_S`.
 - private files: for each project whose `private_files` lists any, `warn` naming each
   entry that is missing at the project's root, is not a file, is tracked at the root's
   `HEAD`, or that git at the root does not read as ignored, each with its fix, as
@@ -59,6 +64,8 @@ import sqlite3
 import subprocess
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
 
 from moxi import config, proc, store
 from moxi.doctor import Row
@@ -216,31 +223,35 @@ def _locks() -> Iterator[Row]:
 
 def _check_lock() -> Row:
     from . import check_line, checking
+    from . import settings as own
 
+    try:
+        settings = own.load()
+    except config.ConfigError:
+        settings = {}  # the settings' own row says what is wrong with them
+    at_once = checking.lock_setting(settings, "at_once")
+    need_mib = checking.lock_setting(settings, "need_mib")
     path = checking.lock_file()
     now_s = time.time()
-    found = check_line.holder(path)
-    pid = check_line.lock_pid(path)
-    if found is None and pid is not None and proc.identity(pid) is None:
-        pid = None  # the process died holding it, so the system freed the lock
-    line = [one for one in check_line.tickets(path) if not one.dead]
+    places = check_line.places(path, at_once)
+    line = sorted((one for one in check_line.tickets(path) if not one.dead),
+                  key=check_line.order)
     waiting = f"{len(line)} waiting" + (": " + "; ".join(
         f"{number}. {_waiter(one)}" for number, one in enumerate(line, 1)) if line else "")
-    warned, fixes = [], []
-    if found is not None:
-        detail = f"held by {_holder_words(found)}; {_output_words(found, now_s)}"
-        if _quiet(found, now_s):
-            warned.append("it may be hung")
-            output = found.get("output") or "no output file named"
-            fixes.append(f"look at pid {found.get('pid')} (its output: {output}); if it "
-                         "is hung, end it: the lock frees with the process and the next "
-                         "in line takes it")
-    elif pid is not None:
-        detail = f"held by pid {pid}, which wrote no holder record"
-        warned.append("a check that keeps no holder record holds it")
-        fixes.append(f"look at pid {pid}: the lock frees with the process")
-    else:
-        detail = "free"
+    warned, fixes, parts, held = [], [], [], []
+    for k in places:
+        place = _place(check_line.slot_path(path, k), k, now_s)
+        if len(places) == 1:
+            parts.append(place.detail)
+            warned += place.warned
+        else:
+            label = (f"check lock {k} of {at_once}" if k <= at_once
+                     else f"check lock {k}, above check_lock.at_once")
+            parts.append(f"{label}: {place.detail}")
+            warned += [f"{label}: {one}" for one in place.warned]
+        fixes += place.fixes
+        if place.held is not None:
+            held.append(place.held)
     for one in line:
         if one.stale(now_s):
             untouched = int(now_s - one.touched_s)
@@ -248,11 +259,85 @@ def _check_lock() -> Row:
                           f"touched for {untouched} s, so it is passed over")
             fixes.append(f"pid {one.fields.get('pid')} waits but does not run (stopped "
                          "or suspended): resume it to take its place back, or end it")
-    detail = f"{detail}; {waiting}"
+    detail = "; ".join([*parts, waiting])
+    short = _memory_words(line, held, at_once=at_once, need_mib=need_mib)
+    if short:
+        detail = f"{detail}; {short}"
     if warned:
         return Row(MODULE, "check lock", "warn", f"{detail}; " + "; ".join(warned),
                    "; ".join(fixes))
     return Row(MODULE, "check lock", "ok", detail)
+
+
+@dataclass(frozen=True)
+class _Place:
+    """What the doctor reads of one place of the check lock: its words (`detail`), what
+    it warns of and the fixes, and the place as held (`check_line.Held`), None when
+    free."""
+
+    detail: str
+    warned: list
+    fixes: list
+    held: object = None
+
+
+def _place(path: Path, k: int, now_s: float) -> _Place:
+    """One place of the check lock, whose lock file is `path`, read without taking its
+    lock: its live holder, an orphan's run, a live process holding it with no holder
+    record, or free."""
+    from . import check_line
+
+    found = check_line.holder(path)
+    if found is not None:
+        warned, fixes = [], []
+        if _quiet(found, now_s):
+            warned.append("it may be hung")
+            output = found.get("output") or "no output file named"
+            fixes.append(f"look at pid {found.get('pid')} (its output: {output}); if it "
+                         "is hung, end it: the lock frees with the process and the next "
+                         "in line takes it")
+        return _Place(f"held by {_holder_words(found)}; {_output_words(found, now_s)}",
+                      warned, fixes, check_line.Held(k, found))
+    gone = check_line.orphan(path)
+    if gone is not None:
+        run = (f"pid {gone['run_pid']}" if gone.get("run_pid") is not None
+               else f"the processes carrying its tag {gone.get('run_tag')}")
+        return _Place(
+            f"its holder, pid {gone.get('pid')} ({gone.get('round')} {gone.get('stage')}), "
+            f"is gone, but its run still runs, so it stays taken",
+            [f"the run of a gone holder still runs: {run}"],
+            [f"look at {run} ({gone.get('round')} {gone.get('stage')}): the place frees "
+             "once every process of its run has ended; end them if it is hung"],
+            check_line.Held(k, gone, orphan=True))
+    pid = check_line.lock_pid(path)
+    if pid is not None and proc.identity(pid) is not None:
+        return _Place(f"held by pid {pid}, which wrote no holder record",
+                      ["a check that keeps no holder record holds it"],
+                      [f"look at pid {pid}: the lock frees with the process"],
+                      check_line.Held(k, None))
+    # No pid, or the process died holding it, so the system freed the lock.
+    return _Place("free", [], [])
+
+
+def _memory_words(line, held, *, at_once: int, need_mib: int) -> str:
+    """When the first in line waits for memory beside the held places: the reading and
+    the need, as it reads them; else nothing."""
+    from . import check_line
+
+    if not line or not held or len(held) >= at_once:
+        return ""
+    own_mib = line[0].fields.get("memory_mib")
+    if not isinstance(own_mib, int) or isinstance(own_mib, bool):
+        return ""
+    taken = {one.k for one in held}
+    free = [k for k in range(1, at_once + 1) if k not in taken]
+    decision = check_line.decide(own_mib, held, free, at_once=at_once, need_mib=need_mib,
+                                 available=check_line.available_mib)
+    if decision.reason != "memory":
+        return ""
+    return (f"the first in line waits for memory: "
+            f"{check_line.gib(decision.available_mib)} available, "
+            f"{check_line.gib(decision.need_mib)} needed")
 
 
 def _holder_words(found) -> str:

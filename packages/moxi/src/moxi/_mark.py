@@ -21,7 +21,11 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Mapping
+
+#: Type checkers read the block below; at run time it imports nothing.
+TYPE_CHECKING = False
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 #: The variable. Its value names the program that set it; only its presence is read.
 STARTED_BY_ENV = "MOXI_STARTED_BY"
