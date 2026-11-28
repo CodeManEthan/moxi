@@ -16,6 +16,9 @@ def _parser() -> argparse.ArgumentParser:
         description="Moxi's contributor tools, run from a checkout of the repository. "
                     "`moxi-dev <verb> --help` shows a verb's own arguments.")
     verbs = parser.add_subparsers(dest="verb", metavar="<verb>", required=True)
+    verbs.add_parser("cap", add_help=False,
+                     help="cap [--] CMD [ARG...]: run one command in a memory scope of its "
+                          "own")
     verbs.add_parser("check", add_help=False,
                      help="run the checks a change must pass before it merges")
     verbs.add_parser("contract", add_help=False,
@@ -37,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     """Read the verb and hand the rest of the arguments to its module's `main`."""
     args = list(sys.argv[1:] if argv is None else argv)
     verb = _parser().parse_args(args[:1]).verb
+    if verb == "cap":
+        from moxi_dev import cap
+        return cap.main(args[1:])
     if verb == "check":
         from moxi_dev import check
         return check.main(args[1:])
