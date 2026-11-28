@@ -37,10 +37,10 @@ whether it is idle, the builds it shares commits with, or what kept it from bein
 and, once a report of it is recorded, how far the target moved under it since and
 whether that owes a re-check (`drift`). Each build lists what its finish left behind
 (`finish_actions.kept_of`): its worktree, scratch folder or branch, and a checkout of
-the target its merge added and kept, each with where it is and why. Each build carries its stage's slices, each
-with the sized brief that counts for it, and the verifications a brief was sized for
-(`sizing`); the lines say which slices of an open build have a sized brief and which
-have none. Each of the lead's repairs is shown with what
+the target its merge added and kept, each with where it is and why. Each build carries
+its stage's slices, each with the sized brief that counts for it, and the verifications
+a brief was sized for (`sizing`); the lines say which slices of an open build have a
+sized brief and which have none. Each of the lead's repairs is shown with what
 it derived again and the old and new value of each field it changed.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:

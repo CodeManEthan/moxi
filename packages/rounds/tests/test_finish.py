@@ -17,7 +17,8 @@ import pytest
 from moxi import files
 
 from moxi_rounds import (asking, builds, checking, commissioning, finish_lock, finishing,
-                         log, next_step, opening, places, removal, sweeping, verdicts)
+                         log, next_step, opening, places, removal, sweeping, verdicts,
+                         write)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
@@ -623,7 +624,7 @@ def test_the_command_says_what_the_cleanup_removed_and_kept(ready, repo, capsys)
 
 # -- what a finish left, on record ---------------------------------------------------------
 
-def _ignored_file_in(repo, tree) -> Path:
+def ignored_file_in(repo, tree) -> Path:
     """A file the repo ignores, written in the build's worktree: work git doesn't track,
     which the removal rule keeps the worktree for."""
     exclude = repo.root / ".git" / "info" / "exclude"
@@ -639,7 +640,7 @@ def test_a_finish_that_keeps_an_uncommitted_file_records_it_and_still_finishes(
         ready, repo):
     path, tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
-    _ignored_file_in(repo, tree)
+    ignored_file_in(repo, tree)
     tip = tree.rev()
 
     done = finishing.finish(ROUND, "B1", by="coder")
@@ -672,7 +673,7 @@ def test_show_lists_what_a_finish_kept_a_merge_checkout_included(
         ready, repo, monkeypatch, capsys):
     path, tree = ready
     made = checking.commission_of(states.fold(events(path)), build_of(path))
-    _ignored_file_in(repo, tree)
+    ignored_file_in(repo, tree)
     repo.switch("elsewhere", new_from="main")
     place = places.worktree_dir(own.load()) / "proj-a" / ".finish-main"
 
@@ -701,6 +702,58 @@ def test_show_lists_what_a_finish_kept_a_merge_checkout_included(
     (build,) = json.loads(capsys.readouterr().out)["builds"]
     assert [(one["what"], one["where"]) for one in build["kept"]] == [
         ("checkout", str(place)), ("worktree", made["worktree"]), ("branch", "work")]
+
+
+def kept_write_locked(monkeypatch, holder, name: str = ROUND) -> None:
+    """Make the write of what a finish left find the round's lock held by another
+    process: it waits a short while and fails, and the lock goes once it has."""
+    project, slug = name.split("/")
+    real = finishing._record_kept
+
+    def locked(*args, **keys):
+        busy = holder(write.round_lock(project, slug))
+        try:
+            return real(*args, **{**keys, "wait_s": 0.2})
+        finally:
+            busy.stdin.close()
+            busy.wait(timeout=30)
+
+    monkeypatch.setattr(finishing, "_record_kept", locked)
+
+
+def test_a_finish_whose_record_of_what_it_left_fails_still_finishes_and_says_why(
+        ready, repo, monkeypatch, holder):
+    path, tree = ready
+    ignored_file_in(repo, tree)
+    kept_write_locked(monkeypatch, holder)
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert done.event is not None
+    assert build_of(path).ended == builds.FINISHED
+    assert [one.kind for one in done.kept] == ["worktree"]
+    assert of_type(path, "finish.kept") == []
+    assert done.unrecorded.startswith("what the finish left could not be recorded: ")
+    assert "was still locked by pid" in done.unrecorded
+
+
+def test_the_command_warns_when_what_the_finish_left_is_not_recorded(
+        ready, repo, monkeypatch, holder, capsys):
+    path, tree = ready
+    ignored_file_in(repo, tree)
+    kept_write_locked(monkeypatch, holder)
+
+    assert main(["finish", ROUND, "B1", "--as", "coder"]) == 0
+
+    said = capsys.readouterr()
+    assert "finished B1" in said.out
+    (warning,) = [line for line in said.err.splitlines()
+                  if "could not be recorded" in line]
+    assert warning.startswith("moxi rounds finish: warning: what the finish left could "
+                              "not be recorded: ")
+    assert warning.endswith("; the finish stands")
+    assert build_of(path).ended == builds.FINISHED
+    assert of_type(path, "finish.kept") == []
 
 
 # -- the command ---------------------------------------------------------------------------

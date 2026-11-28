@@ -925,8 +925,8 @@ class MergeGit(Git):
         return done.returncode, said
 
 
-__all__ = ["ACTION", "DONE", "KEPT", "KEEP_BRANCH", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "REPEAT",
-           "AGAIN", "SKIPPED", "UNDER_LOCK",
+__all__ = ["ACTION", "DONE", "KEPT", "KEEP_BRANCH", "OK", "FAILED", "FOUND", "STARTED",
+           "SETTLED", "REPEAT", "AGAIN", "SKIPPED", "UNDER_LOCK",
            "AFTER", "CHECKOUT_PREFIX", "MERGE_TIMEOUT_S", "PUSH_TIMEOUT_S", "ActionFailed",
            "Action", "Finished", "finish", "finish_member", "open_build", "seen_now",
            "gates_now", "MergeGit"]
