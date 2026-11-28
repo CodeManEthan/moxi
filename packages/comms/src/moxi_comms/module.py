@@ -17,7 +17,8 @@ OPTIONAL = {
              "through turns' Codex host, which needs the websockets package.",
     "cache": "The cold-send hold: mail to an agent whose prompt cache went cold waits for "
              "its next turn, and a cache comms cannot read refuses the send. Without it "
-             "every agent reads as having no cache and gets its mail live.",
+             "every agent reads as having no cache, gets its mail at once, and each "
+             "send reports it unchecked.",
     "ui": "The comms panel, its roster of agents and its row on Home, in the browser UI shell.",
     "connector": "comms' tools in the Claude apps, text chat and voice mode, through the "
                  "public MCP host",
