@@ -1,8 +1,8 @@
 """Each way a check's run ends, through `checking.check` with real processes, and when
 its place of the machine's check lock frees: a normal end, a timeout, an interrupt of
-the rounds process, and the rounds process killed outright. Also what `check.ran` says
-of the place, and `--no-wait` with two places. Every lock is in the test's own state
-folder."""
+the rounds process, and the rounds process killed outright, that last on every system.
+Also what `check.ran` says of the place, and `--no-wait` with two places. Every lock is
+in the test's own state folder."""
 
 from __future__ import annotations
 
@@ -28,6 +28,8 @@ POSIX = pytest.mark.skipif(sys.platform == "win32",
                            reason="POSIX signals, sessions and environments")
 PY = sys.executable
 PASS = "print('the check passed')"
+#: Ends a process outright: SIGKILL, or on Windows, where there is none, TerminateProcess.
+KILL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 #: A leftover: it names itself in the file `argv[1]` (pid, start time and the tag its
 #: environment carries), then sleeps; on SIGINT or SIGTERM it writes, beside that file,
@@ -111,7 +113,7 @@ def rounds_proc(fenced):
         one.wait(timeout=PROC_WAIT_S)
     for found in leftovers:
         if proc.alive(found):
-            os.kill(found.pid, signal.SIGKILL)
+            os.kill(found.pid, KILL)
 
 
 def leftover(out: Path, name: str = "left") -> dict:
@@ -131,7 +133,7 @@ def signalled(out: Path, name: str = "left") -> dict:
 
 def end(found: proc.ProcId) -> None:
     """Kill the process `found` names, and wait until it no longer runs."""
-    os.kill(found.pid, signal.SIGKILL)
+    os.kill(found.pid, KILL)
     wait_for(lambda: not proc.alive(found), PROC_WAIT_S, what=f"pid {found.pid} to end")
 
 
@@ -227,6 +229,32 @@ def test_a_holder_killed_after_its_command_ended_lets_the_next_run_in_at_once(
 
     _kill_rounds(rounds)
     end(first)
+    declare(PASS)
+
+    done = checking.check(ROUND, "B1", by="coder", wait=False)
+
+    assert done.passed
+    assert [one["check_lock"] for one in ran(path)] == [1]
+    assert not holder_path().exists()
+
+
+def test_a_rounds_process_terminated_mid_run_frees_the_place_once_its_command_is_gone(
+        build, declare, out, rounds_proc):
+    """On every system. On Windows the command ends with the rounds process (its job);
+    on Linux and macOS it outlives it and is ended here."""
+    path, _tree, _made = build
+    declare(f"import pathlib, time; pathlib.Path({str(out / 'first')!r}).write_text('x'); "
+            "time.sleep(120)")
+    rounds = rounds_proc(ROUND)
+    record = _named_run()
+    first = proc.ProcId(record["run_pid"], record["run_started"])
+    rounds_proc.leftovers.append(first)
+    wait_for((out / "first").exists, PROC_WAIT_S, what="the command to start")
+
+    _kill_rounds(rounds)
+    if sys.platform != "win32":
+        end(first)
+    wait_for(lambda: not proc.alive(first), PROC_WAIT_S, what="the command to end")
     declare(PASS)
 
     done = checking.check(ROUND, "B1", by="coder", wait=False)
