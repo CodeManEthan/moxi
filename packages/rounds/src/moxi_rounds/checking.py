@@ -65,7 +65,8 @@ default), across every repo and round, so builds of parallel rounds don't run wh
 suites side by side past what memory holds: each run, the local part of a check by CI and
 a command step's included, holds a place of the machine's check lock (`check_line.slot`)
 from just before its command starts until everything the command started has ended,
-however it ends. The place's lock is the process's, so the system frees it when the verb
+however it ends; a check's or a command step's run holds it until its `check.ran` is
+appended, or refused, too. The place's lock is the process's, so the system frees it when the verb
 dies, and the command does not inherit it. Runs take places in the order they asked for
 them: each takes a ticket in the lock's line and tries only once no live ticket is ahead
 of it. A run starts beside others only when its command's table (the check, or
@@ -94,7 +95,7 @@ import shlex
 import subprocess
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -589,7 +590,7 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
         where = ("the check's command in the settings" if step is None
                  else f"the argv of the step {step} in the round's flow")
         return _run(found, found.argv, found.timeout_s, f"fix {where}, then {again}",
-                    held=held, memory_mib=found.memory_mib)
+                    held=held, memory_mib=found.memory_mib, keep=keep)
 
     first: list[_Look] = []
 
@@ -613,10 +614,12 @@ def check(name: str, stage: str, *, by: str, step: str | None = None,
             first.append(found)
         return found.unmet
 
-    written = write.record(
-        write.Where(home.project, home.rounds_dir, slug), by=by,
-        gates=[gate_and_keep],
-        act=act, event=event, long_act=True, wait_s=wait_s, at=at, env=env)
+    # The place a run takes is let go only once its record is appended or refused.
+    with ExitStack() as keep:
+        written = write.record(
+            write.Where(home.project, home.rounds_dir, slug), by=by,
+            gates=[gate_and_keep],
+            act=act, event=event, long_act=True, wait_s=wait_s, at=at, env=env)
     if first[0].ci is not None:
         return _ci_checked(first[0], written, name=name, stage=stage)
     one = written.events[-1]
@@ -671,14 +674,19 @@ def _check_lock(held: _Held, found: _Look, *,
 
 
 def _run(found: _Look, argv: Sequence[str], timeout_s: float | None,
-         fix: str, *, held: _Held, memory_mib: int | None = None) -> tuple:
+         fix: str, *, held: _Held, memory_mib: int | None = None,
+         keep: ExitStack | None = None) -> tuple:
     """Run `argv` in the build's worktree, holding a place of the machine's check lock,
     its output to a new file in the scratch folder: its exit code (None when ended at
     `timeout_s`), duration, output file and the place it held (`check_line.Taken`). The
     duration counts the run only. The command runs tagged with the place's tag, its
     first process is named in the holder record once it starts, and everything it
-    started is ended before the place is let go, however the run ends."""
-    with _check_lock(held, found, memory_mib=memory_mib) as taken:
+    started is ended before the place is let go, however the run ends. With `keep`, the
+    place is held in that stack, let go when the caller closes it, not when the run
+    ends."""
+    with ExitStack() as own_stack:
+        taken = (own_stack if keep is None else keep).enter_context(
+            _check_lock(held, found, memory_mib=memory_mib))
         output = _output_file(found.scratch)
         check_line.update_holder(taken.path, output=str(output))
         started = time.monotonic()

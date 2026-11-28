@@ -1453,7 +1453,8 @@ model in no tier gets no flag.
 Every run rounds starts that runs a check holds a place of the machine's check lock for as
 long as anything it started still runs: each `moxi rounds check` run (the check,
 `--full`, the scoped check, the local part of a check by CI, a command step) and a
-lander's `ci.local` run. `check_lock.at_once` says how many places there are; with the
+lander's `ci.local` run. A check's or a command step's run keeps its place until its
+record is appended, or refused. `check_lock.at_once` says how many places there are; with the
 default, 1, one run holds the lock at a time. The first place is `check.lock` in rounds'
 folder of lock files and the k-th `check-<k>.lock`, each with its holder record beside it
 (`check.holder.json`, `check-<k>.holder.json`). Runs take places in the order they asked
