@@ -111,29 +111,30 @@ def test_the_outer_starts_the_same_check_as_an_inner_and_prints_nothing_after_it
     made = outer.made[0]
     assert made.kind == "check" and made.host == HOST
     assert made.command == [sys.executable, "-m", "moxi_dev", "check", "--base", "main"]
-    assert (made.found.high_mib, made.found.max_mib) == (6592, 8128)
+    assert (made.found.high_mib, made.found.max_mib) == (8000, 9536)
     assert capsys.readouterr().out == "" and in_repo.calls == []
 
 
 def test_the_outer_says_a_max_below_the_default_first(in_repo, outer, monkeypatch, capsys):
     monkeypatch.setenv(scope.WORKERS_ENV, "8")
-    monkeypatch.setenv(scope.MEMORY_MAX_ENV, "7000")
+    monkeypatch.setenv(scope.MEMORY_MAX_ENV, "9000")
     outer.outcome = Outcome(1)
     assert check.main([]) == 1
     assert capsys.readouterr().out.splitlines() == [
-        f"moxi-dev check: {scope.MEMORY_MAX_ENV} 7000 is below the 8128 MiB the suite "
-        f"needs at 8 workers; expect a kill, or lower {scope.WORKERS_ENV}"]
+        f"moxi-dev check: {scope.MEMORY_MAX_ENV} 9000 is below the "
+        f"{scope.default_max_mib(8)} MiB the suite needs at 8 workers; expect a kill, or "
+        f"lower {scope.WORKERS_ENV}"]
 
 
 def test_an_end_for_memory_gives_the_outers_summary_last(in_repo, outer, capsys):
-    outer.outcome = Outcome(1, "ended past its line (held 6.2G, line 6.1G, high 6.4G, "
-                               "max 7.9G, peak 6.6G)")
+    outer.outcome = Outcome(1, "ended past its line (held 7.5G, line 7.4G, high 7.8G, "
+                               "max 9.3G, peak 8.0G)")
     assert check.main([]) == 1
     line = last(capsys)
     assert LINE.match(line), line
     assert "| packages: unknown |" in line and line.endswith("exit 1")
-    assert ("| memory ended past its line (held 6.2G, line 6.1G, high 6.4G, max 7.9G, "
-            "peak 6.6G) | total ") in line
+    assert ("| memory ended past its line (held 7.5G, line 7.4G, high 7.8G, max 9.3G, "
+            "peak 8.0G) | total ") in line
 
 
 def test_a_callers_signal_ends_the_outer_by_it(in_repo, outer, monkeypatch, capsys):
@@ -162,7 +163,7 @@ def sweeps(monkeypatch):
 
 
 ENDINGS = {"exit": Outcome(1, is_gone=True),
-           "memory": Outcome(1, "killed at its cap (max 7.9G, peak 7.9G)", is_gone=True),
+           "memory": Outcome(1, "killed at its cap (max 9.3G, peak 9.3G)", is_gone=True),
            "signal": Outcome(143, None, 15, is_gone=True)}
 
 
@@ -201,8 +202,8 @@ def inner_cgroup(tmp_path: Path) -> Path:
     group.mkdir()
     (group / "memory.stat").write_text(
         f"anon {5000 * MIB}\nshmem 0\nkernel {10 * MIB}\nslab_reclaimable {10 * MIB}\n")
-    (group / "memory.high").write_text(f"{6592 * MIB}\n")
-    (group / "memory.max").write_text(f"{8128 * MIB}\n")
+    (group / "memory.high").write_text(f"{8000 * MIB}\n")
+    (group / "memory.max").write_text(f"{9536 * MIB}\n")
     (group / "memory.peak").write_text(f"{5877 * MIB}\n")
     (group / "memory.pressure").write_text("some avg10=0.00 avg60=0.00 avg300=0.00 "
                                            "total=400000\n")
@@ -225,7 +226,7 @@ def test_the_inner_runs_the_check_ends_its_leftovers_and_names_its_memory(
     assert check.main([]) == 0
     out = capsys.readouterr().out.strip().splitlines()
     assert LINE.match(out[-1]), out[-1]
-    assert ("| memory peak 5.7G, held 4.9G, line 6.1G, high 6.4G, max 7.9G, "
+    assert ("| memory peak 5.7G, held 4.9G, line 7.4G, high 7.8G, max 9.3G, "
             "stalled 0.4s | total ") in out[-1]
     if ends:
         assert leftovers == [(group, os.getpid())]
@@ -244,13 +245,13 @@ def test_the_marker_is_dropped_from_the_suites():
 # --- moxi-dev cap ----------------------------------------------------------------------
 
 def test_cap_runs_the_command_in_its_own_scope_and_prints_its_memory_last(outer, capsys):
-    outer.outcome = Outcome(3, "peak 0.8G, held 0.6G, line 6.1G, high 6.4G, max 7.9G, "
+    outer.outcome = Outcome(3, "peak 0.8G, held 0.6G, line 7.4G, high 7.8G, max 9.3G, "
                                "stalled 0.0s")
     assert cap.main(["--", "sh", "-c", "echo $HOME; exit 3"]) == 3
     made = outer.made[0]
     assert made.kind == "cap" and made.command == ["sh", "-c", "echo $HOME; exit 3"]
     assert capsys.readouterr().out.splitlines()[-1] == (
-        "moxi-dev cap: memory peak 0.8G, held 0.6G, line 6.1G, high 6.4G, max 7.9G, "
+        "moxi-dev cap: memory peak 0.8G, held 0.6G, line 7.4G, high 7.8G, max 9.3G, "
         "stalled 0.0s")
 
 
@@ -269,13 +270,13 @@ def test_cap_refuses_a_bad_figure_and_no_command(monkeypatch, capsys):
 
 
 def test_cap_sweeps_once_its_unit_is_gone_before_its_last_line(outer, sweeps, capsys):
-    outer.outcome = Outcome(0, "peak 0.8G, held 0.6G, line 6.1G, high 6.4G, max 7.9G, "
+    outer.outcome = Outcome(0, "peak 0.8G, held 0.6G, line 7.4G, high 7.8G, max 9.3G, "
                                "stalled 0.0s", is_gone=True)
     assert cap.main(["true"]) == 0
     assert sweeps == [1]
     assert capsys.readouterr().out.splitlines()[-2:] == [
         f"moxi-dev cap: {SWEPT}",
-        "moxi-dev cap: memory peak 0.8G, held 0.6G, line 6.1G, high 6.4G, max 7.9G, "
+        "moxi-dev cap: memory peak 0.8G, held 0.6G, line 7.4G, high 7.8G, max 9.3G, "
         "stalled 0.0s"]
 
 
