@@ -11,7 +11,8 @@ The fence, around every test (the autouse fixture `fence`):
 
 - The environment. Emptied to `PATH`, the locale (`LANG`, `LANGUAGE`, `LC_*`), the
   variables pytest and xdist set for themselves (`PYTEST_CURRENT_TEST`, `PYTEST_VERSION`,
-  `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`) and
+  `PYTEST_XDIST_WORKER`, `PYTEST_XDIST_WORKER_COUNT`, `PYTEST_XDIST_TESTRUNUID`),
+  `MOXI_TEST_RUN_PID`, the run's name (The run's name, below), and
   `MOXI_TEST_REAL_SUPERVISOR`, which opts a run into the system's real supervisor: a
   test sees it at call time as pytest started with it, and doesn't when it was unset. Then
   every harness home a package reads is pointed into the test's tmp: `HOME` and the XDG
@@ -90,6 +91,34 @@ also recorded, so a test that catches the error still fails. The hook sees this 
 only: a subprocess gets the fenced environment but not the hook. Paths are judged after
 symlinks resolve (a link inside tmp to a place outside is outside); a name relative to a
 `dir_fd` is resolved through `/proc/self/fd` and let through where that can't be read.
+
+The run-level clear. The fence above empties each test's environment, but a fixture of
+wider scope, collection and the processes they start see the run's own. So at its
+configure, before collection, before any fixture and before xdist starts a worker, the
+kit removes from its own process's environment what a harness or a Moxi program stamps
+into an agent's session, so a run started in one sees what a run in CI sees
+(`clear_run_env`). It removes every name starting with a harness's prefix
+(`AGENT_ENV_PREFIXES`: `CLAUDE`, `CODEX_`, `OPENCODE`), the harness names outside them
+(`AGENT_ENV_NAMES`), and every `MOXI_` name but those the run needs: the kit's own
+`MOXI_TEST_` names, the start mark `MOXI_STARTED_BY`, the locators (`MOXI_HOME`, a
+`MOXI_<NAME>_HOME` or `MOXI_<NAME>_RUNTIME_DIR`), and the run's inputs. A run's input is a
+name the command starting the run sets for it and a plugin of the run reads: that plugin
+lists it in a module-level tuple, `RUN_INPUT_ENV`, which the kit reads from every plugin
+pytest has registered by then (`-p` plugins, `pytest11` entry points, the conftests'
+`pytest_plugins`). On Windows names match without case. Nothing else is cleared, and a
+variable a test or fixture sets later is left alone. The launcher's scrub is another rule:
+it keeps the user's Claude sign-in for the session it starts, and a test needs none.
+
+The run's name. The core's agent test (`moxi.terminal.agent`) also walks up the process
+tree for a harness, which no clear removes. So right after the clear, a run's controlling
+process (one that isn't an xdist worker) sets `MOXI_TEST_RUN_PID` (`RUN_PID_ENV`) to its
+own pid, over any value it inherited (`name_run`); a worker keeps its controller's. The
+agent test stops at the pytest run that value names and nowhere else, so every process of
+the run that carries it, the controller, its workers and the children that inherit or
+copy the environment, answers as in CI, where no harness runs above the suite. A child
+whose environment is built from nothing lacks it and answers as it would outside a test;
+pass the name on to it. A pytest run that doesn't load the kit is named by nothing, and
+neither is a process merely called `pytest`.
 
 uv in a child: a test whose subprocess runs uv asks for the `uv_env` fixture and passes
 it as that child's environment. It is the fenced environment plus uv's real cache
@@ -293,7 +322,10 @@ from typing import Any, TypeVar
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from moxi.paths import ANCHOR_HOME_ENV
+from moxi.files import LOCK_FD_ENV
+from moxi.paths import ANCHOR_HOME_ENV, HOME_ENV
+from moxi.proc import LIFELINE_ENV, RUN_TAG_ENV
+from moxi.terminal import STARTED_BY_ENV
 
 from moxi_dev import temp
 from moxi_dev.temp import FENCED_ENV as FENCED_ENV
@@ -396,14 +428,46 @@ HARNESS_HOMES = {
 #: Scheduler); the core's units fence refuses a real supervisor call under pytest without it.
 REAL_SUPERVISOR_ENV = "MOXI_TEST_REAL_SUPERVISOR"
 
+#: The pid of the pytest run the kit names, which the run's controlling process sets at
+#: its configure: the core's agent test stops at that run (module doc, The run's name).
+RUN_PID_ENV = "MOXI_TEST_RUN_PID"
+
 #: Variables carried into the fence unchanged, when set.
 KEPT_ENV = ("PATH", "LANG", "LANGUAGE", "PYTEST_CURRENT_TEST", "PYTEST_VERSION",
             "PYTEST_XDIST_WORKER", "PYTEST_XDIST_WORKER_COUNT", "PYTEST_XDIST_TESTRUNUID",
-            REAL_SUPERVISOR_ENV)
+            REAL_SUPERVISOR_ENV, RUN_PID_ENV)
 
 #: Whether this is Windows, where the fence also moves the user's folders and keeps the
-#: system's variables; tests replace it.
+#: system's variables, and the run-level clear matches names without case; tests replace
+#: it.
 WINDOWS = os.name == "nt"
+
+#: The prefixes of the variables a harness keeps in an agent's session, which the
+#: run-level clear removes (module doc, The run-level clear): Claude Code's (`CLAUDECODE`,
+#: `CLAUDE_CODE_*`, `CLAUDE_CONFIG_DIR` and the rest), Codex's and OpenCode's, the three
+#: harnesses the core's agent test knows.
+AGENT_ENV_PREFIXES = ("CLAUDE", "CODEX_", "OPENCODE")
+#: The names a harness sets outside its prefix, which the clear removes too: Claude Code
+#: sets `AI_AGENT`, and on its tool commands the other three.
+AGENT_ENV_NAMES = ("AI_AGENT", "GIT_EDITOR", "COREPACK_ENABLE_AUTO_PIN",
+                   "NoDefaultCurrentDirectoryInExePath")
+#: The prefix of every variable a Moxi program or module sets, which the clear removes
+#: but for `KEPT_MOXI_ENV`, the locators and the run's inputs.
+MOXI_ENV_PREFIX = "MOXI_"
+#: The kit's own prefix, kept by the clear: its settings and seams, which `moxi-dev
+#: check` and `moxi-dev timed` set for each run they start.
+TEST_PREFIX_ENV = "MOXI_TEST_"
+#: The Moxi names the clear keeps by name: the start mark, which the check sets in CI
+#: too, the one home for every module's roots, and what the core sets for a child it
+#: starts: the tag that names a run so its every process can be ended, the lifeline's
+#: descriptor and the core lock's descriptor.
+KEPT_MOXI_ENV = (STARTED_BY_ENV, HOME_ENV, RUN_TAG_ENV, LIFELINE_ENV, LOCK_FD_ENV)
+#: The locators the clear keeps besides `MOXI_HOME`: a module's root, `MOXI_<NAME>_HOME`
+#: (`MOXI_ANCHOR_HOME` among them), or its runtime directory.
+KEPT_LOCATOR = re.compile(r"MOXI_[A-Z0-9_]+_(?:HOME|RUNTIME_DIR)")
+#: The module-level name under which a pytest plugin declares, as a tuple, the variables
+#: it reads that the command starting the run sets for it; the clear keeps them.
+RUN_INPUT_ATTR = "RUN_INPUT_ENV"
 
 #: On Windows, the user's folders the fence also points under the test's home, each
 #: relative to it, laid out as Windows lays out a profile. The `WIN_PD_OVERRIDE_*`
@@ -879,7 +943,78 @@ def _quiet_ports(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(_plan, "answers", _nothing_answers)
 
 
+def is_kept_moxi_name(name: str, *, fold: bool = False) -> bool:
+    """Whether the run-level clear keeps the `MOXI_` name `name` whatever the run's
+    plugins declare: a `MOXI_TEST_` name, `KEPT_MOXI_ENV` or a locator. With `fold` the
+    name matches without case."""
+    name = name.upper() if fold else name
+    return (name.startswith(TEST_PREFIX_ENV) or name in KEPT_MOXI_ENV
+            or KEPT_LOCATOR.fullmatch(name) is not None)
+
+
+def run_inputs(plugins: Iterable[object]) -> frozenset[str]:
+    """Every name the `plugins` declare in their `RUN_INPUT_ENV`; a plugin that declares
+    none, or something other than names, adds nothing."""
+    found: set[str] = set()
+    for plugin in plugins:
+        try:
+            declared = getattr(plugin, RUN_INPUT_ATTR, ())
+        except Exception:  # noqa: BLE001 -- a plugin object's own attribute lookup
+            continue
+        if isinstance(declared, (tuple, list, frozenset, set)):
+            found.update(name for name in declared if isinstance(name, str))
+    return frozenset(found)
+
+
+def cleared_names(env: Mapping[str, str], inputs: Iterable[str] = (), *,
+                  fold: bool | None = None) -> list[str]:
+    """The names in `env` the run-level clear removes: every name under a harness's prefix
+    (`AGENT_ENV_PREFIXES`), `AGENT_ENV_NAMES`, and every `MOXI_` name the kit doesn't keep
+    (`is_kept_moxi_name`) and no plugin lists among the run's `inputs`. With `fold`
+    (None: `WINDOWS`) names match without case, as Windows reads them."""
+    fold = WINDOWS if fold is None else fold
+
+    def norm(name: str) -> str:
+        return name.upper() if fold else name
+
+    names = {norm(name) for name in AGENT_ENV_NAMES}
+    prefixes = tuple(norm(prefix) for prefix in AGENT_ENV_PREFIXES)
+    kept = {norm(name) for name in inputs}
+    found = []
+    for name in env:
+        key = norm(name)
+        if key.startswith(prefixes) or key in names:
+            found.append(name)
+        elif (key.startswith(MOXI_ENV_PREFIX) and key not in kept
+              and not is_kept_moxi_name(key)):
+            found.append(name)
+    return found
+
+
+def clear_run_env(config: pytest.Config) -> list[str]:
+    """Remove from this process's environment every name `cleared_names` gives, keeping
+    the inputs the plugins pytest has registered declare; the names removed."""
+    inputs = run_inputs(config.pluginmanager.get_plugins())
+    names = cleared_names(os.environ, inputs)
+    for name in names:
+        del os.environ[name]
+    return names
+
+
+def name_run() -> str:
+    """Name this process's pytest run for the core's agent test: set `RUN_PID_ENV` to
+    this process's pid, over any value it inherited, and return it."""
+    os.environ[RUN_PID_ENV] = pid = str(os.getpid())
+    return pid
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    # First, before anything reads the environment, and before xdist starts a worker:
+    # every fixture, worker and child this run starts inherits the cleared environment,
+    # and the run's name. A worker keeps its controller's.
+    clear_run_env(config)
+    if not hasattr(config, "workerinput"):
+        name_run()
     for name, line in MARKERS.items():
         config.addinivalue_line("markers", f"{name}: {line}")
     config.addinivalue_line("markers", f"{LIFTED}: set by the kit on a tier test this "
@@ -2186,8 +2321,8 @@ __all__ = ["ANCHOR_HOME_ENV", "CHANGED_ENV", "DURATIONS_ENV", "FINDING_ENV",
            "FenceError", "Gauge", "GaugeReading", "HARNESS_HOMES", "IDLE_ENV", "Idle",
            "KEPT_ENV", "LEAVE_OUT_ENV", "LIFTED", "LIVE_ENV", "MARKERS", "NOT_MEASURED",
            "PARENT_GRACE_S", "PARENT_PID_ENV", "PARENT_POLL_S", "PROC_STAT",
-           "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "SHUTDOWN_POLL",
-           "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV",
+           "PROC_WAIT_S", "REAL_SUPERVISOR_ENV", "RECORD_FORMAT", "RUN_PID_ENV",
+           "SHUTDOWN_POLL", "STACKS_AT_ENV", "STACKS_ENV", "Seam", "Selection", "TIERS", "TIERS_ENV",
            "TIMED", "TIMED_CLOCKS", "TIMED_ENV", "TIMED_LOCK_FD_ENV", "TIMED_SLACK_ENV",
            "WINDOWS_HOMES", "WINDOWS_KEPT_ENV", "arm_stacks", "console_script", "fence",
            "findings_of", "idle", "param_id", "selection", "served", "short_dir",

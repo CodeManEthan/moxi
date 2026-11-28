@@ -18681,6 +18681,18 @@ cache	packages/cache/tests/test_browser_others.py	self.answer: dict = {"refused"
 cache	packages/cache/tests/test_browser_others.py	self._fulfill(route, {"state": "up", "detail": None, "refused": None, "sessions": self.states})	keep	refused	refused
 cache	packages/cache/tests/test_browser_others.py	stub.answer = {"refused": {"code": "unsupported", "problem": "turns can't nudge this session"}}	keep	refused	refused
 cache	packages/cache/tests/test_browser_others.py	assert any(reads in url for url in check.requests), check.requests	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	picked_dirs: set[str] = set()	keep	set	set
+moxi-dev	packages/moxi-dev/src/moxi_dev/check.py	help="check every package that depends on a touched one as well, "	keep	help	help
+moxi-dev	packages/moxi-dev/src/moxi_dev/contract.py	if not any(isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))	keep	any	any
+moxi-dev	packages/moxi-dev/src/moxi_dev/testing.py	found: set[str] = set()	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_check.py	assert set(check.ROOT_READERS) <= rows	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_fence.py	"PATH": "/bin", "HOME": "/home/you", "LANG": "C.UTF-8", "OPENCLAW": "1",	keep	HOME	HOME
+moxi-dev	packages/moxi-dev/tests/test_fence.py	assert sorted(found) == sorted(set(SESSION_SOURCE) - {"MOXI_X_INPUT"})	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_fence.py	if not any(isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_fence.py	assert any(getattr(plugin, "RUN_INPUT_ENV", ()) for plugin in plugins)	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_fence.py	assert not any(one == key or (key.endswith("_") and one.startswith(key))	keep	any	any
+moxi-dev	packages/moxi-dev/tests/test_fence.py	cleared = sorted(set(SESSION_SOURCE) - {"MOXI_X_INPUT"})	keep	set	set
+moxi-dev	packages/moxi-dev/tests/test_workflows.py	assert not any("--with-dependents" in line for line in full)	keep	any	any
 moxi	packages/moxi/src/moxi/proc.py	said[:] = proc.communicate(timeout=max(deadline - time.monotonic(), 0))	keep	timeout	timeout
 moxi	packages/moxi/tests/test_watch.py	send(processes, signum)	keep	fail	fail
 rounds	packages/rounds/src/moxi_rounds/check_line.py	"""A held place of the check lock: its number `k`, its holder `record` (None when	keep	record	record

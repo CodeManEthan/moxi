@@ -319,11 +319,21 @@ def test_outside_names_a_module_imported_from_elsewhere(tmp_path, monkeypatch):
     assert len(found) == 2
 
 
+#: A sibling's conftest: none, or one that loads the test kit, whose clear at the run's
+#: start keeps the variables a plugin lists in its RUN_INPUT_ENV.
+KIT_CONFTEST = 'pytest_plugins = ["moxi_dev.testing"]\n'
+
+
+def test_the_plugin_declares_the_variable_the_siblings_run_sets_for_it():
+    assert site_check.RUN_INPUT_ENV == (site_check.NAMES_ENV,)
+
+
+@pytest.mark.parametrize("conftest", ["", KIT_CONFTEST], ids=["bare", "kit"])
 @pytest.mark.parametrize(("names", "code"), [("pkg_here", 1), ("pluggy", 0)])
-def test_the_plugin_stops_a_run_that_imports_the_checkout(tmp_path, names, code):
+def test_the_plugin_stops_a_run_that_imports_the_checkout(tmp_path, names, code, conftest):
     (tmp_path / "pkg_here").mkdir()
     (tmp_path / "pkg_here" / "__init__.py").write_text("")
-    (tmp_path / "conftest.py").write_text("")
+    (tmp_path / "conftest.py").write_text(conftest)
     (tmp_path / "test_one.py").write_text("def test_one():\n    pass\n")
     env = {**os.environ, site_check.NAMES_ENV: names}
     done = subprocess.run(
