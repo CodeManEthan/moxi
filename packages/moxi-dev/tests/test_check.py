@@ -649,7 +649,9 @@ def test_a_package_run_past_its_bound_is_ended_with_its_tree_and_fails_alone(
 
 
 #: A check whose cache package's run is a process that starts a sleeping child, notes
-#: both pids in the file its second argument names, and sleeps.
+#: both pids in the file its second argument names, and sleeps. A third and fourth
+#: argument, a signal's name and a disposition's (SIG_DFL, SIG_IGN), set that signal's
+#: handling before the check starts, as a parent that ignores it would leave it.
 SIGNALLED = """\
 import os, sys
 from pathlib import Path
@@ -680,8 +682,9 @@ sys.exit(result.code)
 
 
 @pytest.mark.skipif(sys.platform == "win32",
-                    reason="Windows has no SIGTERM to send: os.kill there ends the process "
-                           "outright, which the test kit's parent watch covers")
+                    reason="Windows has no SIGHUP, and no SIGTERM to send: os.kill there "
+                           "ends the process outright, which the test kit's parent watch "
+                           "covers")
 @pytest.mark.parametrize("name", ["SIGTERM", "SIGHUP"])
 def test_a_check_ended_by_a_signal_ends_the_package_run_under_way(repo, tmp_path, name):
     import signal
