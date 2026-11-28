@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- `moxi-dev check`, with or without `--base`, runs only the packages the change
+  touches. A path under `packages/<p>/` touches `p` (one under `packages/moxi-dev/`
+  touches `moxi-dev` alone), and a root path the packages whose tests read it: the root
+  `pyproject.toml` `moxi` and `moxi-dev`; `LICENSE`, `.gitignore`, `.gitattributes`,
+  `.public-paths`, `.refs-allow` and `.residue-allow` `moxi-dev`; `uv.lock` and
+  `SECURITY.md` nothing; `README.md`, the workflows, `docs/` and `CONTRIBUTING.md` as
+  before. A root path no table lists picks every package. No dependent is added.
+- `--with-dependents` picks as the check did before: the touched packages, every package
+  that depends on one, and every package when the lock, the check itself or another root
+  file changes. It goes with `--base`, `--finding` and `--pick`; with `--full`, `--static`
+  or `--only` it is a usage error. The merge queue's pick and scoped check and `ci.yml`'s
+  check of a pushed branch pass it, so CI picks what it picked before. `--pick` prints
+  what the check with the same flags runs, and `--finding`'s line for a pick with no test
+  carrying the finding names `--with-dependents`.
+- Outside `--full`, a failed static step stops the check before the stamps, sync, lint
+  and tests, and a failed import rule (import-linter, deptry) stops it before any test
+  runs; each stop prints one line, and the steps it skips read `not run` in the summary.
+  Every static step still runs, so one check shows each static failure. `--full` runs
+  every step as before.
+- The test kit clears, when a run starts and before collection, any fixture or xdist
+  worker, what an agent's session stamps into the run's environment: every name
+  starting `CLAUDE`, `CODEX_` or `OPENCODE`, `AI_AGENT`, `GIT_EDITOR`,
+  `COREPACK_ENABLE_AUTO_PIN`, `NoDefaultCurrentDirectoryInExePath`, and every `MOXI_` name
+  but the kit's `MOXI_TEST_` names, `MOXI_STARTED_BY`, the locators and the run's inputs.
+  A pytest plugin declares the inputs it reads in a module-level `RUN_INPUT_ENV` tuple,
+  which the kit keeps, and the contract check (check 5) refuses a `MOXI_` read in a
+  module's plugin file that its `RUN_INPUT_ENV` doesn't name.
+- The test kit names its run in `MOXI_TEST_RUN_PID` (`RUN_PID_ENV`): the run's
+  controlling process sets it to its own pid when the run starts, xdist workers keep it,
+  and the fence passes it to each test. The core's agent test names no harness inside
+  the run it names, so a run started in an agent's session answers as one in CI. A child
+  whose environment a test builds from nothing lacks it and answers as outside a test.
 - `moxi-dev check` (any form but `--only`) runs its steps in a memory-capped
   `systemd-run --user --scope` of its own: MemoryHigh 2496 MiB plus 512 MiB per worker,
   MemoryMax 1536 MiB above it, no swap (`MOXI_TEST_MEMORY_HIGH_MIB` and

@@ -914,8 +914,8 @@ builds onto the target together and runs CI once on the result.
 
 **The check.** In a queue project `moxi rounds check` runs the check's `scoped` command
 in the build's worktree, `{base}` filled in with the merge-base of the tip and the
-target: the check of the packages the build touched and their dependents. It pushes
-nothing and reads no CI. `check --full` runs the repo's `check.command` there instead and
+target: the check of the packages the build touched (the candidate's CI run adds every
+package that depends on them). It pushes nothing and reads no CI. `check --full` runs the repo's `check.command` there instead and
 records it, as in any other project, reading and changing nothing of `land`; the check
 step, the join's gate 3 and finish's are met by either check passing at the tip, so a
 build finished by hand after `land` is flipped to `finish` needs no other run. The merge-base of the tip and the target does not change as the target
@@ -991,10 +991,10 @@ queue file and git.
 that runs only what the members change, while the full run still follows each landing.
 In moxi, `ci.yml` ignores the branches `ci/queue-*`, and `queue.yml` runs on them: its
 `pick` job reads the target's head from the 12 hex digits in the branch's name, prints
-the packages `moxi-dev check --pick` picks on a `picked:` line and those it hands the
+the packages `moxi-dev check --pick --with-dependents` picks on a `picked:` line and those it hands the
 browser matrix on a `picked for browser (*):` line, and hands them on; the matrix runs
-only theirs and is skipped when there are none; `scoped` runs `moxi-dev check --base`
-that head; `web` runs as on any `ci/` branch. No job of it is named `linux`, so a
+only theirs and is skipped when there are none; `scoped` runs `moxi-dev check
+--with-dependents --base` that head; `web` runs as on any `ci/` branch. No job of it is named `linux`, so a
 candidate's run never meets the check `main` waits for. The project reads it with a
 second entry, whose `stands_for` says that the scoped job's failures are compared with
 the full run's `linux` job:

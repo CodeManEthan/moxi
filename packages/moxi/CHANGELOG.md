@@ -2,6 +2,12 @@
 
 ## 0.1.11 (unreleased)
 
+- The agent test (`moxi.terminal.agent()`) stops at the pytest run a test kit names, by
+  its pid, in `MOXI_TEST_RUN_PID`, and nowhere else: a process of that run names no
+  harness, so a test run started in an agent's session answers as one in CI. A process
+  called `pytest` that no such value names, a value naming no pytest run, and a run that
+  doesn't load a kit answer as before. `moxi.terminal` exports the name as
+  `TEST_RUN_PID_ENV`, and `Run` gains `test_run_pid` and `test_run_pid_now`.
 - `moxi.place.move_aside(path, harness=...)` moves a path no placement holds under the
   core's `displaced/<stamp>/<harness>/`, the way a replace moves an occupant aside (one
   rename, or a checked copy across volumes), and returns where it went.

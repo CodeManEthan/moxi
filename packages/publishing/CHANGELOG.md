@@ -121,3 +121,7 @@ The first version.
   approval on, whatever the answer or the `project_add.*` preset, and says so with the
   command that turns each on by hand. `moxi publishing list` shows the mark (`left_out` in
   `--json`) and `moxi doctor publishing` gives it an `ok` row.
+- The site check `moxi publishing ci siblings` runs declares its names variable,
+  `MOXI_PUBLISHING_SITE_CHECK_NAMES`, in `RUN_INPUT_ENV`, so a test kit that clears an
+  agent session's variables when a run starts keeps it and the check reads the wheel's
+  names.
