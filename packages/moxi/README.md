@@ -133,7 +133,9 @@ process that command started ended when it ends, however it ends: the command's 
 group, and every process carrying its `tag` in `MOXI_RUN_TAG`, one that started a session
 of its own included. On Windows the command's Job Object ends its tree, also when the
 module's process dies. A process started with an environment built from scratch that also
-left the group is not reached.
+left the group is not reached. This holds with the command's output to a file (`output=`),
+or once its pipes close: with `capture=True`, a leftover that keeps stdout open keeps the
+run waiting until its timeout.
 
 A shortcut (`moxi shortcut`) is a small script written beside the `moxi` on PATH.
 
