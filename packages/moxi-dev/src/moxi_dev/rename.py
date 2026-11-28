@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins
 import io
 import re
 import subprocess
@@ -674,27 +675,34 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.
            ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
 
+def _binds(one: ast.AST) -> Sequence[str]:
+    """The bare names node `one` binds: an argument, an assigned or loop name, a def or
+    class, an import, an except or match name, a global or nonlocal."""
+    if isinstance(one, ast.Name):
+        return () if isinstance(one.ctx, ast.Load) else (one.id,)
+    if isinstance(one, ast.arg):
+        return (one.arg,)
+    if isinstance(one, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return (one.name,)
+    if isinstance(one, ast.alias):
+        return (one.asname or one.name.split(".")[0],)
+    if isinstance(one, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return (one.name,) if one.name else ()
+    if isinstance(one, (ast.Global, ast.Nonlocal)):
+        return one.names
+    return ()
+
+
 def _names(node: ast.AST, name: str, *, stored: bool = False) -> list[ast.AST]:
-    """The nodes under `node` that bind `name` as a bare name (an argument, an assigned
-    or loop name, a def or class, an import, an except or match name, a global or
-    nonlocal), and, unless `stored`, those that read it. `node`'s own name is not one:
-    the scope around it binds that."""
+    """The nodes under `node` that bind `name` as a bare name (any `_binds` finds), and,
+    unless `stored`, those that read it. `node`'s own name is not one: the scope around
+    it binds that."""
     found = []
     for one in ast.walk(node):
         if isinstance(one, ast.Name) and one.id == name:
             if not stored or not isinstance(one.ctx, ast.Load):
                 found.append(one)
-        elif isinstance(one, ast.arg) and one.arg == name:
-            found.append(one)
-        elif (isinstance(one, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-              and one.name == name and one is not node):
-            found.append(one)
-        elif isinstance(one, ast.alias) and (one.asname or one.name.split(".")[0]) == name:
-            found.append(one)
-        elif isinstance(one, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) \
-                and one.name == name:
-            found.append(one)
-        elif isinstance(one, (ast.Global, ast.Nonlocal)) and name in one.names:
+        elif one is not node and name in _binds(one):
             found.append(one)
     return found
 
@@ -1112,6 +1120,80 @@ def transformed(project: Project, edits: dict[str, list[Edit]], rows: Sequence[R
     return texts
 
 
+_BUILTINS = frozenset(dir(builtins))
+
+
+def _package_dir(path: str) -> str | None:
+    """The `packages/<p>` folder a file is in."""
+    parts = PurePosixPath(path).parts
+    return "/".join(parts[:2]) if len(parts) > 2 and parts[0] == "packages" else None
+
+
+def _homes(source: Source) -> set[str]:
+    """The modules a file's settled names point into."""
+    found = set()
+    for value in source.aliases.values():
+        if value.startswith("mod:"):
+            found.add(value[4:])
+        elif value.startswith("sym:"):
+            found.add(value.split(":", 2)[1])
+    return found
+
+
+def _imported(project: Project, source: Source, homes: dict[str, set[str]]) -> set[str]:
+    """The modules a file imports, read from its import statements wherever they sit:
+    every dotted prefix of an `import a.b.c`, a from-import's module (resolved when
+    relative) and that module's `.name`, and the modules its settled names point into.
+    A package `__init__` it imports adds every module its own names point into. `homes`
+    caches those per module."""
+    found: set[str] = set()
+    for node in source.nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                found.update(".".join(parts[:end]) for end in range(1, len(parts) + 1))
+        elif isinstance(node, ast.ImportFrom):
+            module = _relative(source.module, node.level, node.module,
+                               package=source.path.endswith("/__init__.py"))
+            found.add(module)
+            found.update(f"{module}.{alias.name}" for alias in node.names
+                         if alias.name != "*")
+    found |= _homes(source)
+    for module in list(found):
+        other = project.modules.get(module)
+        if other is not None and other.path.endswith("/__init__.py"):
+            if module not in homes:
+                homes[module] = _homes(other)
+            found |= homes[module]
+    return found
+
+
+def _bound(source: Source) -> set[str]:
+    """Every bare name the file binds anywhere, `*` for a star import among them."""
+    return {name for one in source.nodes for name in _binds(one)}
+
+
+def _scope_gone(project: Project, row: Row) -> bool:
+    """Whether a `name` or `kwonly` row names a scope its file no longer has: it has no
+    target left to reach."""
+    return row.scope != "-" and row.scope not in project.sources[row.path].scopes
+
+
+def _function_name(row: Row) -> str:
+    """The name a call of a row's function goes by: the last part of its scope, the
+    class's for an `__init__`."""
+    if row.scope.endswith(".__init__"):
+        return row.scope.rsplit(".", 2)[-2]
+    return row.scope.rsplit(".", 1)[-1]
+
+
+def _calls(row: Row, name: str | None) -> bool:
+    """Whether a call named `name` may be one of the row's function: by its name, or as
+    `super().__init__(...)` for an `__init__`."""
+    return name == _function_name(row) or (name == "__init__"
+                                            and row.scope.endswith(".__init__"))
+
+
 def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
     found: set[Leftover] = set()
     covered = {(row.path, row.scope) for row in rows if row.kind in ("use", "keep")}
@@ -1123,44 +1205,68 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
             uses.setdefault((row.path, row.scope), []).append(row)
     covered |= {(path, _used(scope, group)) for (path, scope), group in uses.items()}
     # A dead row's target has no kind, which would read as a name used everywhere: its
-    # old name is no leftover anywhere.
+    # old name is no leftover anywhere. So is a row's whose scope its file no longer has.
     targets = [(row, _target(project, row)) for row in rows
-               if row.kind in ("name", "kwonly") and not _dead(project, row)]
+               if row.kind in ("name", "kwonly") and not _dead(project, row)
+               and not _scope_gone(project, row)]
     by_old: dict[str, list[tuple[Row, Target]]] = {}
     for row, target in targets:
         by_old.setdefault(row.old, []).append((row, target))
-    kwonly = []
-    for row, target in targets:
-        if row.kind == "kwonly":
-            function_name = row.scope.rsplit(".", 1)[-1]
-            if row.scope.endswith(".__init__"):
-                function_name = row.scope.rsplit(".", 2)[-2]
-            kwonly.append((row, target, function_name))
+    kwonly = [(row, target, _function_name(row)) for row, target in targets
+              if row.kind == "kwonly"]
     # A parameter's or a local's name means something only in its function, so a cite of
-    # it is looked for in its own file; any other old name is looked for everywhere.
+    # it is looked for in its own file; any other old name is looked for where the row
+    # reaches.
     inner = ("parameter", "local")
-    everywhere = {row.old for row, target in targets if target.kind not in inner}
     own: dict[str, set[str]] = {}
+    by_package: dict[str, set[str]] = {}
+    by_module: dict[str, set[str]] = {}
     for row, target in targets:
         if target.kind in inner and row.old != row.new:
             own.setdefault(row.path, set()).add(row.old)
+        elif target.kind not in inner:
+            by_package.setdefault(_package_dir(row.path) or "", set()).add(row.old)
+            by_module.setdefault(project.sources[row.path].module, set()).add(row.old)
+    homes: dict[str, set[str]] = {}
     for source in project.sources.values():
         def is_covered(line: int) -> bool:
             return (source.path, source.line_text(line).strip()) in covered
 
+        # A row's test runs in a file only if the row reaches it: the file is in the
+        # row's package or imports the row's module.
+        here = _package_dir(source.path)
+        imported = _imported(project, source, homes)
+
+        def reach(row: Row) -> bool:
+            return (here is not None and _package_dir(row.path) == here) \
+                or project.sources[row.path].module in imported
+
+        bound = _bound(source)
+        star = "*" in bound
         for node in source.nodes:
             if isinstance(node, ast.Call):
                 name = _call_name(node)
+                # A keyword reaches a parameter or a field only on a call by its
+                # function's name.
                 passed = [keyword for keyword in node.keywords if any(
-                    target.kind != "local" for _row, target in by_old.get(keyword.arg, ()))]
+                    target.kind in ("parameter", "field") and _calls(row, name)
+                    and reach(row) for row, target in by_old.get(keyword.arg, ()))]
                 # A call never reaches a parameter outside its function.
                 named = [(row, target) for row, target in by_old.get(name, ())
-                         if row.kind == "name" and target.kind not in inner] if name else []
+                         if row.kind == "name" and target.kind not in inner
+                         and reach(row)] if name else []
+                # A builtin the file never binds is the builtin, but in the row's own
+                # file, where the rename took its definition away, or past a star import.
+                if (named and isinstance(node.func, ast.Name) and name in _BUILTINS
+                        and name not in bound and not star):
+                    named = [(row, target) for row, target in named
+                             if row.path == source.path]
                 # A star at or before the position may reach it however few arguments
                 # the call spells.
                 positional = [(row, target, function_name)
                               for row, target, function_name in kwonly
                               if name == function_name and target.position is not None
+                              and reach(row)
                               and (len(node.args) > target.position or any(
                                   isinstance(argument, ast.Starred)
                                   for argument in node.args[:target.position + 1]))]
@@ -1195,8 +1301,8 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                                        f"unresolved call still uses {name!r}"))
             elif isinstance(node, ast.Attribute):
                 # A parameter or a local is never an attribute; any other old name can be.
-                if not any(target.kind not in inner
-                           for _row, target in by_old.get(node.attr, ())):
+                if not any(target.kind not in inner and reach(row)
+                           for row, target in by_old.get(node.attr, ())):
                     continue
                 if is_covered(node.lineno):
                     continue
@@ -1205,13 +1311,17 @@ def leftovers(project: Project, rows: Sequence[Row]) -> list[Leftover]:
                     found.add(Leftover(source.path, node.lineno,
                                        f"unresolved attribute still uses {node.attr!r}"))
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if not any(target.kind not in inner
-                           for _row, target in by_old.get(node.value, ())):
+                if not any(target.kind not in inner and reach(row)
+                           for row, target in by_old.get(node.value, ())):
                     continue
                 if not is_covered(node.lineno):
                     found.add(Leftover(source.path, node.lineno,
                                        f"string lookup still names {node.value!r}"))
-        cited = everywhere | own.get(source.path, set())
+        cited = set(own.get(source.path, ()))
+        if here is not None:
+            cited |= by_package.get(here, set())
+        for module in imported:
+            cited |= by_module.get(module, set())
         if not cited or "`" not in source.text:
             continue
         cite = re.compile(r"`(" + "|".join(re.escape(old) for old in
