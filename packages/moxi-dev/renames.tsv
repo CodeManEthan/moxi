@@ -6335,6 +6335,10 @@ memory	packages/memory/src/moxi_memory/recall_chat.py	recall.put(record={"brief"
 memory	packages/memory/src/moxi_memory/recall_chat.py	recall.put(record={"headless_session": session}, headless_session=session,	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_chat.py	call=recall.record.get("call"))	keep	record	record
 memory	packages/memory/src/moxi_memory/recall_chat.py	chat_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
+memory	packages/memory/src/moxi_memory/recall_chat.py	headless request from this process's environment (`refused`, naming the launcher's	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_chat.py	that request finds `claude` on its PATH (`no-harness`; any other refusal is `refused`)	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_chat.py	REFUSED = "refused"	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_chat.py	refusal is `refused` as well, said as the check failing."""	keep	refused	refused
 memory	packages/memory/src/moxi_memory/recall_fence.py	request_id=spec.request_id, session_id=spec.session_id, actor=ACTOR,	keep	actor	actor
 memory	packages/memory/src/moxi_memory/recall_fence.py	composition = launcher.preview(req, env=env)	keep	env	env
 memory	packages/memory/src/moxi_memory/recall_fence.py	command = launcher.prepare(req, composition, env=env)	keep	env	env
@@ -6342,6 +6346,12 @@ memory	packages/memory/src/moxi_memory/recall_fence.py	child_env = launcher.chil
 memory	packages/memory/src/moxi_memory/recall_fence.py	result = launcher.launch(req, env=env)	keep	env	env
 memory	packages/memory/src/moxi_memory/recall_fence.py	launcher.end_headless(req.request_id, env=env)	keep	env	env
 memory	packages/memory/src/moxi_memory/recall_fence.py	extra, missing = sorted(tools - bound), sorted(set(READ_TOOLS) - tools)	keep	set	set
+memory	packages/memory/src/moxi_memory/recall_fence.py	(the refusal's code `not-found`) or can't read the one it found, and `refused`, naming	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_fence.py	REFUSED = "refused"	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_fence.py	PLAIN_REFUSAL = "refused"	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_fence.py	`refused` or `fence` (or `no-outcome`, from `ensure`), with `detail` saying why: the	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_fence.py	`OSError` reading the binary it found; `refused` for any other, naming its code when	keep	refused	refused
+memory	packages/memory/src/moxi_memory/recall_fence.py	launch and finds `claude` (else `refusal_verdict`'s `no-harness` or `refused`), and	keep	refused	refused
 memory	packages/memory/tests/test_recall_chat.py	fields = dict(start=recalls.CHAT, text="the kiosk approver", senders=(), settings={},	keep	start	start
 memory	packages/memory/tests/test_recall_chat.py	fields = dict(start=recalls.CHAT, text="the kiosk approver", senders=(), settings={},	keep	text	text
 memory	packages/memory/tests/test_recall_chat.py	assert {"headless_session", "call"} <= set(recalls.LINE_FIELDS)	keep	set	set
@@ -6353,6 +6363,7 @@ memory	packages/memory/tests/test_recall_chat.py	return {p.id: p.stale for p in 
 memory	packages/memory/tests/test_recall_chat.py	recall_chat.chat_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recall_chat.py	return recall_chat.Skip("closed")	keep	closed	closed
 memory	packages/memory/tests/test_recall_chat.py	assert recall_chat.why_not(on, checks=checks).reason == "closed"	keep	closed	closed
+memory	packages/memory/tests/test_recall_chat.py	bin_dir.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recall_fence.py	cwd.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recall_fence.py	presets.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recall_fence.py	assert not any(w.startswith("tmpl-") for w in words)	keep	any	any
@@ -6367,6 +6378,7 @@ memory	packages/memory/tests/test_recall_fence.py	claude.plan(stderr="not signed
 memory	packages/memory/tests/test_recall_fence.py	fence.chat_dir().mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recall_fence.py	outs = [k.communicate(timeout=60)[0].strip() for k in kids]	keep	timeout	timeout
 memory	packages/memory/tests/test_recall_fence.py	assert api.check(req) == []	keep	ok	ok
+memory	packages/memory/tests/test_recall_fence.py	api.prepare(req, api.preview(req, env=env), env=env)	keep	env	env
 memory	packages/memory/tests/test_recall_headless.py	self.runs.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recall_tool.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 memory	packages/memory/tests/test_recall_tool.py	"rounds": [{"round": i + 1, "text": t, "at": time.time()}	keep	round	round
@@ -6379,6 +6391,8 @@ memory	packages/memory/tests/test_recall_tool.py	assert any("1 piece couldn't" i
 memory	packages/memory/tests/test_recall_tool.py	home = os.environ["HOME"].rstrip("/")	keep	HOME	HOME
 memory	packages/memory/tests/test_recall_tool.py	assert any("claude isn't there" in n for n in result.structured["notes"])	keep	any	any
 memory	packages/memory/tests/test_recall_tool.py	assert any(recall_tool.NO_CUT in n for n in result.structured["notes"])	keep	any	any
+memory	packages/memory/tests/test_recall_tool.py	(_refused, "refused", "the launcher refused this launch: a launcher row is refused"),	keep	refused	refused
+memory	packages/memory/tests/test_recall_tool.py	assert row.level == "warn" and "refused" in row.text	keep	refused	refused
 moxi	packages/moxi/src/moxi/_mark.py	-	name	NAME	STARTED_BY_ENV
 moxi	packages/moxi/src/moxi/_mark.py	for at, part in enumerate(orig[1:], start=1):	keep	start	start
 moxi	packages/moxi/src/moxi/_mark.py	if not any(name.upper() == STARTED_BY_ENV for name in child):	keep	any	any
