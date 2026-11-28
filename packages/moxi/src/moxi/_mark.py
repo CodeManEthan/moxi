@@ -9,7 +9,9 @@ cause one: a process that started with it is one Moxi started.
 
 `note()` also keeps which harness tool marks (`TOOL_MARKS`) the process started with: a
 variable a harness sets for every command its tools run. Like the mark, one can only stop
-a record.
+a record. And it keeps the value of `MOXI_TEST_RUN_PID` the process started with
+(`test_run_pid`): a test kit names its pytest run there, by pid, and the agent test stops
+at that run and nowhere else (`moxi.terminal._walk`).
 
 Standard library only, and nothing imported beyond `os` and `sys`, since every import of
 the core runs this.
@@ -36,23 +38,36 @@ started_by: str | None = None
 TOOL_MARKS = {"CLAUDECODE": "claude"}
 #: The tool marks in the environment this process started with, in `TOOL_MARKS` order.
 tool_marks: tuple[str, ...] = ()
+#: The variable a test kit names its pytest run in, by the run's pid. The kit owns the
+#: name; the core keeps this copy since it cannot import the kit.
+TEST_RUN_PID_ENV = "MOXI_TEST_RUN_PID"  # noqa: MX2 -- the core cannot import moxi-dev
+#: Its value in the environment this process started with; None when it had none.
+test_run_pid: str | None = None
 #: The value this process gives the mark: its program's name.
 program: str = "python"
 _noted = False
 
 
 def note() -> None:
-    """Keep whether this process started with the mark, then set it if it didn't. Only
+    """Keep whether this process started with the mark, which tool marks it started with
+    and the test kit's run pid it started with, then set the mark if it wasn't there. Only
     the first call does anything, so reloading the package notes nothing new."""
-    global started_by, tool_marks, program, _noted
+    global started_by, tool_marks, test_run_pid, program, _noted
     if _noted:
         return
     _noted = True
     started_by = os.environ.get(STARTED_BY_ENV)
     tool_marks = present(os.environ, TOOL_MARKS)
+    test_run_pid = os.environ.get(TEST_RUN_PID_ENV)
     program = _program()
     if started_by is None:
         os.environ[STARTED_BY_ENV] = program
+
+
+def current_test_run_pid() -> str | None:
+    """`TEST_RUN_PID_ENV`'s value in this process's environment as it is now; None when
+    unset. A test kit sets it after its process started, so `test_run_pid` may lack it."""
+    return os.environ.get(TEST_RUN_PID_ENV)
 
 
 def marked(env: Mapping[str, str] | None = None) -> dict[str, str]:

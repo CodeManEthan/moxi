@@ -153,6 +153,21 @@ def test_a_shell_reads_the_record_under_the_test_kits_anchor(fence, tmp_path, mo
     assert env["MOXI_ANCHOR_HOME"] == env.get("LOCALAPPDATA", str(tmp_path))
 
 
+def test_a_shell_and_what_it_starts_carry_the_test_kits_run_name(tmp_path, monkeypatch):
+    from moxi.terminal import TEST_RUN_PID_ENV
+    from moxi_ui.testing.shell import shell_env
+
+    assert shell_env(tmp_path)[TEST_RUN_PID_ENV] == os.environ[TEST_RUN_PID_ENV]
+    # As the shell starts its page servers and the `moxi` commands a save runs.
+    done = subprocess.run([sys.executable, "-P", "-c",
+                           "import moxi.terminal as t; print(t.agent())"],
+                          env=shell_env(tmp_path), capture_output=True, text=True,
+                          timeout=60)
+    assert done.stdout.strip() == "None", done.stderr
+    monkeypatch.delenv(TEST_RUN_PID_ENV)
+    assert TEST_RUN_PID_ENV not in shell_env(tmp_path)
+
+
 def test_a_shells_env_cant_move_it_out_of_its_home(tmp_path):
     from moxi_ui.testing.shell import TestShell, shell_env
 

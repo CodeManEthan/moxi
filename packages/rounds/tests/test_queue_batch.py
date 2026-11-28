@@ -72,7 +72,7 @@ class FakeCi:
         self.locals.append(values["tip"])
         return queue_ci.Local(("ci-local", values["tip"]),
                               self.local_codes.get(values["tip"], self.local_code), 0.5,
-                              str(place / "local.log"))
+                              str(place / "local.log"), {"check_lock": 1})
 
     def read(self, place, commit):
         if self.landed_word is not None and self.main_of is not None \
@@ -288,6 +288,7 @@ def test_the_check_gate_accepts_a_candidate_read_green_with_its_local_run(
     state = states.fold(log.read_round(round_log_of(tmp_path, ROUND)))
     local = events(tmp_path, ROUND, checking.RAN)[-1]
     assert local["step"] == ci.LOCAL and local["candidate"] == repo.rev("main")
+    assert local["check_lock"] == 1 and "available_mib" not in local
     assert ci.candidate_why_not(state, "B1", tip=tip, has_local=True) is None
     without = states.fold([one for one in log.read_round(round_log_of(tmp_path, ROUND))
                            if one.get("step") != ci.LOCAL])

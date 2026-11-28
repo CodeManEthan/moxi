@@ -112,7 +112,8 @@ def commit_file(root: Path, rel: str, text: str = "x\n") -> None:
 
 def picked(root: Path, base: str = "main") -> list[str]:
     packages = check.load_workspace(root)
-    return [p.dir for p in check.pick(packages, check.changed_paths(root, base))]
+    return [p.dir for p in check.pick(packages, check.changed_paths(root, base),
+                                      with_dependents=True)]
 
 
 def program_path(bin_dir: Path, name: str) -> Path:
@@ -207,13 +208,27 @@ def test_pick_prints_the_picked_packages_as_one_json_line_and_runs_nothing(
     runs = Runs()
     monkeypatch.setattr(check, "_run", runs)
     monkeypatch.chdir(repo / "packages" / "turns")
-    assert check.main(["--pick", "--base", base]) == 0
+    assert check.main(["--pick", "--with-dependents", "--base", base]) == 0
     out = capsys.readouterr().out
     assert out.count("\n") == 1
     assert json.loads(out) == {"packages": ["sessions", "cache", "comms"]}
     assert runs.calls == []
     assert check.main(["--pick"]) == 0
     assert json.loads(capsys.readouterr().out) == {"packages": []}
+
+
+def test_pick_without_the_dependents_prints_the_touched_packages(repo, monkeypatch,
+                                                                 capsys):
+    commit_file(repo, "packages/sessions/src/moxi_sessions/x.py")
+    commit_file(repo, "uv.lock")
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo)
+    assert check.main(["--pick"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"packages": ["sessions"]}
+    assert check.main(["--pick", "--with-dependents"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"packages": list(LAYOUT)}
+    assert runs.calls == []
 
 
 def test_pick_with_no_merge_base_exits_2_printing_nothing(repo, monkeypatch, capsys):
@@ -230,6 +245,40 @@ def test_pick_takes_no_other_mode(repo, monkeypatch, args):
     with pytest.raises(SystemExit) as stop:
         check.main(["--pick", *args])
     assert stop.value.code == 2
+
+
+@pytest.mark.parametrize("args", [["--full"], ["--static"], ["--only", "refs"]])
+def test_with_dependents_takes_no_mode_that_picks_every_package_or_none(
+        repo, monkeypatch, capsys, args):
+    runs = Runs()
+    monkeypatch.setattr(check, "_run", runs)
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as stop:
+        check.main(["--with-dependents", *args])
+    assert stop.value.code == 2
+    assert "--with-dependents cannot be combined" in capsys.readouterr().err
+    assert runs.calls == []
+
+
+def test_the_check_without_the_dependents_runs_the_touched_packages_alone(ignoring):
+    commit_file(ignoring, "packages/sessions/x.py")
+    runs = Runs()
+    result = run_check(ignoring, runs, with_dependents=False)
+    assert result.packages == ["sessions"]
+    assert [name for name, _ in runs.suites()] == ["sessions"]
+    runs = Runs()
+    result = run_check(ignoring, runs, with_dependents=True)
+    assert result.packages == ["sessions", "cache", "comms"]
+    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+
+
+def test_main_passes_with_dependents_to_the_check(repo, monkeypatch):
+    seen = []
+    monkeypatch.setattr(check, "check", lambda root, **kw: seen.append(kw) or check.Result())
+    monkeypatch.chdir(repo)
+    check.main(["--with-dependents", "--base", "main"])
+    check.main([])
+    assert [kw["with_dependents"] for kw in seen] == [True, False]
 
 
 # The real workspace's dev groups: every package lists moxi-dev, which requires moxi and
@@ -386,7 +435,7 @@ def test_the_real_workspace_picks_by_the_same_rule():
     dirs = [p.dir for p in packages]
 
     def of(path):
-        return [p.dir for p in check.pick(packages, [path])]
+        return [p.dir for p in check.pick(packages, [path], with_dependents=True)]
 
     assert {"moxi", "sessions", "turns", "cache", "comms", "moxi-dev"} <= set(dirs)
     # A root path a package's tests read picks that package; the rest of .github none.
@@ -409,15 +458,90 @@ def test_the_real_workspace_picks_by_the_same_rule():
     assert "connector" in of("packages/ui/src/moxi_ui/__init__.py")
 
 
+EVERY = "every package"
+
+
+def closure_of(dirs: list[str]) -> str:
+    """A table cell: the dependents' pick of a change inside these packages."""
+    return "closure of " + ",".join(dirs)
+
+
+# Each row: the changed paths, the touched pick, the dependents' pick.
+PICK_TABLE = [
+    (["uv.lock"], [], EVERY),
+    (["pyproject.toml"], ["moxi", "moxi-dev"], EVERY),
+    (["LICENSE"], ["moxi-dev"], EVERY),
+    ([".gitignore"], ["moxi-dev"], EVERY),
+    ([".gitattributes"], ["moxi-dev"], EVERY),
+    ([".public-paths"], ["moxi-dev"], EVERY),
+    ([".refs-allow"], ["moxi-dev"], EVERY),
+    ([".residue-allow"], ["moxi-dev"], EVERY),
+    (["SECURITY.md"], [], EVERY),
+    (["package.json"], EVERY, EVERY),
+    (["tools/web/build.mjs"], EVERY, EVERY),
+    (["a-root-file-no-table-lists.txt"], EVERY, EVERY),
+    (["packages/moxi/src/moxi/x.py"], ["moxi"], closure_of(["moxi"])),
+    (["packages/moxi-dev/src/moxi_dev/x.py"], ["moxi-dev"], EVERY),
+    (["packages/moxi-dev/renames.tsv"], ["moxi-dev"], ["moxi-dev"]),
+    (["README.md"], ["memory"], closure_of(["memory"])),
+    ([".github/workflows/queue.yml"], ["moxi-dev"], ["moxi-dev"]),
+    (["packages/memory/src/moxi_memory/x.py", "packages/launcher/src/moxi_launcher/x.py",
+      "uv.lock"], ["launcher", "memory"], EVERY),
+]
+
+
+def _real_workspace() -> list[check.Package]:
+    if not (REPO / "packages" / "sessions" / "pyproject.toml").is_file():
+        pytest.skip("not run from the repository (an sdist has no workspace)")
+    return check.load_workspace(REPO)
+
+
+def _cell(packages, want) -> list[str]:
+    dirs = [package.dir for package in packages]
+    if want == EVERY:
+        return dirs
+    if isinstance(want, str):
+        members = want.removeprefix("closure of ").split(",")
+        paths = [f"packages/{member}/src/x.py" for member in members]
+        return [p.dir for p in check.pick(packages, paths, with_dependents=True)]
+    return [one for one in dirs if one in want]
+
+
+@pytest.mark.parametrize(("paths", "touched", "wide"), PICK_TABLE,
+                         ids=[" ".join(row[0]) for row in PICK_TABLE])
+def test_the_real_workspace_picks_by_both_rules(paths, touched, wide):
+    packages = _real_workspace()
+    assert [p.dir for p in check.pick(packages, paths, with_dependents=False)] == _cell(
+        packages, touched)
+    assert [p.dir for p in check.pick(packages, paths, with_dependents=True)] == _cell(
+        packages, wide)
+
+
+def test_the_table_has_a_row_for_every_root_reader():
+    rows = {paths[0] for paths, _, _ in PICK_TABLE if len(paths) == 1}
+    assert set(check.ROOT_READERS) <= rows
+
+
 # --- the steps -------------------------------------------------------------------------
 
 def run_check(repo, runs, **kw):
+    """The check over `repo` with `runs` as its step runner. The steps' tests pick as CI
+    does, with the dependents, so a change in one package runs several suites; the
+    touched pick has tests of its own."""
     kw.setdefault("env", {"PATH": "/usr/bin", "VIRTUAL_ENV": str(repo / ".venv")})
     kw.setdefault("plan", lambda package, work, members: [])
+    kw.setdefault("with_dependents", True)
     return check.check(repo, run=runs, **kw)
 
 
-def test_code_check_failures_are_recorded_and_later_steps_run(repo, monkeypatch):
+STATIC_STOP = ("moxi-dev check: a static step failed, so the check stops before the "
+               "packages' steps\n")
+LINT_STOP = "moxi-dev check: a package's import rules failed, so the check runs no tests\n"
+NOT_REACHED = ("| stamps not run | web not run | sync not run | lint not run | "
+               "no suites run | timed not run |")
+
+
+def test_code_check_failures_are_recorded_and_stop_the_check(repo, monkeypatch, capsys):
     commit_file(repo, "packages/sessions/x.py")
     monkeypatch.setattr(check.refs, "scan", lambda root: [
         check.refs.Hit("packages/sessions/x.py", 1, "Gone")])
@@ -429,7 +553,33 @@ def test_code_check_failures_are_recorded_and_later_steps_run(repo, monkeypatch)
     result = run_check(repo, runs)
     assert (result.code == 1 and result.refs == "fail" and result.names == "fail"
             and result.ruff == "fail")
-    assert runs.suites(), "the package suites still run after whole-tree findings"
+    # Every static step ran, then the check stopped: no stamps, sync, lint or suite.
+    assert result.release == "pass" and result.machine == "pass"
+    assert [cmd for cmd, _, _ in runs.calls] == [["uv", "lock", "--check"]]
+    assert NOT_REACHED in result.line() and LINE.match(result.line())
+    assert capsys.readouterr().out.endswith(STATIC_STOP)
+
+
+def test_under_full_a_static_failure_still_runs_every_suite(repo, monkeypatch, capsys):
+    monkeypatch.setattr(check.refs, "scan", lambda root: [
+        check.refs.Hit("packages/sessions/x.py", 1, "Gone")])
+    runs = Runs()
+    result = run_check(repo, runs, full=True)
+    assert result.code == 1 and result.refs == "fail" and result.sync == "pass"
+    assert [name for name, _ in runs.suites()] == list(LAYOUT)
+    assert STATIC_STOP not in capsys.readouterr().out
+
+
+def test_with_nothing_picked_a_static_failure_reads_as_before(repo, monkeypatch, capsys):
+    monkeypatch.setattr(check.refs, "scan", lambda root: [
+        check.refs.Hit("README.md", 1, "Gone")])
+    runs = Runs()
+    result = run_check(repo, runs, with_dependents=False)
+    assert result.code == 1 and result.refs == "fail"
+    assert ("packages: none | lock pass | tags pass | refs fail" in result.line()
+            and "| stamps skipped | web skipped | sync skipped | lint not run | "
+                "no suites run |" in result.line())
+    assert STATIC_STOP not in capsys.readouterr().out
 
 
 def test_only_runs_one_scanner_reads_the_whole_tree_and_filters_printing(tmp_path,
@@ -853,14 +1003,16 @@ def test_nothing_picked_checks_the_lock_and_passes(repo):
 
 # --- the tag check and the lint -------------------------------------------------------
 
-def test_a_tag_fails_the_check_and_the_rest_still_run(repo, capsys):
+def test_a_tag_fails_the_check_and_stops_it_before_the_packages(repo, capsys):
     tag = "[B5]"
     commit_file(repo, "packages/sessions/x.py", f"# see {tag}\n")
     runs = Runs()
     result = run_check(repo, runs)
-    assert result.code == 1 and result.tags == "fail"
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
-    assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in capsys.readouterr().out
+    assert result.code == 1 and result.tags == "fail" and result.refs == "pass"
+    assert runs.suites() == [] and NOT_REACHED in result.line()
+    out = capsys.readouterr().out
+    assert f"moxi-dev check: packages/sessions/x.py:1: tag {tag!r}" in out
+    assert out.endswith(STATIC_STOP)
 
 
 
@@ -876,12 +1028,13 @@ def test_the_release_step_runs_whatever_the_change_picks(repo, capsys):
             "0.0.9, but project.version is 0.1.0;") in capsys.readouterr().out
 
 
-def test_a_release_problem_fails_the_check_and_the_rest_still_run(repo, capsys):
+def test_a_release_problem_fails_the_check_and_stops_it_before_the_packages(repo, capsys):
     commit_file(repo, "packages/sessions/README.md", "See [the guide](docs/guide.md).\n")
     runs = Runs()
     result = run_check(repo, runs)
     assert result.code == 1 and result.release == "fail" and result.tags == "pass"
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+    assert result.pronouns == "pass" and result.machine == "pass"
+    assert runs.suites() == [] and NOT_REACHED in result.line()
     assert "packages/sessions: README.md:1: links to docs/guide.md" in capsys.readouterr().out
 
 def test_each_lint_command_runs_in_the_check_s_env(repo):
@@ -913,19 +1066,28 @@ def test_each_lint_command_runs_in_the_check_s_env(repo):
     assert last_lint < first_suite
 
 
-def test_a_lint_failure_fails_the_check_and_the_rest_still_run(repo):
+def _failing_lint(package, work, members):
+    if package.name == "cache":
+        raise check.lint.LintError("no announcement")
+    return [check.lint.Command("one", ["deptry", "."])]
+
+
+def test_a_lint_failure_fails_the_check_after_every_lint_and_runs_no_suite(repo, capsys):
     commit_file(repo, "packages/sessions/x.py")
-
-    def plan(package, work, members):
-        if package.name == "cache":
-            raise check.lint.LintError("no announcement")
-        return [check.lint.Command("one", ["deptry", "."])]
-
     runs = Runs({lambda cmd, cwd: Path(cmd[0]).stem == "deptry" and cwd.name == "comms": 1})
-    result = run_check(repo, runs, plan=plan)
+    result = run_check(repo, runs, plan=_failing_lint)
     assert result.code == 1
-    assert "| lint fail (cache, comms) |" in result.line()
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms"]
+    assert "| lint fail (cache, comms) | no suites run | timed not run |" in result.line()
+    assert runs.suites() == []
+    assert capsys.readouterr().out.endswith(LINT_STOP)
+
+
+def test_under_full_a_lint_failure_still_runs_every_suite(repo, capsys):
+    runs = Runs({lambda cmd, cwd: Path(cmd[0]).stem == "deptry" and cwd.name == "comms": 1})
+    result = run_check(repo, runs, plan=_failing_lint, full=True)
+    assert result.code == 1 and "| lint fail (cache, comms) |" in result.line()
+    assert [name for name, _ in runs.suites()] == list(LAYOUT)
+    assert LINT_STOP not in capsys.readouterr().out
 
 
 def test_a_package_with_no_lint_commands_is_left_out(repo):
@@ -945,7 +1107,7 @@ def test_the_real_plan_runs_over_the_real_layout(repo):
     """Without a stand-in plan, each package whose required module has no announcement
     fails its lint with a reason, and the rest still lint."""
     commit_file(repo, "packages/sessions/x.py")
-    result = check.check(repo, run=Runs(), env={"PATH": "/usr/bin"})
+    result = check.check(repo, run=Runs(), env={"PATH": "/usr/bin"}, with_dependents=True)
     assert "| lint fail (cache, comms) |" in result.line()
     assert (repo / ".moxi-dev" / "lint" / "sessions" / "importlinter.toml").is_file()
 
@@ -1196,7 +1358,7 @@ def test_a_settled_tree_passes_the_renames_step(repo):
     assert LINE.match(result.line()), result.line()
 
 
-def test_a_row_to_apply_fails_the_renames_step_and_the_rest_still_run(repo, capsys):
+def test_a_row_to_apply_fails_the_renames_step_and_stops_the_check(repo, capsys):
     with_renames(repo, {X: "old = 1\n"}, (X, "-", "name", "old", "fresh"))
     runs = Runs()
     result = run_check(repo, runs)
@@ -1205,8 +1367,7 @@ def test_a_row_to_apply_fails_the_renames_step_and_the_rest_still_run(repo, caps
     assert (f"moxi-dev check: renames: to apply: renames.tsv row 2: {X} name old -> fresh"
             in capsys.readouterr().out)
     assert "| renames fail |" in result.line() and LINE.match(result.line())
-    # the table's own change picks moxi-dev
-    assert [name for name, _ in runs.suites()] == ["sessions", "cache", "comms", "moxi-dev"]
+    assert runs.suites() == []
 
 
 def test_a_leftover_fails_the_renames_step(repo, capsys):
@@ -1681,7 +1842,7 @@ def test_a_record_the_disk_refuses_is_said_and_the_line_still_prints(
     monkeypatch.setattr(check.lint, "plan", lambda package, work, members: [])
     monkeypatch.chdir(ignoring)
     try:
-        assert check.main([]) == 0
+        assert check.main(["--with-dependents"]) == 0
     finally:
         where.chmod(0o700)
     out, err = capsys.readouterr()
@@ -1758,9 +1919,13 @@ def test_a_finding_no_test_carries_fails_the_check(ignoring, capsys):
     commit_file(ignoring, "packages/sessions/x.py")
     runs = Timed({"sessions": [], "cache": [], "comms": []},
                  {lambda cmd, cwd: "pytest" in cmd: 5})
-    result = run_check(ignoring, runs, finding=["L50"])
+    result = run_check(ignoring, runs, finding=["L50"], with_dependents=False)
     assert result.code == 1
-    assert "no test in sessions, cache, comms carries L50" in capsys.readouterr().out
+    assert ("no test in sessions carries L50; a test in a package that depends on them "
+            "needs --with-dependents\n") in capsys.readouterr().out
+    result = run_check(ignoring, runs, finding=["L50"], with_dependents=True)
+    assert result.code == 1
+    assert "no test in sessions, cache, comms carries L50\n" in capsys.readouterr().out
 
 
 def test_a_finding_in_a_package_without_the_kit_fails_it(ignoring, capsys):
