@@ -5,8 +5,19 @@ Run from the repository's root as
 [--finding L<n>]`, or as `uv run --locked moxi-dev check --static` for step 2 alone, or
 as `uv run --locked moxi-dev check --pick [--with-dependents] [--base REV]` to print
 what step 3 picks (see the end).
-It first reads the workspace, the worker count and the changed paths; a bad workspace,
-worker count or base stops it there, before any step runs. Then, in order:
+It first reads the worker count and the memory figures, and runs the check in a memory
+scope of its own (`moxi_dev.scope`): the `moxi-dev` the caller started stays outside
+the scope and watches it, and the steps below run in the scope, as `python -m moxi_dev
+check` with the same arguments. A bad worker count or figure stops it there. Where no
+scope is made (`MOXI_TEST_MEMORY_MAX_MIB=none`, not Linux, CI, no systemd user manager
+with the memory controller) the steps run in place, and the summary's memory field says
+why. Once the scope's unit is gone, however the check in it ended, the `moxi-dev` the
+caller started sweeps what test runs left (`moxi_dev.temp.sweep`): quietly when the
+check printed its own summary, else with its line before the outer's summary or its
+signal. `--only`, `--static` and `--pick` run no tests and make no scope.
+
+The check then reads the workspace and the changed paths; a bad workspace or base stops
+it there, before any step runs. Then, in order:
 
 1. `uv lock --check`: the committed `uv.lock` matches every package's declarations. A
    stale lock stops the check here.
@@ -146,7 +157,17 @@ worker count or base stops it there, before any step runs. Then, in order:
    against main, where the tests kept their temp (`temp disk`, with the reason when the
    check moved a memory choice to disk; `temp PYTEST_DEBUG_TEMPROOT` when the caller's
    root on disk was kept; and how many suites kept it in memory after all, read from
-   their durations, with why), the total and the exit code.
+   their durations, with why), the memory field, the total and the exit code. Before it,
+   the check ends any process it left running in its scope and says how many, and it
+   warns when it held 90 % of its line or more, or waited on memory for 10 s or more.
+
+   The memory field names the scope's peak, the most memory it held that it couldn't
+   give back (`held`), its line (95 % of MemoryHigh), MemoryHigh, MemoryMax and the
+   seconds it stalled on memory; or `not capped (<why>)`; or how a memory end ended it:
+   `ended past its line (...)`, `killed at its cap (...)`, `killed while the machine ran
+   short (...)`; or `not run` under `--static`. A caller's SIGINT, SIGTERM or SIGHUP
+   prints the scope's memory state at once and ends the check by that signal, with no
+   summary.
 
 The tags, references, names, Ruff, renames, release, pronoun and machine-text steps all
 run even when one before them failed, as do each package's lint and each package's
@@ -158,18 +179,21 @@ no tests`; the steps it skipped read `not run` in the summary, `timed not run` a
 suites run` among them. `--full` stops at neither: a failed static step or lint still
 lets every suite run.
 
-The exit code is 0 only when every step passed, 1 when one failed, and 2 when the check
-could not start or a step could not be run (not in a workspace, a member with no readable
-`pyproject.toml` or no project name, no merge base, a bad `MOXI_TEST_WORKERS`,
-`MOXI_TEST_TEMP` or `--finding`, `uv` not on PATH, a private-names list secrets can't
-read). The summary line is printed in every case.
+The exit code is 0 only when every step passed, 1 when one failed or the check was ended
+for memory, and 2 when the check could not start or a step could not be run (not in a
+workspace, a member with no readable `pyproject.toml` or no project name, no merge base, a
+bad `MOXI_TEST_WORKERS`, `MOXI_TEST_MEMORY_HIGH_MIB`, `MOXI_TEST_MEMORY_MAX_MIB`,
+`MOXI_TEST_TEMP` or `--finding`, a memory scope that could not be made where one was
+expected, `uv` not on PATH, a private-names list secrets can't read). The summary line is
+printed in every case but a caller's signal.
 
 `--static` reads the workspace and runs step 2 alone, over the whole repository: the
 tag, comment-reference, naming, Ruff, renames, release, pronoun and machine-text steps,
 with the same printed lines, the same summary line (every other step `not run`,
-`packages: none`, `temp not run`) and the same exit codes. It reads no changed paths and
-no worker count, and runs no lock check, so no step needs the network. It starts no
-test, so it reads no `MOXI_TEST_TEMP`, chooses no temp root and sweeps nothing.
+`packages: none`, `temp not run`, `memory not run`) and the same exit codes. It reads no
+changed paths and no worker count, makes no memory scope and runs no lock check, so no
+step needs the network. It starts no test, so it reads no `MOXI_TEST_TEMP`, chooses no
+temp root and sweeps nothing.
 
 `--pick` reads the workspace and the changed paths as step 3 does, with the same
 `--with-dependents` the check takes, so it names exactly the packages that check runs. It
@@ -201,7 +225,8 @@ from typing import Callable, Iterator, Mapping, Protocol, Sequence
 from moxi import proc
 
 from . import (durations, lint, machine_text, naming, pronouns, refs, release, rename,
-               ruff_check, stamp, tags, temp)
+               ruff_check, scope, stamp, tags, temp)
+from .scope import SCOPE_ENV, WORKERS_ENV
 from .testing import (CHANGED_ENV, DURATIONS_ENV, FINDING_ENV, FINDING_NAME,
                       LEAVE_OUT_ENV, PARENT_PID_ENV, STACKS_AT_ENV, STACKS_ENV, TIERS_ENV,
                       TIMED_ENV)
@@ -210,7 +235,6 @@ PYTHON = "3.12"
 ENV_DIR = Path(".moxi-dev") / f"env-{PYTHON}"
 LINT_DIR = Path(".moxi-dev") / "lint"
 RUN_DIR = Path(".moxi-dev") / "run"       # this run's changed paths and suites' durations
-WORKERS_ENV = "MOXI_TEST_WORKERS"
 #: Seconds one package's test run may take before the check ends it, in place of
 #: `SUITE_BOUND_S`.
 SUITE_BOUND_ENV = "MOXI_TEST_SUITE_BOUND_S"
@@ -531,9 +555,11 @@ def _base_env(env: Mapping[str, str]) -> dict[str, str]:
 
 #: Dropped from the suites' environment: either can make the run serial, or run less
 #: than the package's own configuration says; the kit's selection and durations
-#: variables are the check's own to set.
+#: variables are the check's own to set, and the memory scope's marker names the
+#: check's own scope.
 SUITE_DROPPED_ENV = ("PYTEST_XDIST_AUTO_NUM_WORKERS", "PYTEST_ADDOPTS", TIERS_ENV,
-                     CHANGED_ENV, FINDING_ENV, DURATIONS_ENV, TIMED_ENV, LEAVE_OUT_ENV)
+                     CHANGED_ENV, FINDING_ENV, DURATIONS_ENV, TIMED_ENV, LEAVE_OUT_ENV,
+                     SCOPE_ENV)
 
 #: pytest's exit code when it ran no test.
 NO_TESTS = 5
@@ -617,6 +643,9 @@ class Result:
     is_temp_chosen: bool = True
     #: (package, root, why) for each suite whose temp was in memory after all.
     temp_in_memory: list[tuple[str, str, str | None]] = field(default_factory=list)
+    #: The memory scope's field (`moxi_dev.scope`): what the scope held, how it ended,
+    #: or why there was none.
+    memory: str = "not run"
     seconds: float = 0.0
     code: int = 0
 
@@ -671,7 +700,8 @@ class Result:
                 f"machine {self.machine} | stamps {self.stamps} | "
                 f"web {self.web} | sync {self.sync} | "
                 f"lint {linted} | {suites} | timed {timed} | {self.timing()} | "
-                f"{self.temp_text()} | total {self.seconds:.1f}s | exit {self.code}")
+                f"{self.temp_text()} | memory {self.memory} | "
+                f"total {self.seconds:.1f}s | exit {self.code}")
 
 
 def _commit(root: Path) -> str:
@@ -1315,7 +1345,101 @@ def main(argv: list[str]) -> int:
     if args.pick:
         return print_pick(root, args.base or "main",
                           with_dependents=args.with_dependents)
+    if args.static:
+        # The static steps start no test, so they run in place, with no scope.
+        result = check(root, static=True)
+        print(result.line(), flush=True)
+        return result.code
+    unit = scope.inner_unit(os.environ)
+    if unit is None:
+        # A marker that names no scope this process is in counts for nothing: the outer
+        # and all it starts run without it.
+        env = {key: value for key, value in os.environ.items() if key != SCOPE_ENV}
+        return _outer(root, args, argv, env)
+    return _inner(root, args, unit)
+
+
+def _say(text: str) -> None:
+    print(text, flush=True)
+
+
+def _commit_or_unknown(root: Path) -> str:
+    try:
+        return _commit(root)
+    except CheckError:
+        return "unknown"
+
+
+def _outer(root: Path, args: argparse.Namespace, argv: list[str],
+           env: Mapping[str, str]) -> int:
+    """Run the check in a memory scope of its own (`moxi_dev.scope`), or in place where
+    there is none, with `env` as its environment, and return its exit code."""
+    started = time.monotonic()
+    try:
+        found = scope.figures(env, int(worker_args(env)[1]))
+    except (CheckError, scope.ScopeError) as exc:
+        print(f"moxi-dev check: {exc}", file=sys.stderr, flush=True)
+        result = Result(commit=_commit_or_unknown(root), code=2)
+        print(result.line(), flush=True)
+        return result.code
+    system = scope.System(env=env)
+    host = scope.find_host(system) if found is not None else None
+    why = scope.skip_reason(found, host)
+    if why is not None:
+        result = check(root, full=args.full, base=args.base, finding=args.finding,
+                       with_dependents=args.with_dependents, env=env)
+        result.memory = f"not capped ({why})"
+        print(result.line(), flush=True)
+        return result.code
+    warning = scope.below_default(found)
+    if warning:
+        _say(f"moxi-dev check: {warning}")
+    outer = scope.Outer(kind="check",
+                        command=[sys.executable, "-m", "moxi_dev", "check", *argv],
+                        found=found, host=host, system=system,
+                        description=f"moxi-dev check in {root}", say=_say)
+    outcome = outer.run(env)
+    # The inner's summary, when it printed one, stays the last line: that sweep is quiet.
+    swept = _sweep_after(outcome)
+    if swept and (outcome.signum is not None or outcome.memory is not None):
+        _say(f"moxi-dev check: {swept}")
+    if outcome.signum is not None:
+        scope.die_by(outcome.signum)
+        return outcome.code
+    if outcome.memory is not None:
+        # The inner printed no summary: the outer's is the last line.
+        result = Result(commit=_commit_or_unknown(root), code=outcome.code,
+                        memory=outcome.memory, seconds=time.monotonic() - started)
+        with contextlib.suppress(CheckError):
+            _, result.temp_why, result.is_temproot_given = temp_env(env)
+        print(result.line(), flush=True)
+    return outcome.code
+
+
+def _sweep_after(outcome: scope.Outcome) -> str | None:
+    """Sweep what test runs left (`moxi_dev.temp.sweep`) once the scope's unit is gone,
+    however the work in it ended; the sweep's line, None when it removed nothing or the
+    unit was not seen gone (the next run's own sweep then takes what is left)."""
+    if not outcome.is_gone:
+        return None
+    return _sweep().line()
+
+
+def _inner(root: Path, args: argparse.Namespace, unit: str) -> int:
+    """Run the check inside its scope: sample what it holds, end what it leaves running,
+    and print the summary with the scope's memory field."""
+    cgroup_dir = scope.own_cgroup()
+    sampler = scope.Sampler(cgroup_dir).start()
     result = check(root, full=args.full, base=args.base, finding=args.finding,
-                   static=args.static, with_dependents=args.with_dependents)
+                   with_dependents=args.with_dependents)
+    held = sampler.stop()
+    if cgroup_dir is not None and unit.startswith("moxi-dev-check-"):
+        count = scope.end_leftovers(cgroup_dir, keep=os.getpid())
+        if count:
+            _say(f"moxi-dev check: {scope.ended_line(count, 'check')}")
+    report = scope.memory_report(cgroup_dir, held)
+    for line in report.lines:
+        _say(f"moxi-dev check: {line}")
+    result.memory = report.field
     print(result.line(), flush=True)
     return result.code
