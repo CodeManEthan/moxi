@@ -952,7 +952,7 @@ comms	packages/comms/src/moxi_comms/client.py	"""Fire-and-forget notification (`
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient._call	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.attributed_message	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.connect	name	e	exc
-comms	packages/comms/src/moxi_comms/client.py	ORDERED = ("activity", "turn_ended", "ready", "look", "injected")	keep	injected	injected
+comms	packages/comms/src/moxi_comms/client.py	ORDERED = ("activity", "turn_ended", "ready", "look", "relook", "injected")	keep	injected	injected
 comms	packages/comms/src/moxi_comms/client.py	and `delivered` (names), and `expired`. A request that left this process and got	keep	delivered	delivered
 comms	packages/comms/src/moxi_comms/client.py	and `delivered` (names), and `expired`. A request that left this process and got	keep	expired	expired
 comms	packages/comms/src/moxi_comms/client.py	if self._client is client:     # not a connection made since in its place	keep	_client	_client
@@ -1453,6 +1453,7 @@ comms	packages/comms/src/moxi_comms/sending.py	thread.note = THREAD_NOTE_MISSING
 comms	packages/comms/src/moxi_comms/sending.py	waiting = set(answer.get("waiting") or ())	keep	set	set
 comms	packages/comms/src/moxi_comms/sending.py	what=what, names=names_text, new=new_flag()))	keep	new	new
 comms	packages/comms/src/moxi_comms/sending.py	whom = "this recipient" if len(set(resolved)) == 1 else "these recipients"	keep	set	set
+comms	packages/comms/src/moxi_comms/sending.py	got = entry.load()(by, state.target, state.session_id, env=ctx.env)	keep	env	env
 comms	packages/comms/src/moxi_comms/store/books.py	"""Why `message_id` left `name`'s queue undelivered (`withdrawn` or `expired`), from	keep	expired	expired
 comms	packages/comms/src/moxi_comms/store/books.py	"""`ids` may no longer go to `name`'s model (`reason`, `withdrawn` or `expired`):	keep	expired	expired
 comms	packages/comms/src/moxi_comms/store/books.py	"""`withdrawn` or `expired` for a message that may no longer be delivered; None	keep	expired	expired
@@ -1871,6 +1872,10 @@ comms	packages/comms/tests/test_claude_adapter.py	assert rig.send(REVIEWER, "fro
 comms	packages/comms/tests/test_claude_adapter.py	send(rig, "refused")	keep	refused	refused
 comms	packages/comms/tests/test_claude_adapter.py	shim = rig.shim(name="reviewer", scope="proj-a", session_id=None, start=False)	keep	start	start
 comms	packages/comms/tests/test_claude_adapter.py	stall.set()	keep	set	set
+comms	packages/comms/tests/test_claude_adapter.py	ep.settle(did, {"kind": "lost", "reason": "the endpoint is stopping"})	keep	handled	handled
+comms	packages/comms/tests/test_claude_adapter.py	ep.settle(did, {"kind": "lost", "reason": "the endpoint is stopping"})	keep	ok	ok
+comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(m == "steer" for (m, *_) in ep.calls))	keep	any	any
+comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(h.steer and h.turn_id == turn_id	keep	any	any
 comms	packages/comms/tests/test_claude_launch.py	-	name	test_turns_endpoint_command_reaches_the_environment_claude_starts_with	test_turns_endpoint_command_reaches_the_env_claude_starts_with
 comms	packages/comms/tests/test_claude_launch.py	assert any(ln.startswith("waiting") and "none" in ln for ln in out.splitlines()), out	keep	any	any
 comms	packages/comms/tests/test_claude_launch.py	config.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
@@ -2673,6 +2678,7 @@ comms	packages/comms/tests/test_queue.py	shim._client.call("max_id")	keep	_clien
 comms	packages/comms/tests/test_queue.py	shim.on_turn_boundary(idle=True)	keep	idle	idle
 comms	packages/comms/tests/test_queue.py	with rig.record._txn(write=True) as st:	keep	record	record
 comms	packages/comms/tests/test_queue.py	with rig.record._write() as conn:	keep	record	record
+comms	packages/comms/tests/test_queue.py	assert first not in rig.daemon.bindings[REVIEWER_Q].delivered	keep	delivered	delivered
 comms	packages/comms/tests/test_read_only_record.py	assert set(threading.enumerate()) == threads	keep	set	set
 comms	packages/comms/tests/test_read_only_record.py	old.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 comms	packages/comms/tests/test_read_only_record.py	test_the_step_is_read_once_per_connection.other_thread	name	e	exc
@@ -2964,7 +2970,7 @@ comms	packages/comms/tests/test_verb_held.py	assert not any(line.startswith("NOT
 comms	packages/comms/tests/test_verb_held.py	return rig.record.history(rig.names_channel)	keep	record	record
 comms	packages/comms/tests/test_verb_held.py	return rig.record.history(rig.names_channel)[-1]	keep	record	record
 comms	packages/comms/tests/test_verb_held.py	rig.daemon = Daemon(rig.record, clock=rig.clock, start_trim_thread=False).start()	keep	record	record
-comms	packages/comms/tests/test_wire.py	@pytest.mark.parametrize("method", ["turn_ended", "injected", "ready", "look", "activity",	keep	injected	injected
+comms	packages/comms/tests/test_wire.py	@pytest.mark.parametrize("method", ["turn_ended", "injected", "ready", "look", "relook",	keep	injected	injected
 comms	packages/comms/tests/test_wire.py	Line.call	name	id	request_id
 comms	packages/comms/tests/test_wire.py	arrived = line.delivered()	keep	delivered	delivered
 comms	packages/comms/tests/test_wire.py	assert agreed.version == 1 and set(agreed.capabilities) == set(wire.CAPABILITIES)	keep	set	set
@@ -4487,6 +4493,7 @@ launcher	packages/launcher/tests/test_handoffs.py	test_without_notes_the_folder_
 launcher	packages/launcher/tests/test_handoffs.py	fake.find = lambda *, pid: Found() if pid == os.getpid() else None	keep	find	find
 launcher	packages/launcher/tests/test_handoffs.py	fake.find = lambda *, pid: None	keep	find	find
 launcher	packages/launcher/tests/test_handoffs.py	fake.find = broken	keep	find	find
+launcher	packages/launcher/tests/test_hold_line.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 launcher	packages/launcher/tests/test_keep_warm_chain.py	[(text, _)] = director.delivered	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keep_warm_chain.py	assert director.delivered == []	keep	delivered	delivered
 launcher	packages/launcher/tests/test_keep_warm_chain.py	assert len(director.delivered) == 1	keep	delivered	delivered
