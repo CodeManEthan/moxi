@@ -19,6 +19,8 @@ from moxi_memory.connector import recall as recall_tool
 from moxi_memory.connector.redaction import Gate
 
 HOST = modules.load("connector", interface=1).api
+#: The real launcher, reached as memory reaches it, for the refusals it gives.
+LAUNCHER = modules.load("launcher", interface=4).api
 #: The schema checker the host validates a call's arguments with.
 jsonschema = pytest.importorskip("jsonschema")
 CONV = "kiosk-approver-1530"
@@ -37,10 +39,15 @@ class Secrets:
         return out if between is None else between(out)
 
 
+def refusal(problem):
+    """A refusal of the launcher's `check`, as the real launcher gives one."""
+    return LAUNCHER.Refusal(None, problem, "change the launch")
+
+
 class Launcher:
     """The launcher at interface 4, as far as the start checks ask it."""
 
-    Refusal = RuntimeError
+    Refusal = LAUNCHER.Refusal
 
     def __init__(self, refusals=()):
         self.refusals = list(refusals)
@@ -242,9 +249,10 @@ def _no_launcher(monkeypatch):
                         lambda: links.Link(links.NONE, None, "launcher not installed"))
 
 
-def _no_harness(monkeypatch):
+def _refused(monkeypatch):
     monkeypatch.setattr(links, "launcher_headless",
-                        lambda: links.Link(links.READY, Launcher(["no claude on PATH"])))
+                        lambda: links.Link(links.READY,
+                                           Launcher([refusal("a launcher row is refused")])))
 
 
 def _fence(monkeypatch):
@@ -256,7 +264,7 @@ def _fence(monkeypatch):
 
 @pytest.mark.parametrize("fail, reason, noted", [
     (_no_launcher, "no-launcher", "launcher not installed"),
-    (_no_harness, "no-harness", "no claude on PATH"),
+    (_refused, "refused", "the launcher refused this launch: a launcher row is refused"),
     (_fence, "fence", "tools: extra Bash"),
 ])
 def test_each_start_check_failing_gives_its_reason_and_the_call_still_collects(
@@ -374,9 +382,9 @@ def test_a_piece_its_words_and_notes_go_out_with_local_paths_cut(spawned, can_st
     a_piece("a", f"the plan is in {home}/notes/kiosk/plan.md, served on "
                  "http://127.0.0.1:8765/approve, and ~/work/approver.txt",
             head="what ~/kiosk/plan.md says")
-    refusal = f"{home}/bin/claude isn't there"
+    problem = f"{home}/bin/claude isn't there"
     monkeypatch.setattr(links, "launcher_headless",
-                        lambda: links.Link(links.READY, Launcher([refusal])))
+                        lambda: links.Link(links.READY, Launcher([refusal(problem)])))
     _memory, prov = build(spawned)
     result, _ = call(prov, {"conversation": CONV, "words": "the kiosk approver"},
                      written=True)
@@ -384,8 +392,9 @@ def test_a_piece_its_words_and_notes_go_out_with_local_paths_cut(spawned, can_st
     assert piece["text"] == ("the plan is in plan.md, served on local, and "
                              "approver.txt")
     assert piece["for_words"] == "what plan.md says"
-    assert result.structured["skipped"] == recall_chat.NO_HARNESS
+    assert result.structured["skipped"] == recall_chat.REFUSED
     assert any("claude isn't there" in n for n in result.structured["notes"])
+    assert "No recall started: refused." in result.text
     sent = result.text + repr(result.structured)
     for leak in (home, "127.0.0.1", "8765", "~/", "/notes/", "/bin/"):
         assert leak not in sent
@@ -397,7 +406,8 @@ def test_without_the_sessions_cut_pieces_wait_with_a_note(spawned, can_start,
     home = os.environ["HOME"].rstrip("/")
     a_piece("a", f"the plan is in {home}/notes/plan.md")
     monkeypatch.setattr(links, "launcher_headless",
-                        lambda: links.Link(links.READY, Launcher([f"{home}/bin/claude"])))
+                        lambda: links.Link(links.READY,
+                                           Launcher([refusal(f"{home}/bin/claude")])))
 
     def no_sessions():
         raise RuntimeError("sessions offers no interface 7")
@@ -428,9 +438,9 @@ def test_the_recall_row_says_off_on_and_why_not_with_recalls_today(spawned, monk
     row = rows(memory)["recall"]
     assert row.level == "ok" and row.text.startswith("off:") and "0 recalls today" in row.text
     write_config(ON)
-    _no_harness(monkeypatch)
+    _refused(monkeypatch)
     row = rows(memory)["recall"]
-    assert row.level == "warn" and "no-harness" in row.text
+    assert row.level == "warn" and "refused" in row.text
     _fence(monkeypatch)
     monkeypatch.setattr(recall_fence, "verdict",
                         lambda launcher, spec, env=None: recall_fence.Verdict(None))

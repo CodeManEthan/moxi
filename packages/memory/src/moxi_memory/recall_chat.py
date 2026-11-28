@@ -30,10 +30,12 @@ call.
 
 **Whether a chat recall can start (`why_not`).** The checks of `START_CHECKS`, in order,
 the first that fails giving the reason: `subconscious.chat.enabled` is on (`off`); the
-launcher offers interface 4 (`no-launcher`); the launcher's `check` of a chat recall's
-headless request finds `claude` from this process's environment (`no-harness`); and
-the fence holds no failed outcome for that binary (`fence`, asked of
-`moxi_memory.recall_fence.verdict`). A new check joins the list as one entry.
+launcher offers interface 4 (`no-launcher`); the launcher's `check` takes a chat recall's
+headless request from this process's environment (`refused`, naming the launcher's
+refusal); and, asked of `moxi_memory.recall_fence.verdict`, the launcher's preview of
+that request finds `claude` on its PATH (`no-harness`; any other refusal is `refused`)
+and the fence holds no failed outcome for that binary (`fence`). A new check joins the
+list as one entry.
 
 **Its start (`start`).** Under the start lock (`subconscious/chat/start.lock`, the core's
 lock helper), the chat recalls running over every conversation are counted; below
@@ -46,12 +48,16 @@ lock is always taken before the key's.
 
 **The child's chat branch (`prepare`).** The recall's child mints its agent's Claude
 Code session id and writes it on the record and the line before it asks the launcher
-for anything; asks `recall_fence.ensure` (the probe, when the fence record holds no
-outcome for the binary), ending the recall `lost` with the reason `fence` on a failed
-outcome and `gone` when it got none; runs the first search with no project; and builds
-the brief: `CHAT_PREAMBLE` with the context, then `recall_brief.brief`'s output with the
+for anything; runs the first search with no project and builds the brief:
+`CHAT_PREAMBLE` with the context, then `recall_brief.brief`'s output with the
 conversation's handed lines of `HANDED_LINES_S` (at most `HANDED_LINES_MAX`) as what the
-assistant already has. Its route is `recall_route.Headless`.
+assistant already has; and asks `recall_fence.ensure` (the probe, when the fence record
+holds no outcome for the binary) about the very launch its first round runs: that brief,
+the notes folders it names and the minted ids, with a request id of its own that is
+written nowhere, since each round mints its own. A failed outcome ends the recall `lost`
+with the reason `fence`, a launcher refusal `denied` (as a round's refused launch does),
+and no `claude`, or no outcome, `gone`. Its route is `recall_route.Headless`, with the
+same launch.
 
 Standard library at import; the core and the launcher are reached at use.
 """
@@ -66,7 +72,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any
 
 from . import recalls, records
@@ -97,7 +103,13 @@ OFF = "off"
 BUSY = "busy"
 NO_LAUNCHER = "no-launcher"
 NO_HARNESS = "no-harness"
+REFUSED = "refused"
 FENCE = "fence"
+#: Said with `no-harness`: why a connector can miss a `claude` a terminal finds.
+SERVICE_PATH = "a connector run as a service may have a shorter PATH"
+#: The lost reason of a recall whose launch the launcher refused, at the fence's check
+#: as at a round's launch (`recall_route.Headless`).
+DENIED = "denied"
 
 #: What the chat recall's agent is told before the brief.
 CHAT_PREAMBLE = """\
@@ -390,10 +402,22 @@ def check_launcher(ctx: Context) -> Skip | None:
     return None
 
 
+def _refused(verdict) -> Skip:
+    """The skip for `recall_fence.refusal_verdict`'s verdict."""
+    from . import recall_fence
+
+    if verdict.reason == recall_fence.NO_HARNESS:
+        return Skip(NO_HARNESS, f"{verdict.detail} ({SERVICE_PATH})")
+    return Skip(REFUSED, verdict.detail)
+
+
 def check_harness(ctx: Context) -> Skip | None:
-    """The launcher can start claude in the chat recall's folder, made first: before the
-    first call nothing has, and the launcher refuses a working folder that isn't there."""
+    """The launcher's `check` takes a chat recall's launch in its folder, made first:
+    before the first call nothing has, and the launcher refuses a working folder that
+    isn't there. Its first refusal is the skip; a check that fails with anything but a
+    refusal is `refused` as well, said as the check failing."""
     from moxi import files
+    from moxi.store import StoreError
 
     from . import recall_fence
 
@@ -402,11 +426,12 @@ def check_harness(ctx: Context) -> Skip | None:
     try:
         refusals = ctx.launcher.check(recall_fence.request(ctx.launcher, ctx.spec),
                                       env=ctx.env)
-    except Exception as exc:  # noqa: BLE001 - a check that fails finds no harness
+    except (ctx.launcher.Refusal, StoreError) as exc:
         refusals = [exc]
+    except Exception as exc:  # noqa: BLE001 - a check that breaks lets no recall start
+        return Skip(REFUSED, f"the launcher's check failed: {type(exc).__name__}: {exc}")
     if refusals:
-        return Skip(NO_HARNESS, f"the launcher can't start claude here: {refusals[0]} "
-                                "(a connector run as a service may have a shorter PATH)")
+        return _refused(recall_fence.refusal_verdict(refusals[0]))
     return None
 
 
@@ -415,8 +440,8 @@ def check_fence(ctx: Context) -> Skip | None:
 
     found = recall_fence.verdict(ctx.launcher, ctx.spec, env=ctx.env)
     ctx.verdict = found
-    if found.reason == recall_fence.NO_HARNESS:
-        return Skip(NO_HARNESS, found.detail)
+    if found.reason in (recall_fence.NO_HARNESS, recall_fence.REFUSED):
+        return _refused(found)
     if found.reason is not None:
         return Skip(FENCE, f"the fence failed on this machine: {found.detail}")
     return None
@@ -550,8 +575,8 @@ def chat_brief(recall, *, search=None, places=None) -> tuple[str, list[str]]:
 
 def prepare(recall, *, launcher=None, search=None, places=None, ensure=None):
     """The child's chat branch before its stream: the agent's session id minted and
-    written first, the fence ensured, and the brief built. Returns (the brief, the
-    route), or None when the recall was ended `lost`."""
+    written first, the brief built, and the fence ensured for the launch the first round
+    runs. Returns (the brief, the route), or None when the recall was ended `lost`."""
     from . import links, recall_child, recall_fence, recall_route
     from .recall_stream import GONE
 
@@ -565,20 +590,23 @@ def prepare(recall, *, launcher=None, search=None, places=None, ensure=None):
             return None
         launcher = link.api
     chat_dir().mkdir(parents=True, exist_ok=True)
+    text_brief, notes_dirs = chat_brief(recall, search=search, places=places)
     settings = recall.settings
     spec = recall_fence.Spec(
-        brief="", cwd=str(chat_dir()), name=f"recall-{recall.recall_id}", request_id="",
-        session_id=session, max_tools=int(settings["max_tools"]),
+        brief=text_brief, cwd=str(chat_dir()), name=f"recall-{recall.recall_id}",
+        request_id=str(uuid.uuid4()), session_id=session,
+        max_tools=int(settings["max_tools"]), add_dirs=tuple(notes_dirs),
         model=str(settings.get("chat.model") or ""), recall_id=recall.recall_id)
     verdict = (ensure or recall_fence.ensure)(launcher, spec)
     if verdict.reason == recall_fence.FENCE:
         recall_child.lose(recall, recalls.FENCE, verdict.detail)
         return None
+    if verdict.reason == recall_fence.REFUSED:
+        recall_child.lose(recall, DENIED, f"the launcher: {verdict.detail}")
+        return None
     if not verdict.ok:
         recall_child.lose(recall, GONE, verdict.detail)
         return None
-    text_brief, notes_dirs = chat_brief(recall, search=search, places=places)
-    spec = replace(spec, add_dirs=tuple(notes_dirs))
     route = recall_route.Headless(recall.session_id, recall.recall_id, spec=spec,
                                   launcher=launcher,
                                   on_request=lambda rid: recall.put(request=rid))
@@ -587,7 +615,8 @@ def prepare(recall, *, launcher=None, search=None, places=None, ensure=None):
 
 __all__ = ["CONVERSATION", "KEY_PREFIX", "CHATS_RUNNING_MAX", "PIECES_MAX", "HANDED_LINES_S",
            "HANDED_LINES_MAX", "STATE_KEEP_S", "START_LOCK", "FOR_WORDS_CHARS", "NO_WORDS",
-           "NO_KEYWORD", "OFF", "BUSY", "NO_LAUNCHER", "NO_HARNESS", "FENCE",
+           "NO_KEYWORD", "OFF", "BUSY", "NO_LAUNCHER", "NO_HARNESS", "REFUSED", "FENCE",
+           "SERVICE_PATH", "DENIED",
            "CHAT_PREAMBLE", "WEB_WORDS", "NO_CONTEXT", "key", "conversation_of",
            "chat_dir", "read_state", "write_state", "handed_lines", "Piece", "Collected",
            "release", "collect", "settle", "Skip", "Context", "check_spec", "check_enabled",

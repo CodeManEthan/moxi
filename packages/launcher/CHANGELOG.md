@@ -8,6 +8,9 @@
   one of the directors (the launch's own or the box's policy directors) of the live
   launch holding the cold session, and with nothing otherwise. It reads the launch log
   once per cold recipient and writes nothing.
+- Every launcher module imports on its own, in any order: `parks` reaches `fork` only when
+  it reads a launch, which ends the import cycle that made `import moxi_launcher.keepwarm`
+  or `moxi_launcher.relaunch` fail when imported first.
 - Opening the launch log only to read it (`store.connect(create=False)`) no longer
   creates its tables in an empty file: a file that holds no launch log yet raises
   `StoreError`, as a missing one does, and is left as it was. Every reader treats that as

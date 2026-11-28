@@ -265,7 +265,7 @@ export interface RecordValue {
   } | null;
   runs?: {
     step: string | null; exit_code: number | null; duration_s: number | null; commit: string | null;
-    at: string | null; output: string | null;
+    at: string | null; output: string | null; lane?: string | null;
   }[];
   drift?: { why: string | null; owed: boolean; moved: number | null; meeting: string[]; shared: string[] } | null;
   gates?: {

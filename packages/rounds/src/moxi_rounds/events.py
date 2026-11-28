@@ -150,11 +150,13 @@ TYPES = _types(
     # (`pushed`). A queue member's run of `check.local` at its candidate, which the
     # lander writes, names the candidate commit and the batch. Each run names the place
     # of the machine's check lock it held (`check_lock`), and one started beside others
-    # the free memory read then and the need it met (`available_mib`, `need_mib`).
+    # the free memory read then and the need it met (`available_mib`, `need_mib`). A run
+    # on a lane names the lane (`lane`), the name its machine gave (`lane_host`) and the
+    # place of that machine's check lock it held (`lane_check_lock`) in their place.
     EventType("check.ran",
               ("stage", "step", "commit", "merge_base", "argv", "exit_code", "duration_s",
                "output", "pushed", "candidate", "batch", "check_lock", "available_mib",
-               "need_mib")),
+               "need_mib", "lane", "lane_host", "lane_check_lock")),
     # CI was read for a build: the commit, its merge-base with the target, the argvs
     # that ran, each workflow by path with the id it read as, its reading and its
     # run's url, and for one read by its jobs each job's reading and url (with the

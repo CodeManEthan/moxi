@@ -16,6 +16,20 @@ its checklist, its watched paths and its verifier's brief lines.
 The `sweep`, `check_lock` and `watched_paths_guard` keys are this machine's and belong to
 no project, so they are read as they stand (`settings["sweep.armed"]`).
 
+**Lanes.** `[lanes.<name>]`, also this machine's, names another machine a check can be
+sent to: its ssh destination (`host`), the command line that runs Moxi there (`moxi`),
+the words that run the ssh client here (`ssh`, used as given, never split), how long
+reaching it may take (`connect_timeout_s`) and the lock file that machine's own
+scheduled work holds (`shared_lock`), which the far side takes for each run; `lane`
+gives one with its defaults filled in. A project sends checks only to the lanes its own
+`[projects.<key>.lanes.<name>]` tables name, in the order it names them
+(`project_lanes`): each may give the words the check runs there (`command`, `scoped`),
+its time limit and `memory_mib` there, and the `preflight` lines run there before each
+run. `check_text` prints, after its check, a note for each lane table that gives its own
+words, with the project's words beside them (`lane_notes`): the two copies can drift. It
+prints them for `moxi config` (check, set and unset), not for the doctor, which runs the
+same check for its settings row and gives rows, not notes (`_under_doctor`).
+
 A project's table is `[projects.<key>]`, and its name finds the project the way the
 projects list finds one: ignoring case. So `project_table` gives the same table for
 `proj-a` however the table's name or the key is written, and two tables whose names
@@ -59,9 +73,29 @@ def load():
 def check_text(text: str) -> None:
     """The module's whole loader over config text `text`. Raises
     `moxi.config.ConfigError` when it refuses."""
+    import sys
+
     from moxi import config
 
-    check(config.check_text(MODULE, schema(), text))
+    checked = check(config.check_text(MODULE, schema(), text))
+    if _under_doctor():
+        return
+    for line in lane_notes(checked):
+        print(line, file=sys.stderr)
+
+
+def _under_doctor() -> bool:
+    """Whether this call came from the core's doctor (`moxi.doctor`), which runs a
+    module's `CONFIG_CHECK` for its settings row."""
+    import inspect
+
+    frame = inspect.currentframe()
+    while frame is not None:
+        name = str(frame.f_globals.get("__name__", ""))
+        if name == "moxi.doctor" or name.startswith("moxi.doctor."):
+            return True
+        frame = frame.f_back
+    return False
 
 
 def check(settings):
@@ -77,6 +111,7 @@ def check(settings):
     _check_at_once(settings.file, "check_lock.at_once", settings["check_lock.at_once"])
     _check_need(settings.file, "check_lock.need_mib", settings["check_lock.need_mib"])
     _check_director(settings.file, "defaults.director", settings["defaults.director"])
+    _check_lanes(settings.file, settings["lanes"])
     named: dict[str, str] = {}
     for name, table in settings["projects"].items():
         first = named.setdefault(name.casefold(), name)
@@ -87,6 +122,9 @@ def check(settings):
                 "matched ignoring case, so the two tables are one project's",
                 f"keep the project's settings in one table, [projects.{first}]")
         _check_project(settings.file, name, table)
+        if isinstance(table, dict) and LANES_KEY in table:
+            _check_project_lanes(settings.file, f"projects.{name}.{LANES_KEY}",
+                                 table[LANES_KEY], settings["lanes"])
     _check_rounds_dirs_apart(settings)
     return settings
 
@@ -103,6 +141,13 @@ BUILD_KEYS = ("into", "land", "check", "ci", "finish", "check_on", "shared_paths
 #: The keys only a project's own table holds, with no `defaults` form: what the project's
 #: code is checked against belongs to that project.
 PROJECT_KEYS = ("checklist", "watched_paths", "verifier_brief")
+#: A project's own table of the lanes it sends checks to, `[projects.<key>.lanes.<name>]`.
+LANES_KEY = "lanes"
+#: The keys of a lane, `[lanes.<name>]`, and of a project's use of one.
+LANE_KEYS = ("host", "moxi", "ssh", "connect_timeout_s", "shared_lock")
+PROJECT_LANE_KEYS = ("command", "scoped", "timeout_s", "memory_mib", "preflight")
+#: What a lane reads where its table leaves a key out.
+LANE_DEFAULTS = {"moxi": "moxi", "ssh": ("ssh",), "connect_timeout_s": 10}
 #: The switch of the watched-paths guard, a key of this machine's.
 GUARD_SWITCH = "watched_paths_guard.enabled"
 
@@ -202,6 +247,50 @@ def fill_memory(words, table) -> list[str]:
     return [str(word).replace(MEMORY_FIELD, str(found)) for word in words]
 
 
+def lane(settings, name: str) -> dict | None:
+    """The lane `name` as `[lanes.<name>]` gives it, each key left out at its default
+    (`LANE_DEFAULTS`; `shared_lock` None); None when the settings name no such lane."""
+    found = settings["lanes"].get(name)
+    if not isinstance(found, Mapping):
+        return None
+    filled = {"shared_lock": None, **LANE_DEFAULTS, **found}
+    filled["ssh"] = [str(word) for word in filled["ssh"]]
+    return filled
+
+
+def project_lanes(settings, repo: str) -> dict[str, dict]:
+    """The lanes the project `repo` sends checks to, by name in the order its
+    `[projects.<key>.lanes.<name>]` tables name them, each that table (a copy)."""
+    import copy
+
+    found = project_table(settings, repo).get(LANES_KEY) or {}
+    return {name: copy.deepcopy(dict(table)) for name, table in found.items()
+            if isinstance(table, Mapping)}
+
+
+def lane_notes(settings) -> list[str]:
+    """For each project lane table that gives its own `command` or `scoped`, the
+    project's words and the lane's under each other, with the line saying the lane's
+    replace them there: two copies of a check's words, shown where they can drift."""
+    lines: list[str] = []
+    for project, table in settings["projects"].items():
+        if not isinstance(table, Mapping):
+            continue
+        own_check = table.get("check") if isinstance(table.get("check"), Mapping) else {}
+        for name, used in (table.get(LANES_KEY) or {}).items():
+            given = [key for key in ("command", "scoped")
+                     if isinstance(used, Mapping) and key in used]
+            if not given:
+                continue
+            lines.append(f"note: [projects.{project}.{LANES_KEY}.{name}] gives its own "
+                         f"words: on lane {name} these replace the project's")
+            for key in given:
+                width = len(key) + 9
+                lines.append(f"  {'project ' + key:<{width}} {own_check.get(key, '(none)')}")
+                lines.append(f"  {'lane ' + key:<{width}} {used[key]}")
+    return lines
+
+
 def finish_actions(actions) -> list[dict]:
     """The finish `actions` of a config, each a copy with its `id`: a merge's or a push's
     is its kind when it names none."""
@@ -217,11 +306,13 @@ def _check_project(file, name, table) -> None:
                           f"write the project's settings as a [{key}] table")
     for other, value in table.items():
         where = f"{key}.{other}"
+        if other == LANES_KEY:
+            continue
         if other not in ROUND_KEYS and other not in BUILD_KEYS and other not in PROJECT_KEYS:
             raise ConfigError(
                 file, where, "is not a key of a project table",
                 "remove it; a project table takes "
-                + ", ".join((*ROUND_KEYS, *BUILD_KEYS, *PROJECT_KEYS)))
+                + ", ".join((*ROUND_KEYS, *BUILD_KEYS, *PROJECT_KEYS, LANES_KEY)))
         if other in _PROJECT_ONLY or other in PROJECT_KEYS:
             _PROJECT_CHECKS[other](file, where, value)
         elif other != "dir":
@@ -322,6 +413,73 @@ def _check_memory_mib(file, where, value) -> None:
                           "give the most memory one run of the command holds, in MiB "
                           "(the MemoryMax its cap enforces), or leave it out to run the "
                           "command only alone")
+
+
+def _check_lanes(file, value) -> None:
+    """Each `[lanes.<name>]`: a table of `LANE_KEYS` with a `host`; `moxi` a command
+    line; `ssh` a non-empty list of non-empty strings; `connect_timeout_s` a number of
+    seconds above 0; `shared_lock` a path."""
+    for name, table in value.items():
+        where = f"lanes.{name}"
+        _check_table_keys(file, where, table, LANE_KEYS, "lane")
+        if not isinstance(table.get("host"), str) or not table["host"].strip():
+            raise ConfigError(file, f"{where}.host",
+                              "is missing" if "host" not in table else "is not a host",
+                              "give the ssh destination as the ssh client takes it: a "
+                              "Host of your ssh config, or user@host")
+        if "moxi" in table and (not isinstance(table["moxi"], str)
+                                or not table["moxi"].strip()):
+            raise ConfigError(file, f"{where}.moxi", "is not a command line",
+                              "give the command line that runs Moxi on that machine, as "
+                              'its login shell reads it, or leave it out for "moxi"')
+        ssh = table.get("ssh", ["ssh"])
+        if (not isinstance(ssh, list) or not ssh
+                or not all(isinstance(word, str) and word for word in ssh)):
+            raise ConfigError(file, f"{where}.ssh",
+                              "is not a non-empty list of non-empty strings",
+                              'give the words that run the ssh client here, such as '
+                              '["ssh"], or leave it out')
+        timeout_s = table.get("connect_timeout_s", 10)
+        if (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float))
+                or timeout_s <= 0):
+            raise ConfigError(file, f"{where}.connect_timeout_s",
+                              f"is {timeout_s!r}, not a number of seconds above 0",
+                              "give how long reaching the host may take, in seconds, or "
+                              "leave it out for 10")
+        if "shared_lock" in table and (not isinstance(table["shared_lock"], str)
+                                       or not table["shared_lock"].strip()):
+            raise ConfigError(file, f"{where}.shared_lock", "is not a path",
+                              "give the path, on that machine, of the lock file its "
+                              "scheduled work holds, or leave it out")
+
+
+def _check_project_lanes(file, where, value, lanes) -> None:
+    """A project's `lanes`: a table of tables, each naming a lane `[lanes]` has, with
+    `PROJECT_LANE_KEYS`."""
+    if not isinstance(value, dict):
+        raise ConfigError(file, where, f"is {flows.kind_of(value)}, not a table",
+                          f"write each lane the project uses as a [{where}.<name>] table")
+    for name, table in value.items():
+        at = f"{where}.{name}"
+        _check_table_keys(file, at, table, PROJECT_LANE_KEYS, "project's lane")
+        if name not in lanes:
+            known = ", ".join(lanes) or "none"
+            raise ConfigError(file, at, f"names the lane {name}, which [lanes] does not "
+                              f"have (its lanes: {known})",
+                              f"add [lanes.{name}] with its host, or remove [{at}]")
+        for key in ("command", "scoped"):
+            if key in table:
+                _check_command_line(file, f"{at}.{key}", table[key])
+        flows.check_timeout(file, f"{at}.timeout_s", table.get("timeout_s"))
+        if "memory_mib" in table:
+            _check_memory_mib(file, f"{at}.memory_mib", table["memory_mib"])
+        preflight = table.get("preflight", [])
+        if (not isinstance(preflight, list)
+                or not all(isinstance(line, str) and line.strip() for line in preflight)):
+            raise ConfigError(file, f"{at}.preflight",
+                              "is not a list of non-empty strings",
+                              'give each command line to run there first as a string, '
+                              'such as ["git --version"]')
 
 
 def _check_disposable(file, where, value) -> None:
@@ -905,4 +1063,6 @@ _KIND_WORDS = {"string": "a string", "bool": "a boolean", "int": "an int"}
 __all__ = ["MODULE", "SCHEMA_RESOURCE", "schema", "load", "check_text", "check",
            "ROUND_KEYS", "BUILD_KEYS", "PROJECT_KEYS", "GUARD_SWITCH", "LAND_FINISH", "LAND_QUEUE", "BASE_FIELD", "MEMORY_FIELD", "MEMORY_MIB_MIN", "MERGE", "PUSH", "COMMAND", "DEFAULT_FINISH",
            "round_setting", "build_setting", "project_setting", "project_table",
-           "finish_actions", "has_notes_dir", "memory_mib", "fill_memory"]
+           "finish_actions", "has_notes_dir", "memory_mib", "fill_memory",
+           "LANES_KEY", "LANE_KEYS", "PROJECT_LANE_KEYS", "LANE_DEFAULTS", "lane",
+           "project_lanes", "lane_notes"]

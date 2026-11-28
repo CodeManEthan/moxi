@@ -50,7 +50,7 @@ from moxi import exit as codes
 from moxi import files
 from moxi.paths import Layout
 
-from . import catalog, first, fork, slots, store
+from . import catalog, first, slots, store
 
 log = logging.getLogger("moxi.launcher.parks")
 
@@ -345,6 +345,8 @@ def _session_of(conn: sqlite3.Connection, slot: Any,
         return "settle", f"launch {row.request_id} was not a slot launch", row, None, None
     if row.state == "failed":
         return "settle", f"launch {row.request_id} failed", row, None, None
+    from . import fork  # at use: fork reaches relaunch, which reaches parks through job
+
     if fork.recall_fork(row):
         return ("settle", f"launch {row.request_id} was a recall's fork, which nothing "
                 "brings back", row, None, None)
