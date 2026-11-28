@@ -18728,7 +18728,7 @@ rounds	packages/rounds/src/moxi_rounds/cli.py	help="answer the doctor's probe: t
 rounds	packages/rounds/src/moxi_rounds/cli.py	"serve": _serve, "show": _show,	keep	show	show
 rounds	packages/rounds/src/moxi_rounds/frames.py	REFUSED = "refused"	keep	refused	refused
 rounds	packages/rounds/src/moxi_rounds/frames.py	__all__ = ["VERSION", "HEADER_MAX_BYTES", "CHUNK_BYTES", "REQUEST", "BUNDLE", "FILE",	keep	REQUEST	REQUEST
-rounds	packages/rounds/src/moxi_rounds/serving.py	first. `closed` says whether stdin has ended."""	keep	closed	closed
+rounds	packages/rounds/src/moxi_rounds/serving.py	given, unless `disarm` ran first. `closed` says whether stdin has ended."""	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/serving.py	self.closed = threading.Event()	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/serving.py	self.closed.set()	keep	closed	closed
 rounds	packages/rounds/src/moxi_rounds/serving.py	self.closed.set()	keep	set	set
@@ -18782,6 +18782,10 @@ rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, {"version": 
 rounds	packages/rounds/tests/test_serve.py	one.send(frames.PROBE, payload)	keep	fail	fail
 rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, {"version": 0})	keep	fail	fail
 rounds	packages/rounds/tests/test_serve.py	assert one.proc.wait(timeout=PROC_WAIT_S) == 1	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	one.send(frames.REQUEST, request(work, [PY, "-c", long_run], timeout_s=300))	keep	fail	fail
+rounds	packages/rounds/tests/test_serve.py	assert one.proc.wait(timeout=PROC_WAIT_S) == serving.INTERRUPTED, one.said()	keep	timeout	timeout
+rounds	packages/rounds/tests/test_serve.py	fields = {**check_line.me(), "round": "proj-a/lane", "stage": "B1",	keep	round	round
+rounds	packages/rounds/tests/test_serve.py	child.wait(timeout=PROC_WAIT_S)	keep	timeout	timeout
 rounds	packages/rounds/src/moxi_rounds/sending.py	return {"version": frames.VERSION, "round": name, "stage": stage, "step": step,	keep	round	round
 rounds	packages/rounds/src/moxi_rounds/sending.py	found = self.frames.get(timeout=wait_s)	keep	timeout	timeout
 rounds	packages/rounds/src/moxi_rounds/sending.py	self.writer.send(kind, payload)	keep	fail	fail
@@ -18797,6 +18801,7 @@ rounds	packages/rounds/tests/test_lane_send.py	if not self.record.exists():	keep
 rounds	packages/rounds/tests/test_lane_send.py	return [json.loads(line) for line in self.record.read_text().splitlines()]	keep	record	record
 rounds	packages/rounds/tests/test_lane_send.py	lane.lock.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok
 rounds	packages/rounds/tests/test_lane_send.py	if held.stdin and not held.stdin.closed:	keep	closed	closed
+rounds	packages/rounds/tests/test_lane_send.py	watcher.join(timeout=PROC_WAIT_S)	keep	timeout	timeout
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="run the check on this machine, waiting in its line, and "	keep	help	help
 rounds	packages/rounds/src/moxi_rounds/cli.py	where.add_argument("--lane", metavar="NAME",	keep	NAME	NAME
 rounds	packages/rounds/src/moxi_rounds/cli.py	help="run the check on the lane NAME, one the project's "	keep	help	help
