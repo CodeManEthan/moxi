@@ -117,12 +117,14 @@ its current session, and its held mail ends with its binding). The `sent` line c
 first, one `held:` line per held recipient with when its cache went cold, and the last
 line says when each held recipient reads it.
 Recipients that pass get the message now. An agent comms has no clock for, a model with
-no lifetime row included, reads `no-cache` and gets its mail live. A read comms cannot
-make refuses the whole post -- nothing posted, exit 75 (`TEMPFAIL`, outcome `cache-unread`) -- and the refusal
-opens with "Nothing was sent:" and each refused recipient's reason, and closes with
-"Nothing was sent.": a bound recipient whose read is `unknown` (no session id yet, a
-transcript comms cannot read), a failed `session` query, and a name that unbound while
-comms checked it. There is no size exception and no sender exemption: the operator's
+no lifetime row included, reads `no-cache` and gets its mail at once, and the send
+reports it `unchecked` with a line saying why, since it may wake a cold session. A read
+comms cannot make refuses the whole post -- nothing posted, exit 75 (`TEMPFAIL`, outcome
+`cache-unread`) -- and the refusal opens with "Nothing was sent:" and each refused
+recipient's reason, and closes with "Nothing was sent.": a bound recipient whose read is
+`unknown` (no session id yet, a transcript comms cannot read), a failed `session` query,
+a name that unbound while comms checked it, and, with `[cache] required = true`, a read
+that finds the cache module missing. There is no size exception and no sender exemption: the operator's
 lane and every reserved name are held like any agent. There is no
 override. On every exit path the outcome line is last and every NOTE comes before it,
 so the last line tells the truth. The verb's check decides what it says; the daemon

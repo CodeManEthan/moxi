@@ -220,6 +220,8 @@ export function deliveryWords(recipient: Recipient, when: (at: number) => string
     case "live":
       return working ? `Delivered. ${name} is working; it reads this when its turn ends.`
         : `Delivered. ${name} reads it at its next turn boundary.`;
+    case "unchecked":
+      return `Delivered, unchecked: comms can't read ${name}'s cache, so this may wake it from a cold cache.`;
     case "held-cold": {
       const at = recipient.cold_at === null ? "" : ` at ${when(recipient.cold_at)}`;
       return `Held until ${name}'s next turn. Its cache went cold${at}, and nothing wakes it for mail. `

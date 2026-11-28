@@ -158,8 +158,8 @@ def test_the_outcomes_deliveries_and_exit_codes():
                               "unknown": 1}
     assert api.EXIT_CODES["cache-unread"] == moxi_exit.TEMPFAIL
     assert api.EXIT_CODES["unknown"] == moxi_exit.ERROR, "never try-again: it may be sent"
-    assert api.DELIVERIES == ("live", "held-cold", "held-flag", "waiting", "unbound",
-                              "operator")
+    assert api.DELIVERIES == ("live", "unchecked", "held-cold", "held-flag", "waiting",
+                              "unbound", "operator")
     assert [f.name for f in api.SendResult.__dataclass_fields__.values()] == [
         "outcome", "message_id", "recipients", "refusal", "notes", "said", "code"]
     assert list(api.Recipient.__dataclass_fields__) == ["qualified", "delivery",
@@ -383,6 +383,28 @@ def test_a_held_send_says_held_flag_per_recipient(rig):
     (r,) = got.recipients
     assert (r.delivery, r.cold_at) == ("held-flag", None)
     assert r.reason == cli.HELD_NOTE.format(name="reviewer")
+
+
+def test_a_held_send_to_a_cold_recipient_says_it_is_cold_too(rig, monkeypatch):
+    """A flagged send's cold recipient reads `held-flag`, and its reason has the cold
+    line after the `--held` NOTE."""
+    from moxi_comms import cache
+    real = cache.clock_state
+    monkeypatch.setattr(cache, "clock_state", lambda adapter, session_id, **kw: (
+        cache.Clock(cache.COLD, age_s=2 * 3600.0, ttl_s=3600.0) if adapter == "claude-shim"
+        else real(adapter, session_id, **kw)))
+    rig.shim(name="planner")
+    rig.shim(name="reviewer")
+    with rig.session_holding(_sender(rig, "planner")) as path:
+        got = api.send(api.Sender.socket(path), ["reviewer"], "later", posture="none",
+                       held=True)
+    assert got.outcome == "sent", got
+    (r,) = got.recipients
+    assert r.delivery == "held-flag"
+    note, cold = r.reason.split("\n")
+    assert note == cli.HELD_NOTE.format(name="reviewer")
+    assert cold.startswith("held: reviewer's cache went cold 1h ago"), cold
+    assert cold in got.lines()
 
 
 def test_the_never_bound_refusal_and_new_name(rig):

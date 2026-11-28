@@ -341,6 +341,40 @@ def _words(error: BaseException) -> str:
     return str(error) or type(error).__name__
 
 
+#: The line comms adds under a cold recipient's hold line when the sender directs its
+#: launch (`hold_line`).
+RELAUNCH_LINE = ("To reach it now, relaunch it fresh from its handoff: moxi launcher "
+                 "relaunch {name}.")
+
+
+def hold_line(by: str, recipient: str, session: str | None, *,
+              env: Mapping[str, str] | None = None) -> str | None:
+    """comms' `moxi.comms.hold_lines` entry: `RELAUNCH_LINE` for the cold `recipient`
+    when `by` (the sender's qualified name) is a director of the live launch that holds
+    `session`, as a director's relaunch checks it (`relaunch.is_director` over
+    `directors` and `policy_directors`). None for no session id, no launch log, no launch
+    holding the id, a launch whose endpoint never claimed it or has ended, comms not
+    loadable at the launcher's interface, or a sender that is not a director. Opens the
+    launch log for this read alone; an error from it raises, and comms leaves the line
+    out."""
+    if not by or not session:
+        return None
+    with store.reading(env=env) as conn:
+        row = None if conn is None else store.resolve(conn, session)
+    if row is None or not row.endpoint or store.endpoint_gone(row.endpoint):
+        return None
+    # Imported here: relaunch imports this module.
+    from . import presets, relaunch
+
+    comms = presets.comms_api()
+    if comms is None:
+        return None
+    if not relaunch.is_director(comms, by, directors(row), row.scope or None,
+                                policy=policy_directors(row, comms)):
+        return None
+    return RELAUNCH_LINE.format(name=recipient)
+
+
 def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
     """The settings a notice reads: the fallback and the reserved-name retry bound.
     `current` is the launcher's `moxi.config.Settings`, which reads by key and has no
@@ -351,6 +385,7 @@ def settings_of(current: Mapping[str, Any]) -> dict[str, Any]:
 
 __all__ = ["LEFT_IN_PLACE", "MODULE", "NAME_RESERVED", "NOTE", "NOTES", "NOTE_NOT_TAKEN",
            "NOTE_OUTCOMES", "NOTICE_OUTCOMES", "OFFLINE_RETRY_S", "RELAUNCHED",
-           "RESERVED_RETRY_S", "SENDER", "directors", "is_flagged", "note",
+           "RELAUNCH_LINE", "RESERVED_RETRY_S", "SENDER", "directors", "hold_line",
+           "is_flagged", "note",
            "note_text", "notify", "owes_note", "policy_directors", "recipients",
            "settings_of", "text"]

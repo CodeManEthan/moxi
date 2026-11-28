@@ -227,12 +227,24 @@ price. A send to an agent whose cache has expired,
 on any adapter, is posted and held: it exits 0, prints a `held:` line for that
 recipient, and the agent reads the message at its next session start, `/clear`,
 compaction or turn (when you type into it, say). Nothing wakes it for that message
-alone. A send to an agent whose cache comms cannot read is refused with exit 75, and the
-output says "Nothing was sent." first and last; send it again in a moment. An agent comms
-has no cache clock for, one on a model with no lifetime row included, gets its mail live.
+alone. A `--held` send to a cold agent prints its `held:` line too. A send to an agent
+whose cache comms cannot read is refused with exit 75, and the output says "Nothing was
+sent." first and last; send it again in a moment. An agent comms has no cache clock for
+(the cache module missing, an agent kind or a harness with no clock, a model with no
+lifetime row) gets its mail at once, and the send reports it `unchecked`, with a line
+saying why, since it may wake a cold session. With `[cache] required = true` a send whose
+read finds the cache module missing is refused instead.
 This holds for every sender, the operator included, and there is no
 override. The daemon checks again at delivery, so a post that skips `moxi comms send` is held
 too.
+
+A cold agent's `held:` line can carry one more line from another module: comms asks each
+entry point in `moxi.comms.hold_lines` (`hold_line(by, recipient, session, *, env)`, the
+sender's name, the cold name and its session id) and prints any text it answers under the
+line; one that fails or answers nothing adds nothing. With launcher installed, a sender
+that directs the cold agent's launch reads "To reach it now, relaunch it fresh from its
+handoff: moxi launcher relaunch <name>." The `send` and `reply` tools' results give each
+recipient this same text as its `reason`, null where the send says nothing for it.
 
 ## Other agents (experimental)
 

@@ -415,7 +415,6 @@ comms	packages/comms/src/moxi_comms/client.py	"""Fire-and-forget notification (`
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient._call	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.attributed_message	name	e	exc
 comms	packages/comms/src/moxi_comms/client.py	DaemonClient.connect	name	e	exc
-comms	packages/comms/src/moxi_comms/client.py	ORDERED = ("activity", "turn_ended", "ready", "look", "injected")	keep	injected	injected
 comms	packages/comms/src/moxi_comms/client.py	and `delivered` (names), and `expired`. A request that left this process and got	keep	delivered	delivered
 comms	packages/comms/src/moxi_comms/client.py	and `delivered` (names), and `expired`. A request that left this process and got	keep	expired	expired
 comms	packages/comms/src/moxi_comms/client.py	if self._client is client:     # not a connection made since in its place	keep	_client	_client
@@ -1143,7 +1142,6 @@ comms	packages/comms/tests/test_upgrade_0_2.py	-	name	test_a_stopped_move_whose_
 comms	packages/comms/tests/test_upgrade_0_2.py	-	name	test_older_directory_shapes_are_carried_as_0_2_read_them	test_older_dir_shapes_are_carried_as_0_2_read_them
 comms	packages/comms/tests/test_upgrade_0_2.py	lay_tokens	name	out	fh
 comms	packages/comms/tests/test_upgrade_0_2.py	run_setup	name	e	exc
-comms	packages/comms/tests/test_wire.py	@pytest.mark.parametrize("method", ["turn_ended", "injected", "ready", "look", "activity",	keep	injected	injected
 comms	packages/comms/tests/test_wire.py	Line.call	name	id	request_id
 comms	packages/comms/tests/test_wire.py	arrived = line.delivered()	keep	delivered	delivered
 comms	packages/comms/tests/test_wire.py	assert wait_until(lambda: mid in rig.daemon.bindings[PLANNER].delivered)	keep	delivered	delivered
@@ -7551,3 +7549,12 @@ rounds	packages/rounds/src/moxi_rounds/doctor.py	return (f"pid {fields.get('pid'
 rounds	packages/rounds/tests/test_lane_doctor.py	check_line.write_holder(far.lock, {**check_line.me(), "round": "proj-a/x",	keep	round	round
 rounds	packages/rounds/tests/test_lane_doctor.py	**check_line.me(), "round": "proj-a/x", "stage": "B1", "step": "check",	keep	round	round
 rounds	packages/rounds/tests/test_lane_doctor.py	**check_line.me(), "round": "proj-a/y", "stage": "B2", "step": "check",	keep	round	round
+comms	packages/comms/src/moxi_comms/client.py	ORDERED = ("activity", "turn_ended", "ready", "look", "relook", "injected")	keep	injected	injected
+comms	packages/comms/src/moxi_comms/sending.py	got = entry.load()(by, state.target, state.session_id, env=ctx.env)	keep	env	env
+comms	packages/comms/tests/test_claude_adapter.py	ep.settle(did, {"kind": "lost", "reason": "the endpoint is stopping"})	keep	handled	handled
+comms	packages/comms/tests/test_claude_adapter.py	ep.settle(did, {"kind": "lost", "reason": "the endpoint is stopping"})	keep	ok	ok
+comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(m == "steer" for (m, *_) in ep.calls))	keep	any	any
+comms	packages/comms/tests/test_claude_adapter.py	assert wait_until(lambda: any(h.steer and h.turn_id == turn_id	keep	any	any
+comms	packages/comms/tests/test_queue.py	assert first not in rig.daemon.bindings[REVIEWER_Q].delivered	keep	delivered	delivered
+comms	packages/comms/tests/test_wire.py	@pytest.mark.parametrize("method", ["turn_ended", "injected", "ready", "look", "relook",	keep	injected	injected
+launcher	packages/launcher/tests/test_hold_line.py	path.parent.mkdir(parents=True, exist_ok=True)	keep	exist_ok	exist_ok

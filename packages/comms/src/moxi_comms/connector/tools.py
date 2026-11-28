@@ -138,7 +138,8 @@ _MESSAGE = _object({"id": _STR, "from": _AUTHOR, "at": _NULL_STR,
                     "reply_to": _NULL_STR, "text": _STR,
                     "already_shown": {"type": "boolean"}})
 _RECIPIENTS = {"type": "array", "items": _object({
-    "name": _STR, "delivery": {"type": "string", "enum": list(sending.DELIVERIES)}})}
+    "name": _STR, "delivery": {"type": "string", "enum": list(sending.DELIVERIES)},
+    "reason": _NULL_STR})}
 
 #: Each tool's output schema: the structured value of a result that isn't an error.
 OUTPUTS: dict[str, dict] = {
@@ -173,12 +174,18 @@ TITLES = {"agents": "Who can be messaged", "send": "Send a message",
 #: How each delivery is said for one recipient.
 SPOKEN = {
     sending.DELIVERY_LIVE: "delivered now",
+    sending.DELIVERY_UNCHECKED: "delivered now, but comms can't tell whether its cache is "
+                                "warm",
     sending.DELIVERY_HELD_COLD: "held for its next turn",
     sending.DELIVERY_HELD_FLAG: "held for its next turn",
     sending.DELIVERY_WAITING: "waiting for its session to take mail",
     sending.DELIVERY_UNBOUND: "waiting, since no session holds that name now",
     sending.DELIVERY_OPERATOR: "delivered",
 }
+
+
+#: The deliveries `send_and_wait` waits on: the message reached the session now.
+DELIVERED = (sending.DELIVERY_LIVE, sending.DELIVERY_UNCHECKED)
 
 
 class Tools:
@@ -289,8 +296,8 @@ class Tools:
     @staticmethod
     def _sent_fields(result) -> dict:
         return {"outcome": result.outcome, "message_id": result.message_id,
-                "recipients": [{"name": r.qualified, "delivery": r.delivery}
-                               for r in result.recipients],
+                "recipients": [{"name": r.qualified, "delivery": r.delivery,
+                                "reason": r.reason} for r in result.recipients],
                 "notes": list(result.notes)}
 
     @staticmethod
@@ -451,7 +458,7 @@ class Tools:
         fields = self._sent_fields(result)
         del fields["outcome"]
         recipient = result.recipients[0] if result.recipients else None
-        if recipient is None or recipient.delivery != sending.DELIVERY_LIVE:
+        if recipient is None or recipient.delivery not in DELIVERED:
             return self.result(_with_notes(f"{self._sent_text(result)} {LATER}", result),
                                {**fields, "outcome": "not-delivered", "reply": None,
                                 "other_new": 0})

@@ -332,6 +332,7 @@ already handed, oldest first, with `held: true` on the payload:
 | `turn_ended` with `answered: true` | no at the frame; its settle window reads | every row at once; then the report settles |
 | any other `turn_ended` | yes, and again for a settle window if it does not pass | every row at the first read that passes; then the report settles |
 | `look` | yes | every row if it passes; settles nothing |
+| `relook` | yes | rows of unflagged messages if it passes; flagged rows wait; settles nothing |
 | `bind` | yes | rows of unflagged messages if it passes; flagged rows wait |
 | a live message to the name, an `activity` | - | nothing |
 
@@ -373,18 +374,27 @@ so a read made in the same lag never leaves its row behind the release. A `[held
 takes no read and always waits for the next turn end.
 
 A row handed to a binding is handed to it again only after its adapter reports it
-unhandled or the binding ends, at the next release point. When a binding ends, every row
-it was handed and had not had acked waits again. An `agent-N` name has no rows while
+unhandled or the binding ends, at the next release point. A send that passes its read
+is pushed whatever rows wait for the name, rows a turn left unhandled included, so it can
+reach the session before an older message; each carries its id. When a binding ends,
+every row it was handed and had not had acked waits again. An `agent-N` name has no rows while
 unbound and loses them when its binding ends.
 
 `moxi comms send` asks the daemon for its read of each bound recipient's cache. A recipient
 that reads cold is held: the message is posted, exit 0, and the output is the `sent
 <id>` line, one `held:` line per held recipient saying when its cache went cold, any
-NOTEs, and a last line that says when each held recipient reads it. A recipient comms
-cannot read (no session id reported yet, a transcript missing or unreadable, a failed
-`session` read, a name that unbound while the verb checked it) refuses the whole send,
-exit 75, nothing posted, `--held` included: the refusal's first line, "Nothing was sent:
-...", names each one and why, and the cure is to send it again in a moment. On every
+NOTEs, and a last line that says when each held recipient reads it. A recipient whose
+read is `no-cache` for want of a clock (the cache module absent or not loading, an
+adapter kind comms has no clock for, a model with no lifetime row, a harness cache has
+no clock for) is delivered as a live one is, and the send reports it `unchecked`: a line
+"delivered now, unchecked: comms can't read <name>'s cache (<why>), so this may wake a
+cold session." follows the `held:` lines. A flagged send holds every recipient, so it
+prints no such line. A recipient comms cannot read (no session id reported yet, a
+transcript missing or unreadable, a failed `session` read, a name that unbound while the
+verb checked it) refuses the whole send, exit 75, nothing posted, `--held` included: the
+refusal's first line, "Nothing was sent: ...", names each one and why, and the cure is to
+send it again in a moment. With `[cache] required = true`, a recipient whose read finds
+the cache module absent refuses the send the same way. On every
 exit path the outcome is the last line. `--held` waits for the recipient's own turn
 even when it is warm; to the operator it is ignored, with a NOTE, and line zero carries
 `[held]` only when another recipient takes it.
@@ -393,9 +403,11 @@ comms reads no cache itself: the cache module (`moxi-cache`, installed with `mox
 comms --with cache`) says what each recipient's cache is, and comms decides what happens
 to the mail. comms reaches it through one file, `src/moxi_comms/cache.py`, and only
 through `moxi.modules.load("cache", interface=1)`. **Without the cache module every agent
-reads `no-cache` and gets its mail live**: nothing is held for a cold cache and nothing
-is refused for an unreadable one. `[cache] required = true` in comms' config makes the
-daemon refuse to start when the cache module is absent or broken.
+reads `no-cache` and gets its mail at once, and each send reports it `unchecked`**: nothing
+is held for a cold cache and nothing is refused for an unreadable one. `[cache] required =
+true` in comms' config makes the daemon refuse to start when the cache module is absent or
+broken, and makes a send refuse `cache-unread` (exit 75, nothing posted) when its read
+finds the cache module absent under a daemon that is already running.
 
 Each harness has its clock, which cache reads. A Claude session's cache counts from its
 transcript's last request, for the lifetime of the cache tier its requests wrote (one hour
@@ -409,7 +421,7 @@ number, which cache lowers for good when the daemon's read sees a cache go cold 
 lowering). A model the table
 lists as free (OpenCode Zen's `opencode/big-pickle`), a
 model or provider with no row, and an adapter comms has no clock for read `no-cache` and
-are delivered to at any age. Anything else comms cannot read with evidence (a rollout or
+are delivered to at any age; a send reports each but the free model `unchecked`. Anything else comms cannot read with evidence (a rollout or
 row it does not recognise, a reverted thread, a revert pending, a next model it cannot
 tell) reads `unknown`; a model change reads cold until a turn on the new model.
 
@@ -485,8 +497,8 @@ sender only to a daemon whose hello lists `scoped-senders`.
 An adapter's methods, on the connection that holds its binding: `bind` (answers the
 identity, a fresh binding token and `high`, the catch-up boundary), `open_digest`,
 `turn_ended` (answers the name's cursor), and the notifications `injected` (the digest's
-id and its text, capped at 64 kB), `ready` (with `source`), `look`, `activity` and
-`unanswered`, and `mcp_token` (below). One from a connection that holds no binding is
+id and its text, capped at 64 kB), `ready` (with `source`), `look`, `relook`,
+`activity` and `unanswered`, and `mcp_token` (below). One from a connection that holds no binding is
 refused `not-bound`. The
 daemon pushes `deliver` (a payload), `replay_complete` (after a bind's catch-up) and
 `notice`. It keeps at most 64 rows per binding pushed and not yet in a digest, so a long
@@ -505,9 +517,14 @@ adapter sends `activity` with that digest's id as `ref`; `explain` reads it for
 not an ack. `ready` is sent at every session start, clear, compaction and resume, with
 `source` `startup`, `resume`, `clear` or `compact` (any other value reads as `resume`).
 The adapter's first look at an idle session sends `look`: a release point on a passing
-read that settles nothing and is no evidence of a turn. "Held mail" has what each one
-releases. The daemon takes all of them, and the session reports below, only from the
-binding's own connection. `injected`, `ready`, `look` and `activity` carry a `seq` that
+read that settles nothing and is no evidence of a turn. A later look, after the
+session's endpoint went away (a plugin reload, a crash), that reads the session idle
+sends `relook`, after the `turn_ended` that settles what the loss left open has been
+answered: a release point for unflagged rows only, since a reload is not a turn. A daemon
+that predates `relook` answers it method-not-found, which a notification drops. "Held
+mail" has what each one releases. The daemon takes all of them, and the session reports
+below, only from the binding's own connection. `injected`, `ready`, `look`, `relook` and
+`activity` carry a `seq` that
 increases per connection, and the daemon drops one that doesn't; that orders them, it
 doesn't authenticate them.
 

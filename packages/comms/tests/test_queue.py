@@ -392,25 +392,26 @@ def test_a_live_message_with_rows_waiting_hands_only_itself(rig, reads, peers):
     assert rows(rig, REVIEWER_Q) == {cold, flagged}
 
 
-def test_a_live_message_behind_a_row_left_unhandled_waits_and_goes_after_it(
+def test_a_live_message_behind_a_row_left_unhandled_is_pushed_at_once(
         rig, reads, peers):
     """A turn leaves a digest unhandled and its row waits for the next release point. A
-    live message to the name meanwhile gets a row, not a push, so it never overtakes the
-    older one; the next turn end hands both, oldest first."""
+    warm send to the name meanwhile is pushed at once, as any live send is: it may
+    reach the session before the older row. The row goes at the next release point."""
     reads[REVIEWER_Q] = cache.WARM
     peer = peers()
     first = post(rig, [REVIEWER_Q], "first")
     assert wait_until(lambda: first in peer.handed())
     peer.turn(unhandled=[first])
     assert rows(rig, REVIEWER_Q) == {first}
-    live = post(rig, [REVIEWER_Q], "live, behind it")
-    row_for(rig, REVIEWER_Q, live)
+    live = post(rig, [REVIEWER_Q], "live, after it")
+    assert wait_until(lambda: live in peer.handed())
     peer.sync()
-    assert peer.handed() == [first], "a row, not a push"
-    assert rows(rig, REVIEWER_Q) == {first, live}
+    assert peer.handed() == [first, live], "pushed, not queued behind the row"
+    assert peer.payloads()[1].get("held") is None
+    assert first not in rig.daemon.bindings[REVIEWER_Q].delivered
     peer.turn()
-    assert peer.handed() == [first, first, live], "after the older row, by id"
-    assert all(p.get("held") is True for p in peer.payloads()[1:])
+    assert peer.handed() == [first, live, first], "the row goes at the next release point"
+    assert peer.payloads()[2].get("held") is True
 
 
 # ============================================================ (c) the release table
@@ -431,6 +432,8 @@ RELEASE_TABLE = [
     ("turn none", cache.WARM, "none"),
     ("register", cache.WARM, "unflagged"),
     ("register", cache.COLD, "none"),
+    ("relook", cache.WARM, "unflagged"),
+    ("relook", cache.COLD, "none"),
     ("no kind", cache.WARM, "none"),
 ]
 
@@ -441,8 +444,9 @@ RELEASE_TABLE = [
 def test_the_release_table(rig, reads, peers, kind, event, read, releases):
     """One test per row of the release table, on the Claude shim and a harness double.
     Each name has a flagged row and an unflagged one (queued while cold, or while
-    unbound for the register rows). `fork` and any other source read as resume; a `ready` with no source, a `turn` with no `handled` and an `activity` with
-    no kind release nothing."""
+    unbound for the register rows). `fork` and any other source read as resume; a
+    `ready` with no source, a `turn` with no `handled` and an `activity` with no kind
+    release nothing. A `relook` releases what a register does."""
     q = REVIEWER_Q if kind == "shim" else CODER_Q
     if event == "register":
         plain = post(rig, [q], "while away")
@@ -467,6 +471,8 @@ def test_the_release_table(rig, reads, peers, kind, event, read, releases):
             peer.turn()
         elif event == "turn none":
             peer.activity(kind="turn", turned=True)
+        elif event == "relook":
+            peer.activity(kind="relook")
         else:
             peer.activity()
     peer.sync()

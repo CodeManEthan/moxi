@@ -276,9 +276,10 @@ SEND_BODY_CAP_BYTES = 128 * 1024
 #: What `/api/check` and `/api/send` answer: the verb's `outcome` (`would-send`, `sent`,
 #: `refused`, `cache-unread`, `blocked`, `offline`, `failed` or `unknown`); the posted
 #: message's id, a string of digits, or null; each recipient's `delivery` (`live`,
-#: `held-cold`, `held-flag`, `waiting`, `unbound` or `operator`), with `cold_at`, line
-#: zero's time its cache goes or went cold in epoch seconds, or null; and `refusal`, the
-#: code of why nothing was posted, or null. No answer carries the verb's text.
+#: `unchecked`, `held-cold`, `held-flag`, `waiting`, `unbound` or `operator`), with
+#: `cold_at`, line zero's time its cache goes or went cold in epoch seconds, or null; and
+#: `refusal`, the code of why nothing was posted, or null. No answer carries the verb's
+#: text.
 SENT = {
     "outcome": lb.Out("string"),
     "message_id": lb.Out("string", nullable=True),

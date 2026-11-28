@@ -476,8 +476,8 @@ def test_the_client_reads_an_unknown_message_as_none(rig):
 
 # =============================================================== the adapter's methods
 
-@pytest.mark.parametrize("method", ["turn_ended", "injected", "ready", "look", "activity",
-                                    "unanswered"])
+@pytest.mark.parametrize("method", ["turn_ended", "injected", "ready", "look", "relook",
+                                    "activity", "unanswered"])
 def test_an_adapter_method_on_a_connection_with_no_binding_is_not_bound(rig, lines, method):
     bound(lines())          # the name is bound, on another connection
     refused = error(lines().call(method, {"identity": PLANNER, "message_id": "1",
@@ -512,17 +512,20 @@ def test_unanswered_on_the_bindings_own_connection_is_kept(rig, lines):
     assert [(r["owing"], r["message_id"]) for r in rows] == [(PLANNER, "12")]
 
 
-def test_ready_and_look_reach_the_binding(rig, lines, monkeypatch):
+def test_ready_look_and_relook_reach_the_binding(rig, lines, monkeypatch):
     seen = []
     monkeypatch.setattr(rig.daemon, "_on_ready", lambda b, source: seen.append(
         ("ready", b.qualified, source)))
     monkeypatch.setattr(rig.daemon, "_on_look", lambda b: seen.append(("look", b.qualified)))
+    monkeypatch.setattr(rig.daemon, "_on_relook",
+                        lambda b: seen.append(("relook", b.qualified)))
     line = lines()
     bound(line)
     line.notify("ready", {"identity": PLANNER, "source": "startup", "seq": line.seq()})
     line.notify("look", {"identity": PLANNER, "seq": line.seq()})
+    line.notify("relook", {"identity": PLANNER, "seq": line.seq()})
     result(line.call("max_id"))
-    assert seen == [("ready", PLANNER, "startup"), ("look", PLANNER)]
+    assert seen == [("ready", PLANNER, "startup"), ("look", PLANNER), ("relook", PLANNER)]
 
 
 # ======================================================================== the old wire

@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field
 
 from moxi import exit as moxi_exit
+from moxi import modules
 
 from . import (attribution, cache, claimfile, claimhold, config, constants, directory,
                machine_line, policy, wire)
@@ -136,7 +137,9 @@ _ENDS = {_REFUSED: (OUTCOME_REFUSED, moxi_exit.REFUSED),
          _COLD: (OUTCOME_CACHE_UNREAD, moxi_exit.TEMPFAIL)}
 
 #: How a posted message reaches one recipient:
-#:   live       delivered now (a warm, fresh or no-cache read);
+#:   live       delivered now (a warm or fresh read, a person, or a free model);
+#:   unchecked  delivered now as `live` is, but comms has no clock to read the cache by
+#:              (`cache.NO_CLOCK_CODES`), so the delivery may wake a cold session;
 #:   held-cold  held for the recipient's next release point, its cache read cold;
 #:   held-flag  held because the send carried `[held]`;
 #:   waiting    the recipient is bound and its session has no endpoint, so its adapter
@@ -145,8 +148,13 @@ _ENDS = {_REFUSED: (OUTCOME_REFUSED, moxi_exit.REFUSED),
 #:   operator   the operator, who has no session to hold for.
 DELIVERY_LIVE, DELIVERY_HELD_COLD, DELIVERY_HELD_FLAG = "live", "held-cold", "held-flag"
 DELIVERY_WAITING, DELIVERY_UNBOUND, DELIVERY_OPERATOR = "waiting", "unbound", "operator"
-DELIVERIES = (DELIVERY_LIVE, DELIVERY_HELD_COLD, DELIVERY_HELD_FLAG, DELIVERY_WAITING,
-              DELIVERY_UNBOUND, DELIVERY_OPERATOR)
+DELIVERY_UNCHECKED = "unchecked"
+DELIVERIES = (DELIVERY_LIVE, DELIVERY_UNCHECKED, DELIVERY_HELD_COLD, DELIVERY_HELD_FLAG,
+              DELIVERY_WAITING, DELIVERY_UNBOUND, DELIVERY_OPERATOR)
+
+#: An `unchecked` recipient's reason.
+UNCHECKED_NOTE = ("delivered now, unchecked: comms can't read {name}'s cache ({why}), so "
+                  "this may wake a cold session.")
 
 
 @dataclass(frozen=True)
@@ -161,8 +169,8 @@ class Refusal:
 class Recipient:
     """One resolved name of a send. `cold_at` is line zero's value for it, the time (epoch
     seconds) its cache goes or went cold, None when it is delivered live without a
-    clock or the send carried `[held]`. `reason` says why the mail waits, None when it
-    does not."""
+    clock or the send carried `[held]`. `reason` says why the mail waits, or for an
+    `unchecked` one why its cache was not read; None when there is nothing to say."""
 
     qualified: str
     delivery: str
@@ -1005,11 +1013,10 @@ def _send_resolved(args, ctx: Context, *, sender, operator_id, tags, reply_to,
     _keep(ctx, message_id=message_id)
     ctx.say(f"sent {message_id} to {', '.join(plan.resolved)} in {channel_room}")
     held, tiers = plan.held, plan.tiers
-    if held:
-        # Posted, and queued by the daemon for each cold one's next release point: one
-        # line each, right after the `sent` line, which scripts read for the id.
-        for state in held:
-            ctx.say(cache.hold_line(state))
+    # Posted, and queued by the daemon for each cold one's next release point (a flagged
+    # send's too): its lines right after the `sent` line, which scripts read for the id.
+    _say_cold(ctx, plan)
+    _say_unchecked(ctx, plan)
     # What an open thread's sender learns from its own send: none of these opens with a
     # caller's line marker or carries an id.
     for line in plan.sent_lines:
@@ -1245,14 +1252,34 @@ def _post_as_operator(ctx: Context, user_id: str, token: str, content: str):
 
 def _say_would_send(ctx: Context, plan, count: int) -> None:
     """What a passing `--check` prints: `would send <N> message(s) to <names>`, then the
-    `held:` line the post would print for each recipient the daemon would hold, then
+    `held:` lines the post would print for each cold recipient, then
     every NOTE the post would print, in the post's order. Not the post's outcome lines
     ("Sent. Open thread …", "Sent and held …"): nothing was sent."""
     ctx.say(f"{WOULD_SEND} {count} message(s) to {', '.join(plan.resolved)}")
-    if plan.held:
-        for state in plan.held:
-            ctx.say(cache.hold_line(state))
+    _say_cold(ctx, plan)
+    _say_unchecked(ctx, plan)
     _say_notes(ctx, plan)
+
+
+def _say_cold(ctx: Context, plan) -> None:
+    """Each cold recipient's lines, on a flagged send too: its `held:` line, then any
+    line a `moxi.comms.hold_lines` entry added. The same text its `Recipient` carries."""
+    for lines in plan.cold.values():
+        ctx.say(lines)
+
+
+def _say_unchecked(ctx: Context, plan) -> None:
+    """One line per recipient delivered with no clock to read its cache by, after the
+    `held:` lines: the same reason its `Recipient` carries. A flagged send holds them
+    all, so it says none."""
+    if plan.flagged:
+        return
+    unbound = {q for q, _tier in plan.deferred}
+    held = {state.target for state in plan.held}
+    for qualified, state in plan.unchecked.items():
+        if qualified in unbound or qualified in held or qualified in plan.waiting:
+            continue
+        ctx.say(unchecked_line(state))
 
 
 def _say_notes(ctx: Context, plan) -> None:
@@ -1319,6 +1346,12 @@ class SendPlan:
     waiting: dict = field(default_factory=dict)
     #: Line zero carries `[interrupt]` (`--interrupt`, to a non-operator).
     interrupt: bool = False
+    #: The recipients delivered with no clock to read their cache by, each with its read
+    #: (`DELIVERY_UNCHECKED`).
+    unchecked: dict = field(default_factory=dict)
+    #: Each cold recipient's lines, on a flagged send too: its `cache.hold_line`, then a
+    #: line for each `moxi.comms.hold_lines` entry that answered (`_cold_lines`).
+    cold: dict = field(default_factory=dict)
     #: Seconds from the post to the message's expiry (`--expires`, else the config's
     #: default); None: it never expires.
     expires_in: int | None = None
@@ -1343,8 +1376,9 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
       4. the reply checks: read the referent, then a reply to `[no reply]`, `--posture
          open` on a reply to a once ask, the open-thread
          check and the rest of the `--cap` refusals;
-      5. the cache reads: refused for a read comms cannot make, held for a cold one,
-         and the send's cold-at for each recipient;
+      5. the cache reads: refused for a read comms cannot make, held for a cold one
+         (its lines asked of each `moxi.comms.hold_lines` entry), and the send's cold-at
+         for each recipient;
       6. the audience table, on the referent read in step 4.
 
     A posture refusal never applies to the exempt sender (`_exempt`): the operator.
@@ -1584,6 +1618,12 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     states = [cache.kind_of(target) for target in targets]
     refused = [state for state in states
                if state.kind not in cache.PASSING and state.kind != cache.COLD]
+    absent = [state for state in states
+              if state.kind == cache.NO_CACHE and state.code == cache.MODULE_ABSENT]
+    if absent and config.load(env=ctx.env).cache.required:
+        # The box asks for the hold (`[cache] required`), and the cache module is gone
+        # under a running daemon: refused as an unread cache is, never pushed unread.
+        refused += absent
     if refused:
         _refuse(ctx, "cache-unread", _hold_text(refused,
                            others=len(set(resolved)) > len({s.target for s in refused})))
@@ -1597,7 +1637,9 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
     if interrupt_typed and OPERATOR in resolved:
         notes.append(INTERRUPT_IGNORED_OPERATOR_TOOL if _tool(ctx)
                      else INTERRUPT_IGNORED_OPERATOR)
-    held = [] if flagged else [state for state in states if state.kind == cache.COLD]
+    colds = [state for state in states if state.kind == cache.COLD]
+    held = [] if flagged else colds
+    cold = {state.target: _cold_lines(ctx, sender, state) for state in colds}
     # The send's cold-at, which the daemon reads when its own read is unknown: on every
     # line zero without `[held]`, never beside it. One value per tag, in line zero's tag order.
     read = {state.target: state for state in states}
@@ -1611,11 +1653,14 @@ def _send_checks(args, ctx: Context, *, sender, operator_id, tags, reply_to, pro
             _refuse(ctx, "audience-differs", refusal)
             return _REFUSED, None
     waiting = {t.label: t.endpoint_for for t in targets if t.endpoint is False}
+    unchecked = {state.target: state for state in states
+                 if state.kind == cache.NO_CACHE and state.code in cache.NO_CLOCK_CODES}
     return None, SendPlan(resolved=resolved, deferred=deferred, tiers=tiers, held=held,
                           audience=audience, posture=posture, flagged=flagged,
                           cold_at=cold_at, marks=marks, sent_lines=sent_lines,
                           notes=notes, ask_notes=ask_notes, waiting=waiting,
-                          interrupt=interrupt, expires_in=expires_in)
+                          interrupt=interrupt, expires_in=expires_in,
+                          unchecked=unchecked, cold=cold)
 
 
 #: A `moxi comms send` to an identity comms has never seen bound, without `--new-name`.
@@ -2378,6 +2423,10 @@ def _refusal_reason(state) -> str:
     q = state.target
     if state.reason == cache.NOT_BOUND:
         return f"{q} unbound while comms was checking it"
+    if state.kind == cache.NO_CACHE and state.code == cache.MODULE_ABSENT:
+        return (f"comms could not read {q}'s cache: the cache module is not installed "
+                f"or does not load, and comms' config sets [cache] required = true "
+                f"(install it: {cache.INSTALL})")
     if state.adapter is None:
         return (f"comms could not ask the daemon about {q} "
                 f"({state.reason or 'no reason given'})")
@@ -2635,6 +2684,45 @@ def _result(code: int, capture: _Capture, ctx, *, check: bool) -> SendResult:
                       notes=notes, said=said)
 
 
+def unchecked_line(state) -> str:
+    """An `unchecked` recipient's reason: comms delivered it with no clock to read its
+    cache by, and says which."""
+    return UNCHECKED_NOTE.format(name=state.target,
+                                 why=state.reason or state.code or "no clock to count by")
+
+
+#: The extension group whose entries add a line under a cold recipient's hold line. comms
+#: calls each as `hold_line(by, recipient, session, *, env) -> str | None`: `by` the
+#: sender's qualified name, `recipient` the cold name, `session` its session id.
+HOLD_LINES = "moxi.comms.hold_lines"
+
+
+def _cold_lines(ctx, sender, state) -> str:
+    """A cold recipient's lines: `cache.hold_line`, then each answer of a
+    `moxi.comms.hold_lines` entry, one line each, in the entries' name order. An entry
+    that raises or answers anything but text or None is logged and adds nothing, so a
+    send never fails on one."""
+    lines = [cache.hold_line(state)]
+    by = getattr(sender, "qualified", None) or OPERATOR
+    for entry in modules.extensions(HOLD_LINES):
+        name = getattr(entry, "name", "?")
+        try:
+            got = entry.load()(by, state.target, state.session_id, env=ctx.env)
+        except Exception as exc:  # noqa: BLE001 - an entry's fault costs only its line
+            log.warning("hold line entry %s raised %s: %s; its line is left out", name,
+                        type(exc).__name__, exc)
+            continue
+        if got is None:
+            continue
+        if not isinstance(got, str):
+            log.warning("hold line entry %s answered %s, not text; its line is left out",
+                        name, type(got).__name__)
+            continue
+        if got.strip():
+            lines.append(got.strip())
+    return "\n".join(lines)
+
+
 def _recipients(plan, ctx) -> tuple:
     """One `Recipient` per resolved name, in line zero's order, from the plan the checks
     made: the plan is what the post printed its lines from, so the data and the text say
@@ -2642,7 +2730,8 @@ def _recipients(plan, ctx) -> tuple:
 
     `waiting` is a bound recipient whose session has no turns endpoint, as the daemon
     reports it for a binding whose adapter says so (a Claude session's); a held recipient
-    reads held, since its mail waits for a release point either way."""
+    reads held, since its mail waits for a release point either way. A cold recipient's
+    reason is its lines (`SendPlan.cold`), after the `--held` NOTE on a flagged send."""
     unbound = {q for q, _tier in plan.deferred}
     held = {state.target: state for state in plan.held}
     cold_at = {}
@@ -2660,11 +2749,15 @@ def _recipients(plan, ctx) -> tuple:
                       + _session_only_sentence([qualified])
                       if plan.tiers.get(qualified) == TIER_EPHEMERAL
                       else HELD_NOTE.format(name=qualified))
+            if qualified in plan.cold:
+                reason += "\n" + plan.cold[qualified]
         elif qualified in held:
-            delivery, reason = DELIVERY_HELD_COLD, cache.hold_line(held[qualified])
+            delivery, reason = DELIVERY_HELD_COLD, plan.cold[qualified]
         elif qualified in plan.waiting:
             delivery, reason = DELIVERY_WAITING, _waiting_note(
                 qualified, plan.waiting[qualified], ctx)
+        elif qualified in plan.unchecked:
+            delivery, reason = DELIVERY_UNCHECKED, unchecked_line(plan.unchecked[qualified])
         else:
             delivery, reason = DELIVERY_LIVE, None
         at = cold_at.get(qualified)

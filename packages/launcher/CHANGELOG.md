@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- comms' send to a cold session now names the call that reaches it: the launcher answers
+  comms' new `moxi.comms.hold_lines` group (`notices.hold_line`) with "To reach it now,
+  relaunch it fresh from its handoff: moxi launcher relaunch <name>." when the sender is
+  one of the directors (the launch's own or the box's policy directors) of the live
+  launch holding the cold session, and with nothing otherwise. It reads the launch log
+  once per cold recipient and writes nothing.
 - Every launcher module imports on its own, in any order: `parks` reaches `fork` only when
   it reads a launch, which ends the import cycle that made `import moxi_launcher.keepwarm`
   or `moxi_launcher.relaunch` fail when imported first.

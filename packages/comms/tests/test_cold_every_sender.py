@@ -493,15 +493,16 @@ def test_an_unbound_recipient_waits_and_is_told_what_releases_it(rig):
 
 
 def test_held_reads_the_cache_and_a_cold_recipient_waits_as_flagged(rig):
-    """`--held` reads the recipient's cache like any send: a cold read posts
-    and the message waits as flagged, with the `--held` NOTE and no `held:` line (the
-    flag, not the read, makes the row), so no usage run."""
+    """`--held` reads the recipient's cache like any send: a cold read posts and the
+    message waits as flagged (the flag, not the read, makes the row), with the cold
+    recipient's `held:` line and the `--held` NOTE."""
     s = shim(rig, SESS_A, age=9 * HOUR)
     code, out = send(rig, REVIEWER_Q, "later", "--held")
     assert code == 0, out
     (msg,) = posted(rig)
     assert cli.HELD_NOTE.format(name=REVIEWER_Q) in out.splitlines()
-    assert not any(line.startswith("held: ") for line in out.splitlines())
+    assert [line for line in out.splitlines() if line.startswith("held: ")] == [
+        out.splitlines()[1]], out
     assert wait_until(lambda: msg.id in held_of(rig))
     time.sleep(0.1)
     assert s.queue == []

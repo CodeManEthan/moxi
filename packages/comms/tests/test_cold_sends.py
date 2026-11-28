@@ -17,7 +17,7 @@ release point (a `turn` carrying `handled`, a `ready` with a source, a register 
 unflagged rows) and deleted only when the adapter names it handled.
 
 Sections follow: (a) the session id, (b) a forged activity, (c) `cache_state`, (d) the
-hold, (e) `moxi comms cache`, (f) `--held`.
+hold, (e) `moxi comms cache`, (f) `--held`, (g) the `moxi.comms.hold_lines` entries.
 """
 
 from __future__ import annotations
@@ -356,6 +356,69 @@ def test_a_failed_read_refuses_the_post(rig):
     assert lines[1:] == ["Send it again in a moment; a read that succeeds holds or "
                          "delivers it.", "Nothing was sent."]
     assert "held:" not in out
+
+
+def reads_no_cache(monkeypatch, code, reason=None):
+    """The daemon's read of a claude-shim binding gives `no-cache` with `code`."""
+    real = cache.clock_state
+
+    def reads(adapter, session_id, **kw):
+        if adapter == "claude-shim":
+            return cache.Clock(cache.NO_CACHE, reason=reason, code=code)
+        return real(adapter, session_id, **kw)
+
+    monkeypatch.setattr(cache, "clock_state", reads)
+
+
+NO_CLOCK_REASONS = {cache.MODULE_ABSENT: "cache is not installed",
+                    cache.NO_CLOCK: "comms has no cache clock for claude-shim agents",
+                    cache.NO_ROW: "no lifetime row for this model",
+                    cache.UNKNOWN_HARNESS: "cache has no clock for this harness"}
+
+
+@pytest.mark.parametrize("code", cache.NO_CLOCK_CODES)
+def test_a_cache_comms_has_no_clock_for_is_delivered_unchecked_and_says_why(
+        rig, monkeypatch, code):
+    """A `no-cache` read for want of a clock is delivered as live mail is, and the send
+    says it went unchecked, with the reason, on the line after its `sent` line."""
+    reviewer = reviewer_with_session(rig)
+    reads_no_cache(monkeypatch, code, NO_CLOCK_REASONS[code])
+    code_, out = send(rig, REVIEWER_Q)
+    assert code_ == 0, out
+    lines = out.splitlines()
+    assert lines[1] == ("delivered now, unchecked: comms can't read reviewer@proj-a's "
+                        f"cache ({NO_CLOCK_REASONS[code]}), so this may wake a cold "
+                        "session."), out
+    assert "held" not in out
+    (msg,) = posted(rig)
+    assert wait_until(lambda: msg.id in queued_ids(reviewer))
+
+
+@pytest.mark.parametrize("code", [cache.PERSON, cache.FREE])
+def test_a_person_or_a_free_model_is_live_with_nothing_to_say(rig, monkeypatch, code):
+    reviewer_with_session(rig)
+    reads_no_cache(monkeypatch, code)
+    code_, out = send(rig, REVIEWER_Q)
+    assert code_ == 0 and out.splitlines()[1:] == [], out
+
+
+def test_a_box_that_requires_cache_refuses_a_send_when_the_module_is_gone(
+        rig, monkeypatch):
+    """`[cache] required = true` and the cache module gone under a running daemon: the
+    send is refused as an unread cache is, nothing posted. The other no-clock codes
+    still deliver unchecked: they are about the recipient, not a missing module."""
+    reviewer_with_session(rig)
+    write_config(None, "[cache]\nrequired = true\n")
+    reads_no_cache(monkeypatch, cache.MODULE_ABSENT, "cache is not installed")
+    code, out = send(rig, REVIEWER_Q)
+    assert code == moxi_exit.TEMPFAIL and posted(rig) == [], out
+    assert out.splitlines()[0].startswith(
+        "Nothing was sent: comms could not read reviewer@proj-a's cache: the cache "
+        "module is not installed or does not load, and comms' config sets [cache] "
+        "required = true"), out
+    reads_no_cache(monkeypatch, cache.NO_ROW, "no lifetime row for this model")
+    code, out = send(rig, REVIEWER_Q)
+    assert code == 0 and "unchecked" in out.splitlines()[1], out
 
 
 def test_no_session_id_refuses_the_post_young_or_old(rig):
@@ -1007,6 +1070,102 @@ def test_reply_takes_held(rig):
         f"::to reviewer@proj-a re:{ask.id} [held]"
     wait_until(lambda: held_of(rig))
     assert reviewer.queue == []
+
+
+def test_a_flagged_send_to_a_cold_recipient_says_it_is_cold_too(rig):
+    """`--held` to a cold recipient: its `held:` line after the `sent` line, as an
+    unflagged send prints it, then the `--held` NOTE."""
+    reviewer_with_session(rig)
+    write_transcript(SESS_REVIEWER, 2 * HOUR + 600)
+    code, out = send(rig, REVIEWER_Q, "later", "--held")
+    assert code == 0, out
+    lines = out.splitlines()
+    assert re.fullmatch(r"held: reviewer@proj-a's cache went cold 1h10m ago \(last turn "
+                        r"[A-Za-z0-9: ]+\)\.", lines[1]), out
+    assert lines[2] == cli.HELD_NOTE.format(name=REVIEWER_Q), out
+
+
+# ================================================= the hold lines entries
+
+class HoldEntry:
+    """A stand-in `moxi.comms.hold_lines` entry: its callable answers `answer`, or raises
+    it when it is an exception, and keeps each call's arguments."""
+
+    def __init__(self, answer, name="sample"):
+        self.name, self.answer, self.calls = name, answer, []
+
+    def load(self):
+        def hold_line(by, recipient, session, *, env):
+            self.calls.append((by, recipient, session, env))
+            if isinstance(self.answer, BaseException):
+                raise self.answer
+            return self.answer
+        return hold_line
+
+
+def hold_entries(monkeypatch, *entries):
+    """`moxi.comms.hold_lines` holds `entries` alone, as comms' send reads the group."""
+    from moxi_comms import sending
+
+    real = sending.modules.extensions
+    monkeypatch.setattr(sending.modules, "extensions",
+                        lambda group: list(entries) if group == sending.HOLD_LINES
+                        else real(group))
+
+
+RELAUNCH = ("To reach it now, relaunch it fresh from its handoff: moxi launcher relaunch "
+            "reviewer@proj-a.")
+
+
+def test_a_hold_lines_answer_follows_the_hold_line(rig, monkeypatch):
+    """An entry's answer is one more line under the cold recipient's `held:` line, on an
+    unflagged and a flagged send, asked with the sender, the recipient and its session."""
+    entry = HoldEntry(RELAUNCH)
+    hold_entries(monkeypatch, entry)
+    reviewer_with_session(rig)
+    write_transcript(SESS_REVIEWER, 2 * HOUR + 600)
+    for flags in ((), ("--held",)):
+        code, out = send(rig, REVIEWER_Q, "hello", *flags)
+        assert code == 0, out
+        lines = out.splitlines()
+        assert lines[1].startswith("held: reviewer@proj-a's cache went cold"), out
+        assert lines[2] == RELAUNCH, out
+    by, recipient, session, env = entry.calls[0]
+    assert (by, recipient, session) == ("planner@proj-a", REVIEWER_Q, SESS_REVIEWER)
+    assert hasattr(env, "get")
+
+
+def test_a_warm_recipient_asks_no_hold_lines_entry(rig, monkeypatch):
+    entry = HoldEntry(RELAUNCH)
+    hold_entries(monkeypatch, entry)
+    reviewer_with_session(rig)
+    write_transcript(SESS_REVIEWER, 60)
+    code, out = send(rig, REVIEWER_Q)
+    assert code == 0 and RELAUNCH not in out, out
+    assert entry.calls == []
+
+
+@pytest.mark.parametrize("answer", [None, "", RuntimeError("broken"), 7, ["a line"]],
+                         ids=["none", "empty", "raises", "number", "list"])
+def test_a_hold_lines_entry_that_gives_no_text_adds_nothing(rig, monkeypatch, answer):
+    """None, blank text, a raise or anything but text: the send goes as it would with no
+    entry, and the other entries' lines still come."""
+    hold_entries(monkeypatch, HoldEntry(answer, name="a"), HoldEntry(RELAUNCH, name="b"))
+    reviewer_with_session(rig)
+    write_transcript(SESS_REVIEWER, 2 * HOUR + 600)
+    code, out = send(rig, REVIEWER_Q)
+    assert code == 0 and len(posted(rig)) == 1, out
+    lines = out.splitlines()
+    assert lines[1].startswith("held: ") and lines[2:] == [RELAUNCH, HELD_LAST], out
+
+
+def test_with_no_hold_lines_entry_the_hold_line_stands_alone(rig, monkeypatch):
+    hold_entries(monkeypatch)
+    reviewer_with_session(rig)
+    write_transcript(SESS_REVIEWER, 2 * HOUR + 600)
+    code, out = send(rig, REVIEWER_Q)
+    assert code == 0, out
+    assert out.splitlines()[2:] == [HELD_LAST], out
 
 
 # ================================================= the senders and the cache callers

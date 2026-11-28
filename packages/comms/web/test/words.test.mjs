@@ -111,6 +111,8 @@ test("would-send: one phrase per recipient by its delivery", () => {
   assert.equal(words("operator").text, "");
   assert.equal(deliveryWords({ qualified: "x", delivery: "live", cold_at: null }, when),
                "Delivered. x reads it at its next turn boundary.");
+  assert.equal(deliveryWords({ qualified: "x", delivery: "unchecked", cold_at: null }, when),
+               "Delivered, unchecked: comms can't read x's cache, so this may wake it from a cold cache.");
 });
 
 test("would-send to a session whose turn is open: it is working and reads it when the turn ends", () => {

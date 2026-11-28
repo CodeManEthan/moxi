@@ -87,7 +87,7 @@ class DaemonNoAnswer(DaemonError):
 #: The notifications that carry `seq`, numbered from one counter per connection: hints
 #: that feed `moxi comms explain`, and the only ones where a late or replayed copy can
 #: mislead it. `seq` is ordering, not authentication.
-ORDERED = ("activity", "turn_ended", "ready", "look", "injected")
+ORDERED = ("activity", "turn_ended", "ready", "look", "relook", "injected")
 
 #: How long a client with no pushes to read waits before it asks a busy daemon again,
 #: once, on a new connection.

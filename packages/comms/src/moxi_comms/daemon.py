@@ -181,6 +181,10 @@ ACTIVITY_READY = "ready"
 #: turns endpoint while the session is idle: a release point, on a passing read, that
 #: settles nothing and is no evidence of a turn (`turned` is left as the frame says).
 ACTIVITY_LOOK = "look"
+#: The `kind` of an `activity` notify for a Claude adapter's later look, after its
+#: session's endpoint went away, that read the session idle: a release point, on a
+#: passing read, for the rows of unflagged messages only. It settles nothing.
+ACTIVITY_RELOOK = "relook"
 #: A `ready` source that starts a context with nothing cached to lose: it releases every
 #: row without reading the cache. Any other source (`resume`, Claude Code's `fork`, a
 #: value this daemon does not know) reads the cache first.
@@ -327,9 +331,6 @@ class Binding:
     #: `deliver` frame needs.
     window: set = field(default_factory=set)
     overflow: dict = field(default_factory=dict)
-    #: The ids a turn of this binding left unhandled, back to `waiting` until the next
-    #: release point. A live send above one waits with them (`_behind_returned`).
-    returned: set = field(default_factory=set)
     #: The claim key of the adapter that holds this binding (its claim file's key), as
     #: its `bind` named it. A tool token's row maps to it. None when the bind named none;
     #: such a binding registers no tool token.
@@ -582,6 +583,7 @@ class Daemon:
             "injected": self._injected,
             "ready": self._ready,
             "look": self._look,
+            "relook": self._relook,
             "activity": self._activity,
             "unanswered": self._note_unanswered,
             "mcp_token": self._mcp_token,
@@ -1062,6 +1064,9 @@ class Daemon:
     def _look(self, conn, params: dict) -> None:
         return self._activity(conn, params, kind=ACTIVITY_LOOK)
 
+    def _relook(self, conn, params: dict) -> None:
+        return self._activity(conn, params, kind=ACTIVITY_RELOOK)
+
     def _turn_ended(self, conn, params: dict) -> dict:
         """`turn_ended`, the ack: a turn of the binding's session ended, answering the
         digests `handled` names and not the ones `unhandled` names (both digest ids;
@@ -1091,7 +1096,8 @@ class Daemon:
 
     def _activity(self, conn, params: dict, kind: str | None = None) -> None:
         """`activity` and its kinds: the session reports, from the binding's own
-        connection, and the release points (`ready`, `look`, a turn's end)."""
+        connection, and the release points (`ready`, `look`, `relook`, a turn's
+        end)."""
         b = self._own_binding(conn, params)
         identity = b.qualified if b is not None else str(params.get("identity") or "")
         method = kind or "activity"
@@ -1118,6 +1124,8 @@ class Daemon:
             self._on_ready(b, params.get("source"))
         elif kind == ACTIVITY_LOOK:
             self._on_look(b)
+        elif kind == ACTIVITY_RELOOK:
+            self._on_relook(b)
         return None
 
     # ------------------------------------------------------------------ register
@@ -2303,12 +2311,6 @@ class Daemon:
                         if backlog or not self._past_cursor(q, msg.id, memo):
                             self._queue_add(q, msg.id, _epoch(msg.timestamp))
                         live = False
-                    elif not backlog and self._behind_returned(r.binding, msg.id):
-                        # Rows a turn of this binding left unhandled wait below this
-                        # one: it waits with them for the next release point, and goes
-                        # out after them by id.
-                        self._queue_add(q, msg.id, _epoch(msg.timestamp))
-                        live = False
                     else:
                         live = self._claim(r.binding, msg.id)
                 break
@@ -2784,7 +2786,6 @@ class Daemon:
             if message_id in binding.delivered or message_id in self.withdrawn:
                 return False
             binding.delivered.add(message_id)
-            binding.returned.discard(message_id)
             if _as_id(message_id) > _as_id(binding.handed_max):
                 binding.handed_max = message_id      # the `owed` query's `undelivered`
             # Its row, handed to this binding: made for a live send, taken from
@@ -3259,6 +3260,16 @@ class Daemon:
         if self._passing(b):
             self._release(b, flagged=True)
 
+    def _on_relook(self, b: Binding) -> None:
+        """`activity kind=relook` from the binding's own connection: its adapter found the
+        session's endpoint again after losing it, read the session idle, and first sent
+        the `turn_ended` that put the unhandled digests' ids back as rows. It releases
+        the rows of unflagged messages on a passing read, as a bind does, and settles
+        nothing. A reload raises no SessionStart, so `[held]` rows wait for a real
+        boundary."""
+        if self._passing(b):
+            self._release(b, flagged=False)
+
     def _on_register(self, b: Binding) -> None:
         """After a register's replay: the rows of unflagged messages, on a passing read.
         A bind is how offline mail reaches a name. Flagged rows wait for a real
@@ -3287,18 +3298,6 @@ class Daemon:
         """Whether any row waits for `b`'s name now that `b` was not handed already."""
         with self._lock:
             return any(mid not in b.delivered for mid in self.queue.get(b.qualified, {}))
-
-    def _behind_returned(self, binding: Binding, message_id: str) -> bool:
-        """Whether a row this binding's turns left unhandled still waits below
-        `message_id`. A live send behind one gets a row instead of a push, so it never
-        overtakes mail already handed to the name once. Rows that never went out (a
-        `[held]` message's, one queued while the cache was cold) don't hold it back:
-        those wait for their own release point while live mail goes alone. Under the
-        lock."""
-        rows = self.queue.get(binding.qualified, {})
-        binding.returned &= rows.keys()
-        mid = _as_id(message_id)
-        return any(_as_id(m) < mid for m in binding.returned)
 
     def _release(self, binding: Binding, *, flagged: bool, exclude=()) -> int:
         """Hand the name's rows this binding was not handed already, oldest first, each
@@ -3457,7 +3456,6 @@ class Daemon:
                 binding.delivered.discard(mid)
                 if self.bindings.get(q) is binding:
                     self.queue.setdefault(q, {}).setdefault(mid, None)
-                    binding.returned.add(mid)
         if unhandled:
             self._queue_flush()
 

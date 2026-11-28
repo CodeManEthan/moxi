@@ -506,6 +506,14 @@ identities now (`moxi-comms-provision --standing NAME`); an unprovisioned name g
 neither. A policy name is comms' own spelling, a bare one the global identity, never read
 in the launch's scope.
 
+A director learns it can make the call from its own send. When comms holds a message for
+a cold session, it asks the launcher (an entry point in comms' `moxi.comms.hold_lines`)
+whether the sender directs the live launch holding that session, by the same check as
+the call's, and if so prints one more line under the send's `held:` line: "To reach it
+now, relaunch it fresh from its handoff: moxi launcher relaunch <name>." A session no
+launch holds, a launch whose endpoint has ended, or a sender that directs nothing gets
+no line.
+
     moxi launcher relaunch --status RUN
     moxi launcher relaunch --stop RUN
     moxi launcher relaunch --from-record RUN
@@ -1137,7 +1145,7 @@ A refusal prints one line ending in a short code, such as `[off-posture]`, and a
 | Module | With it | Without it |
 |---|---|---|
 | turns | the first turn delivered once the session is ready; Codex session ids learned; a Codex seat's instructions in its start context; the handoff lines at a seat's start, resume or clear; every act on a launched session; what each running session waits on, on Home's Sessions row | the brief is the opening prompt; no readiness, no pointer; a Codex seat gets only its `AGENTS.md`; Codex session ids unknown; no relaunch, exit-session, recycle or keep-warm; no session reads as waiting |
-| comms | identities, scopes, directors and the `with:` start posture; a headless launch with an identity, and the `headless_exit` row; a director's relaunch, and notices of a failed relaunch; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
+| comms | identities, scopes, directors and the `with:` start posture; a headless launch with an identity, and the `headless_exit` row; a director's relaunch, and notices of a failed relaunch; the relaunch line under a held send to a cold session the sender directs; a director waiting on its agents, on Home's Sessions row; a covered director kept warm while its agents work | plain harness launches; `with:` and `director` refused; relaunch with `--self` only, its failures recorded only; a session waits on its subagents only, and only those can be covered |
 | slots | `--target slot`, `--slot`, and answering the startup screens you turn on; relaunch, and answering the exit dialog | `terminal` and `headless` only; no relaunch, and an exit stops at the exit dialog |
 | cache | the `keep_warm` and `recycle_on_expiry` rows, and a director's relaunch refused while the session's cache is warm; each running session's cache and `Keep warm` on Home's Sessions row; the doctor row `keep-warm.timer` | neither row is offered; no session reads as kept warm, and no `Keep warm` |
 | projects | `project` keys, a project's agent listing, a directory's project key; with ui, the launcher's facts on the Projects page | `cwd` paths and scratch launches only |

@@ -30,7 +30,8 @@ The Claude wrapper also runs as `moxi comms claude`.
 A kind decides two things. One is the **wire**: how the adapter talks to its CLI, and so
 how mail gets into a turn and how the adapter learns the turn ended. The other is the
 **cache clock keyed to the kind's name**: how `moxi comms send` and the daemon read the
-recipient's prompt cache, or that the kind has none, and then its mail goes live. Every
+recipient's prompt cache, or that the kind has none, and then its mail goes at once and a
+send reports it `unchecked`. Every
 kind takes held mail, `--held` included. A new kind brings its own clock, or none.
 
 The four above are comms' own. Another package adds a kind by an entry point in the
@@ -216,7 +217,7 @@ A harness is a port on the base, in a kind of its own, plus the cache clock for 
 kind's name, if it has one. Every kind's cache is checked: the daemon delivers nothing
 live to a binding whose cache reads cold, and holds that mail for its next session
 start, /clear, compaction or turn. A kind comms has no cache clock for reads
-`no-cache`, and its mail goes live. Before writing
+`no-cache`, and its mail goes at once; a send reports it `unchecked`. Before writing
 one, answer these for your CLI:
 
 1. **Does the CLI's shell inherit the environment it was launched with, and can it reach
@@ -251,8 +252,9 @@ request in its rollout, under the sessions root its wrapper reports; an OpenCode
 session's is the start of its last request in `opencode.db`, at the path the wrapper
 asks OpenCode for. Each counts the lifetime its harness, provider and model have in the
 cache module's lifetime table (comms reads both clocks through the cache module; without
-it every agent's mail goes live); a model or provider with no
-row has no clock to count by, and its mail goes live. A message to a cold one is posted
+it every agent's mail goes at once, and a send reports it `unchecked`); a model or
+provider with no row has no clock to count by, and its mail goes at once, reported
+`unchecked` too. A message to a cold one is posted
 and held, as for a cold Claude session. A Codex agent is reached while its cache counts
 warm: 30 minutes after its last request on `gpt-5.6-terra` and `gpt-5.6-luna`, and on
 the models a longer probe measured, the measured number, lowered by the daemon when it

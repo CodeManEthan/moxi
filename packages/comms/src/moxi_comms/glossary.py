@@ -146,9 +146,24 @@ TERMS: tuple[Entry, ...] = (
         "turn that ends with an answer has just used the cache, so its held mail goes out "
         "as the turn ends; after any other turn comms reads the cache first and sends the "
         "mail once it reads warm. `--held` mail "
-        "to an agent whose cache is warm goes out after its next turn. A message that "
-        "waited arrives marked `[held]`, with when it was sent and how long it waited.",
+        "to an agent whose cache is warm goes out after its next turn. A send prints a "
+        "`held:` line for each recipient whose cache is cold, `--held` or not, and with "
+        "the launcher installed, when you direct that agent's launch, one more line: the "
+        "`moxi launcher relaunch` command that reaches it now from its handoff. A message "
+        "that waited arrives marked `[held]`, with when it was sent and how long it "
+        "waited.",
         aliases=("--held", "pending", "cold"),
+    ),
+    Entry(
+        "unchecked",
+        "a send's delivery for a recipient whose cache comms has no clock to read: the "
+        "cache module isn't installed or doesn't load, comms has no clock for the "
+        "recipient's kind of agent, or none for its model or harness. The message is "
+        "delivered at once, as `live` mail is, and the send says which reason applied, "
+        "since it may wake a session whose cache has gone cold. A box whose comms config "
+        "sets `[cache] required = true` refuses the send instead when the cache module "
+        "is missing.",
+        aliases=("no clock",),
     ),
     Entry(
         "interrupt",
