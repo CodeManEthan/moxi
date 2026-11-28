@@ -249,6 +249,8 @@ RECORD = lb.Out("table", nullable=True, items={
     "opened": _s(), "standing": _s(),
     "stages": lb.Out("table", items={"finished": INT, "building": INT,
                                      "not_started": INT}),
+    # what the finishes of its builds left behind, counted
+    "kept": INT,
     "rulings": INT,
     "newest_rulings": _list(lb.Out("table", items={"id": TEXT, "text": _s("scrub"),
                                                    "at": _s()})),

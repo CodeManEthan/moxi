@@ -964,11 +964,16 @@ class _Pass:
                     continue
                 self.write_check_records(batch, name, stage, tip)
                 try:
-                    finishing.finish_member(name, stage, tip=tip, by=LANDER,
-                                            settings=self.settings, env=self.env)
+                    finished = finishing.finish_member(name, stage, tip=tip, by=LANDER,
+                                                       settings=self.settings,
+                                                       env=self.env)
                 except RoundsError as exc:
                     self.say(f"lander of {self.repo}: {name} {stage} landed and is not "
                              f"finished: {exc}")
+                else:
+                    if finished is not None and finished.unrecorded is not None:
+                        self.say(f"lander of {self.repo}: {name} {stage} finished; "
+                                 f"{finished.unrecorded}")
                 landed.append((name, stage, tip, QueueGit(self.root).bringing_merge(
                     tip, str(batch.candidate))))
         finally:

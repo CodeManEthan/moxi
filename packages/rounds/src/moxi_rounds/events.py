@@ -181,11 +181,18 @@ TYPES = _types(
     # its digest and the result.
     EventType("brief.sized", ("stage", "slice", "verify", "brief", "sha256", "result")),
     # One finish action reached a state at a build's tip; a merge also holds where it
-    # landed and the target's head before it.
+    # landed and the target's head before it, and `kept`, the checkout of the target it
+    # added and could not remove, as `{"where", "why"}`.
     EventType("finish.action",
-              ("stage", "tip", "id", "kind", "state", "landing", "target_before")),
+              ("stage", "tip", "id", "kind", "state", "landing", "target_before",
+               "kept")),
     # A build's finish completed at this tip.
     EventType("finish.done", ("stage", "tip")),
+    # A finish at this tip left one thing behind: `what` it is (`worktree`, `scratch`
+    # or `branch`), `where` (the folder, or the branch's name) and `why`, in the words
+    # the finish said it with.
+    EventType("finish.kept", ("stage", "tip", "what", "where", "why"),
+              required=("stage", "what", "where", "why")),
     # A build of a queue project joined its repo's queue at its tip `tip`, the target's
     # head being `main`; `urgent` puts it ahead of every member that is not.
     EventType("queue.join", ("stage", "tip", "main", "urgent", "by"),

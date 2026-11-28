@@ -1592,13 +1592,17 @@ def _finish(args, out) -> int:
                   f"{str(one.target_before)[:12]}")
         print(f"{one.id}: {how}{landed}", file=out)
         if one.kept is not None:
-            print(f"{one.id}: kept the checkout it added, {one.kept}", file=out)
+            print(f"{one.id}: kept the checkout it added, {one.kept.place}: "
+                  f"{one.kept.line()}", file=out)
     print(f"finished {done.stage}" if done.event is not None
           else f"{done.stage} was already recorded as finished", file=out)
     _cleanup_lines(done.removed, done.kept, out, done.unscanned)
     if done.branch is not None:
         print(f"branch: {done.branch}", file=out)
     _ref_lines(done.refs, out)
+    if done.unrecorded is not None:
+        print(f"{args.prog} finish: warning: {done.unrecorded}; the finish stands",
+              file=sys.stderr)
     if not done.released:
         print(f"{args.prog} finish: warning: the finish lock no longer pointed at this "
               "finish's own and was left as it is; moxi doctor rounds names it if it "

@@ -35,10 +35,12 @@ repo's check, of each command step of the user's own and of the local part of a 
 CI, its newest read of CI, and, while it is open, its state as read from git now (`open_builds`):
 whether it is idle, the builds it shares commits with, or what kept it from being read;
 and, once a report of it is recorded, how far the target moved under it since and
-whether that owes a re-check (`drift`). Each build carries its stage's slices, each
-with the sized brief that counts for it, and the verifications a brief was sized for
-(`sizing`); the lines say which slices of an open build have a sized brief and which
-have none. Each of the lead's repairs is shown with what
+whether that owes a re-check (`drift`). Each build lists what its finish left behind
+(`finish_actions.kept_of`): its worktree, scratch folder or branch, and a checkout of
+the target its merge added and kept, each with where it is and why. Each build carries
+its stage's slices, each with the sized brief that counts for it, and the verifications
+a brief was sized for (`sizing`); the lines say which slices of an open build have a
+sized brief and which have none. Each of the lead's repairs is shown with what
 it derived again and the old and new value of each field it changed.
 
 **A later kind of record** (a stage, a build, a waiting item) is a row of `SECTIONS`:
@@ -293,11 +295,17 @@ def _history(found: Shown) -> list:
     return list(found.state.history)
 
 
-def history_of(event: dict) -> str | None:
+def history_of(event: dict, *, here: bool = False) -> str | None:
     """What an event of the history is of, in a word or a few: the id it gave or
     names, its stage, for a change of flow the flow left and the one taken up, for a
     change of lead the lead before and the new one, or for a change to a stage what
-    changed."""
+    changed. A folder a finish left is given as the record holds it (`~` for the home
+    folder), or with `here` as the place it names on this machine, as the build's own
+    lines give it."""
+
+    def place(where: object) -> object:
+        return places.expand_home(where) if here and isinstance(where, str) else where
+
     of = event.get("id") or ",".join(event.get("ids") or ()) or event.get("stage")
     if event.get("type") == "flow.changed":
         of = f"{event.get('was')} to {event.get('flow')}, by {event.get('by')}"
@@ -320,7 +328,15 @@ def history_of(event: dict) -> str | None:
     if event.get("type") == finish_actions.ACTION:
         landed = ("" if event.get("landing") is None
                   else f", landing {str(event.get('landing'))[:12]}")
-        of = (f"{event.get('stage')} {event.get('id')}: {event.get('state')}{landed}")
+        kept = event.get("kept")
+        kept = (f", kept {place(kept.get('where'))}: {kept.get('why')}"
+                if isinstance(kept, Mapping) else "")
+        of = (f"{event.get('stage')} {event.get('id')}: {event.get('state')}{landed}"
+              f"{kept}")
+    if event.get("type") == finish_actions.KEPT:
+        where = (event.get("where") if event.get("what") == finish_actions.BRANCH
+                 else place(event.get("where")))
+        of = f"{event.get('stage')} {event.get('what')} {where}: {event.get('why')}"
     if event.get("type") == "lock.cleared":
         of = f"{event.get('ref')}, held by {event.get('holder')}"
     if event.get("type") == sizing.SIZED:
@@ -337,7 +353,7 @@ def history_of(event: dict) -> str | None:
 def _history_lines(events: list) -> list[str]:
     lines = [f"history: {len(events)} event{'' if len(events) == 1 else 's'}"]
     for event in events:
-        of = history_of(event)
+        of = history_of(event, here=True)
         lines.append(f"  {event.get('n')}  {event.get('at')}  {event.get('actor')}  "
                      f"{event.get('type')}{f'  {of}' if of else ''}")
     return lines
@@ -466,7 +482,7 @@ def _builds(found: Shown) -> list:
                             for finding in findings.of_build(found.state, one)],
                "slices": sizing.slices_of(found.state, one),
                "briefs": sizing.verifications_of(found.state, one),
-               "drift": None, "finish": []}
+               "drift": None, "finish": [], "kept": kept_of(found.state, one)}
         # A folder is shown as the place it names here, whichever form the record has.
         row.update({key: places.expand_home(row[key]) for key in ("worktree", "scratch")
                     if isinstance(row[key], str)})
@@ -499,6 +515,24 @@ def finish_actions_of(state: states.State, build: builds.Build,
     return [{"id": event["id"], "kind": event.get("kind"), "state": event.get("state"),
              "landing": event.get("landing"), "n": event["n"], "at": event.get("at")}
             for event in finish_actions.records(state, build, head).values()]
+
+
+def kept_of(state: states.State, build: builds.Build) -> list[dict]:
+    """What the finishes of `build` left behind (`finish_actions.kept_of`), each folder
+    shown as the place it names here."""
+    return [{**one, "where": (one["where"] if one["what"] == finish_actions.BRANCH
+                              or not isinstance(one["where"], str)
+                              else places.expand_home(one["where"]))}
+            for one in finish_actions.kept_of(state, build)]
+
+
+def kept_line(one: dict) -> str:
+    """A thing a finish left behind in words: `kept worktree /home/you/w: B3: it holds
+    work that is not committed (line 14)`; the checkout of the target a merge added is
+    `kept merge checkout`."""
+    what = ("merge checkout" if one["what"] == finish_actions.CHECKOUT
+            else str(one["what"]))
+    return f"kept {what} {one['where']}: {one['why']} (line {one['n']})"
 
 
 def finish_action_line(one: dict) -> str:
@@ -659,6 +693,7 @@ def _build_lines(listed: list) -> list[str]:
         if one.get("drift") is not None:
             lines.append(f"    {drift_line(one['stage'], one['drift'])}")
         lines += [f"    {finish_action_line(action)}" for action in one.get("finish", ())]
+        lines += [f"    {kept_line(kept)}" for kept in one.get("kept", ())]
         lines += [f"    {finding_line(finding)}" for finding in one.get("findings", ())]
         if one["ended"] is None:
             lines += [f"    {line}" for line in briefs_lines(one)]
@@ -1108,4 +1143,5 @@ __all__ = ["ci_line", "Shown", "Section", "SECTIONS", "show", "data", "as_json",
            "ended_line", "lead_line", "skip_line", "marks_line", "stage_line", "build_line", "build_verdict_line",
            "finding_line", "drift_line", "step_lines", "version_lines", "thread_line",
            "verdict_lines", "history_of", "repair_of", "repair_line", "check_run",
-           "ci_read", "build_verdict", "command_steps", "finish_actions_of"]
+           "ci_read", "build_verdict", "command_steps", "finish_actions_of", "kept_of",
+           "kept_line"]

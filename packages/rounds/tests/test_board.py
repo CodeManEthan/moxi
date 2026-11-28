@@ -4,6 +4,8 @@ says of each build given as `steps.Seen`."""
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from moxi_rounds import (board, checking, closing, drift, events, freezing, listing, log,
@@ -585,6 +587,51 @@ def test_a_closed_round_s_card_is_read_from_its_log_alone(kit):
     assert made["ended"]["how"] == "closed"
     assert made["ends"] == [{"stage": "B1", "how": "landed"}]
     assert made["stages"] == {"finished": 1, "building": 0, "not_started": 0}
+    assert made["kept"] == 0
+
+
+def test_a_card_counts_what_the_finishes_left_and_the_strip_still_says_landed(kit):
+    round_dir = kit("fix")
+    append(round_dir, "stage.declared", id="B1", repo="kestrel", branch="branch-b1",
+           after=[])
+    commission(round_dir)
+    append(round_dir, "finish.action", stage="B1", tip=TIP, id="merge", kind="merge",
+           state="ok", landing="2" * 40, target_before=BASE,
+           kept={"where": "~/w/.finish-main", "why": "B3: it holds work"})
+    append(round_dir, "finish.done", stage="B1", tip=TIP)
+    append(round_dir, "finish.kept", stage="B1", tip=TIP, what="worktree",
+           where="~/w/branch-b1", why="B3: it holds work")
+    append(round_dir, "finish.kept", stage="B1", tip=TIP, what="branch",
+           where="branch-b1", why="its worktree was kept")
+    made = board.part(showing.show(ROUND, refresh=False), {})
+    assert board.card(made, board.Items())["kept"] == 3
+    assert [one["act"] for one in board.strip([made])] == ["landed"]
+
+
+def test_the_page_s_events_give_a_kept_worktree_as_the_place_it_names_here(
+        kit, monkeypatch, tmp_path):
+    home = tmp_path / "ann"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    round_dir = kit("fix")
+    append(round_dir, "stage.declared", id="B1", repo="kestrel", branch="branch-b1",
+           after=[])
+    commission(round_dir)
+    append(round_dir, "finish.action", stage="B1", tip=TIP, id="merge", kind="merge",
+           state="ok", landing="2" * 40, target_before=BASE,
+           kept={"where": "~" + os.sep + "checkout", "why": "B3: it holds work"})
+    append(round_dir, "finish.done", stage="B1", tip=TIP)
+    append(round_dir, "finish.kept", stage="B1", tip=TIP, what="worktree",
+           where="~" + os.sep + "worktree", why="B3: it holds work")
+    append(round_dir, "finish.kept", stage="B1", tip=TIP, what="branch",
+           where="branch-b1", why="its worktree was kept")
+    made = board.part(showing.show(ROUND, refresh=False), {})
+    found = [one["of"] for one in board.events_of(made, None, None)
+             if one["type"] in ("finish.action", "finish.kept")]
+    assert found == [
+        f"B1 merge: ok, landing {'2' * 12}, kept {home / 'checkout'}: B3: it holds work",
+        f"B1 worktree {home / 'worktree'}: B3: it holds work",
+        "B1 branch branch-b1: its worktree was kept"]
 
 
 # -- which step an event belongs to ------------------------------------------------------
@@ -608,6 +655,7 @@ def test_every_type_of_event_rounds_writes_has_a_place_in_the_table():
     ({"type": "finding.marked", "id": "B3.L2"}, ("verify-build", "B3")),
     ({"type": "wait.marked", "id": "B1.W1"}, ("close", None)),
     ({"type": "finish.done", "stage": "B1"}, ("finish", "B1")),
+    ({"type": "finish.kept", "stage": "B1"}, ("finish", "B1")),
     ({"type": "repair"}, (None, None)),
 ])
 def test_an_event_belongs_to_the_step_its_fields_say(event, expected):

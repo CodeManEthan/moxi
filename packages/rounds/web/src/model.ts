@@ -844,6 +844,9 @@ export function cardView(record: RecordValue, ctx: Context): { title: string; su
     fact("stages", [`${stages.finished} finished`, `${stages.building} building`,
                     `${stages.not_started} not started`].join(", "));
   }
+  // What finishes left behind (a worktree, a scratch folder, a branch, a merge's
+  // checkout): `moxi rounds show` lists each one with why.
+  if (record.kept) fact("left at finish", `${record.kept} (moxi rounds show lists each)`);
   if (record.rulings !== undefined) fact("rulings", String(record.rulings));
   const made: Section[] = [];
   if (record.description) made.push(section(null, [[{ text: record.description }]]));

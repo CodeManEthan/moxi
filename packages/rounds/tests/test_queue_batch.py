@@ -11,9 +11,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_finish import ignored_file_in, kept_write_locked
 
 from moxi_rounds import (batching, checking, ci, commissioning, finishing, joining, log,
-                         opening, queue_ci, queue_file, queue_log, queue_view, verdicts)
+                         opening, places, queue_ci, queue_file, queue_log, queue_view,
+                         verdicts)
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
 from moxi_rounds.errors import Refused
@@ -277,6 +279,44 @@ def test_a_lone_member_lands_by_a_fast_forward_and_is_finished_as_found(
     assert queue().member(ROUND, "B1").state == queue_file.LANDED
     assert queue().running() is None and fake.removed == [batch.branch]
     assert repo.git("branch", "--list", batch.branch) == ""
+
+
+def test_a_landed_member_records_what_its_finish_left(repo, ready, fake, lander_pass,
+                                                      tmp_path):
+    tree = ready()
+    tip = tree.rev()
+    ignored_file_in(repo, tree)
+    lander_pass()
+    said = lander_pass()
+
+    assert events(tmp_path, ROUND, finishing.DONE)[-1]["tip"] == tip
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    found = events(tmp_path, ROUND, finishing.KEPT)
+    assert [(one["stage"], one["tip"], one["what"], one["where"]) for one in found] == [
+        ("B1", tip, "worktree", places.contract_home(tree.root)),
+        ("B1", tip, "branch", "work")]
+    assert found[0]["why"].startswith("B3: ") and "(generated/)" in found[0]["why"]
+    assert found[1]["why"] == ("its worktree was kept, and git deletes no branch a "
+                               "worktree has checked out")
+    assert not any("could not be recorded" in line for line in said), said
+
+
+def test_a_landed_member_whose_record_of_what_it_left_fails_says_so(
+        repo, ready, fake, lander_pass, tmp_path, monkeypatch, holder):
+    tree = ready()
+    tip = tree.rev()
+    ignored_file_in(repo, tree)
+    lander_pass()
+    kept_write_locked(monkeypatch, holder)
+    said = lander_pass()
+
+    assert events(tmp_path, ROUND, finishing.DONE)[-1]["tip"] == tip
+    assert queue().member(ROUND, "B1").state == queue_file.LANDED
+    assert events(tmp_path, ROUND, finishing.KEPT) == []
+    (line,) = [one for one in said if "could not be recorded" in one]
+    assert line.startswith(f"lander of proj-a: {ROUND} B1 finished; what the finish left "
+                           "could not be recorded: ")
+    assert "was still locked by pid" in line
 
 
 def test_the_check_gate_accepts_a_candidate_read_green_with_its_local_run(

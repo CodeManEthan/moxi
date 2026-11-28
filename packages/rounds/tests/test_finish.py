@@ -17,7 +17,8 @@ import pytest
 from moxi import files
 
 from moxi_rounds import (asking, builds, checking, commissioning, finish_lock, finishing,
-                         log, next_step, opening, places, removal, sweeping, verdicts)
+                         log, next_step, opening, places, removal, sweeping, verdicts,
+                         write)
 from moxi_rounds import settings as own
 from moxi_rounds import state as states
 from moxi_rounds.cli import main
@@ -591,10 +592,14 @@ def test_a_trash_entry_a_stopped_finish_left_is_deleted_by_the_next_armed_sweep(
 
 def test_with_keep_branch_the_cleanup_removes_the_dirs_and_keeps_the_branch(
         ready, repo, configure):
+    path, _tree = ready
     configure("keep_branch = true")
     done = finishing.finish(ROUND, "B1", by="coder")
     assert len(done.removed) == 2 and done.branch is None
     assert repo.git("branch", "--list", "work").strip().endswith("work")
+    assert [(one["what"], one["where"], one["why"])
+            for one in of_type(path, "finish.kept")] == [
+        ("branch", "work", finishing.KEEP_BRANCH)]
 
 
 def test_the_command_says_what_the_cleanup_removed_and_kept(ready, repo, capsys):
@@ -615,6 +620,162 @@ def test_the_command_says_what_the_cleanup_removed_and_kept(ready, repo, capsys)
     assert [line for line in lines if line.startswith("branch: ")] == [
         "branch: kept: its worktree was kept, and git deletes no branch a worktree has "
         "checked out"]
+
+
+# -- what a finish left, on record ---------------------------------------------------------
+
+def ignored_file_in(repo, tree) -> Path:
+    """A file the repo ignores, written in the build's worktree: work git doesn't track,
+    which the removal rule keeps the worktree for."""
+    exclude = repo.root / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("generated/\n", encoding="utf-8")
+    made = tree.root / "generated" / "types.d.ts"
+    made.parent.mkdir()
+    made.write_text("// written by a tool\n", encoding="utf-8")
+    return made
+
+
+def test_a_finish_that_keeps_an_uncommitted_file_records_it_and_still_finishes(
+        ready, repo):
+    path, tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+    ignored_file_in(repo, tree)
+    tip = tree.rev()
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert done.event is not None and done.unrecorded is None
+    assert build_of(path).ended == builds.FINISHED
+    (worktree,) = [one for one in done.kept if one.kind == "worktree"]
+    kinds = [one["type"] for one in events(path)]
+    assert kinds.index("finish.done") < kinds.index("finish.kept")
+    found = of_type(path, "finish.kept")
+    assert [(one["stage"], one["tip"], one["what"], one["where"]) for one in found] == [
+        ("B1", tip, "worktree", places.contract_home(made["worktree"])),
+        ("B1", tip, "branch", "work")]
+    assert found[0]["why"] == worktree.line()
+    assert found[0]["why"].startswith("B3: ") and "(generated/)" in found[0]["why"]
+    assert found[1]["why"] == ("its worktree was kept, and git deletes no branch a "
+                               "worktree has checked out")
+    assert Path(made["worktree"]).is_dir()
+
+
+def test_a_finish_that_keeps_nothing_records_nothing_kept(ready, repo):
+    path, _tree = ready
+    done = finishing.finish(ROUND, "B1", by="coder")
+    assert (done.kept, done.branch) == ((), "deleted")
+    assert of_type(path, "finish.kept") == []
+    assert "kept" not in of_type(path, "finish.action")[0]
+
+
+def test_show_lists_what_a_finish_kept_a_merge_checkout_included(
+        ready, repo, monkeypatch, capsys):
+    path, tree = ready
+    made = checking.commission_of(states.fold(events(path)), build_of(path))
+    ignored_file_in(repo, tree)
+    repo.switch("elsewhere", new_from="main")
+    place = places.worktree_dir(own.load()) / "proj-a" / ".finish-main"
+
+    def kept_checkout(_root, at, **_keys):
+        return removal.Kept(Path(at), "B3", "it holds work that is not committed",
+                            ("?? left.txt",))
+
+    monkeypatch.setattr(removal, "checkout_removal", kept_checkout)
+    finishing.finish(ROUND, "B1", by="coder")
+    (action,) = of_type(path, "finish.action")
+    assert action["kept"] == {"where": places.contract_home(place),
+                              "why": "B3: it holds work that is not committed "
+                                     "(?? left.txt)"}
+    capsys.readouterr()
+
+    assert main(["show", ROUND]) == 0
+    lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    kept = [line for line in lines if line.startswith("kept ")]
+    assert [line.split(": ")[0] for line in kept] == [
+        f"kept merge checkout {place}", f"kept worktree {made['worktree']}",
+        "kept branch work"]
+    assert kept[0].endswith("B3: it holds work that is not committed (?? left.txt) "
+                            f"(line {action['n']})")
+
+    assert main(["show", ROUND, "--json"]) == 0
+    (build,) = json.loads(capsys.readouterr().out)["builds"]
+    assert [(one["what"], one["where"]) for one in build["kept"]] == [
+        ("checkout", str(place)), ("worktree", made["worktree"]), ("branch", "work")]
+
+
+def test_show_s_history_gives_a_kept_worktree_as_the_place_it_names_here(
+        ready, repo, monkeypatch, capsys):
+    path, tree = ready
+    ignored_file_in(repo, tree)
+    # The worktree is under the home folder, so its record holds it from `~`.
+    monkeypatch.setenv("HOME", str(tree.root.parent))
+    monkeypatch.setenv("USERPROFILE", str(tree.root.parent))
+    finishing.finish(ROUND, "B1", by="coder")
+    (worktree, branch) = of_type(path, "finish.kept")
+    assert worktree["where"] == "~" + os.sep + tree.root.name
+    capsys.readouterr()
+
+    assert main(["show", ROUND]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    (kept,) = [line for line in lines if f"  {worktree['n']}  " in line
+               and "finish.kept" in line]
+    assert kept.endswith(f"finish.kept  B1 worktree {tree.root}: {worktree['why']}")
+    (stays,) = [line for line in lines if f"  {branch['n']}  " in line
+                and "finish.kept" in line]
+    assert stays.endswith(f"finish.kept  B1 branch work: {branch['why']}")
+
+
+def kept_write_locked(monkeypatch, holder, name: str = ROUND) -> None:
+    """Make the write of what a finish left find the round's lock held by another
+    process: it waits a short while and fails, and the lock goes once it has."""
+    project, slug = name.split("/")
+    real = finishing._record_kept
+
+    def locked(*args, **keys):
+        busy = holder(write.round_lock(project, slug))
+        try:
+            return real(*args, **{**keys, "wait_s": 0.2})
+        finally:
+            busy.stdin.close()
+            busy.wait(timeout=30)
+
+    monkeypatch.setattr(finishing, "_record_kept", locked)
+
+
+def test_a_finish_whose_record_of_what_it_left_fails_still_finishes_and_says_why(
+        ready, repo, monkeypatch, holder):
+    path, tree = ready
+    ignored_file_in(repo, tree)
+    kept_write_locked(monkeypatch, holder)
+
+    done = finishing.finish(ROUND, "B1", by="coder")
+
+    assert done.event is not None
+    assert build_of(path).ended == builds.FINISHED
+    assert [one.kind for one in done.kept] == ["worktree"]
+    assert of_type(path, "finish.kept") == []
+    assert done.unrecorded.startswith("what the finish left could not be recorded: ")
+    assert "was still locked by pid" in done.unrecorded
+
+
+def test_the_command_warns_when_what_the_finish_left_is_not_recorded(
+        ready, repo, monkeypatch, holder, capsys):
+    path, tree = ready
+    ignored_file_in(repo, tree)
+    kept_write_locked(monkeypatch, holder)
+
+    assert main(["finish", ROUND, "B1", "--as", "coder"]) == 0
+
+    said = capsys.readouterr()
+    assert "finished B1" in said.out
+    (warning,) = [line for line in said.err.splitlines()
+                  if "could not be recorded" in line]
+    assert warning.startswith("moxi rounds finish: warning: what the finish left could "
+                              "not be recorded: ")
+    assert warning.endswith("; the finish stands")
+    assert build_of(path).ended == builds.FINISHED
+    assert of_type(path, "finish.kept") == []
 
 
 # -- the command ---------------------------------------------------------------------------

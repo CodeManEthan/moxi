@@ -16,6 +16,11 @@ result of `ok`, by its newest record:
 any other (`skips.action_live`). While it stands, `finish` does not run the action for
 that stage and treats it as done; the ruling is the record, and no `ok` is written.
 
+**What a finish left** (`kept_of`): each thing a finish left behind is on the log, a
+`finish.kept` event apiece for the build's worktree, scratch folder and branch, and the
+checkout of the target a merge added and could not remove in that merge's own record,
+under `kept`. `show` lists them under the build and the board counts them.
+
 `blocked` is the one answer to "may this finish run its commands", read by `finish`
 before it takes any lock and by the finish step's row, so the row never reads ready
 where the verb refuses. `again_refused` is what `--again ID` is refused for.
@@ -32,6 +37,12 @@ from .errors import Unmet
 
 #: The event of one finish action's result.
 ACTION = "finish.action"
+#: The event of one thing a finish left behind.
+KEPT = "finish.kept"
+#: What a finish leaves behind: the build's worktree, its scratch folder or its branch,
+#: each a `finish.kept` of its own; or the checkout of the target a merge added, which
+#: that merge's record holds as its `kept`.
+WORKTREE, SCRATCH, BRANCH, CHECKOUT = "worktree", "scratch", "branch", "checkout"
 #: The states of a finish action's record: run and passed, run and failed, or a merge
 #: found already on the target.
 OK, FAILED, FOUND = "ok", "failed", "found"
@@ -53,6 +64,30 @@ def records(state: states.State, build: builds.Build, tip: str) -> dict[str, dic
                 and isinstance(event.get("id"), str)):
             newest[event["id"]] = event
     return newest
+
+
+def kept_of(state: states.State, build: builds.Build) -> list[dict]:
+    """What the finishes of `build` left behind, as its log has it, oldest first, each
+    as `{"what", "where", "why", "n", "at"}`: each `finish.kept`, and each checkout of
+    the target a merge action's record holds as its `kept`. `where` is as the record
+    holds it: a folder with `~` for the home folder, or a branch's name. A record is the
+    build's from its commission up to the stage's next commission."""
+    found = []
+    for event in state.history:
+        if event["n"] <= build.n or event.get("stage") != build.stage:
+            continue
+        if event["type"] == "build.commissioned":
+            break
+        if event["type"] == KEPT:
+            found.append({"what": event.get("what"), "where": event.get("where"),
+                          "why": event.get("why"), "n": event["n"],
+                          "at": event.get("at")})
+        elif event["type"] == ACTION and isinstance(event.get("kept"), Mapping):
+            kept = event["kept"]
+            found.append({"what": CHECKOUT, "where": kept.get("where"),
+                          "why": kept.get("why"), "n": event["n"],
+                          "at": event.get("at")})
+    return found
 
 
 def skipped(state: states.State, stage: str) -> dict[str, str]:
@@ -136,5 +171,6 @@ def again_refused(state: states.State, build: builds.Build, tip: str,
     return []
 
 
-__all__ = ["ACTION", "OK", "FAILED", "FOUND", "STARTED", "SETTLED", "REPEAT", "AGAIN",
-           "records", "skipped", "run_again", "blocked", "again_refused"]
+__all__ = ["ACTION", "KEPT", "WORKTREE", "SCRATCH", "BRANCH", "CHECKOUT", "OK", "FAILED",
+           "FOUND", "STARTED", "SETTLED", "REPEAT", "AGAIN", "records", "kept_of", "skipped",
+           "run_again", "blocked", "again_refused"]
